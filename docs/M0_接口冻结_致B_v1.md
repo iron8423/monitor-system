@@ -88,10 +88,13 @@
 → B：A 侧校验请求头 `X-Ingest-Key`；B 上报脚本默认占位 `dev-ingest-key`，用 `--ingest-key <值>` 或 env `MONITOR_INGEST_KEY` 覆盖。
 → 双方 dev 值**统一为 `dev-ingest-key`**：A 侧 `application.yml` 默认已同步（`${MONITOR_INGEST_KEY:dev-ingest-key}`），两侧默认一致；生产/联调用 env 覆盖。
 
-**仍待 B（未答复）**
-- Q4 `/api/v1/devices/{id}/status` 归属：A 已按 D4 冻结为**保留**（B 从己方清单删除；如需 `health` 另对，不重复「在线判定」）。
-- Q5 告警级别语义：A 侧默认规则定为 `defo_mm THRESHOLD gte 10 / recovery 5 / level=warning`，与 `notice/warning/alarm` 的对应关系待 B 确认。
+**B 第二轮答复（2026-09-09 当晚）**
+- **Q4** `/api/v1/devices/{id}/status` 归属：**B 确认归 A 保留**，不重复「在线判定」；B 如需含 `DATA_ABNORMAL` 的 `health`，基于 A 的 status + 自身数据质量单独另出。
+- **Q5** 告警级别：**B 确认完全对齐**——A 默认 `warning` = B 的 warning(预警)；notice 注意 / warning 预警 / alarm 告警 语义一致。
+- **Q1 契约原文**：**已进仓（2026-09-09）**——`docs/message-contract.md` 被替换为 B 的雷达契约原文并随本轮提交；契约核心（每点 2 测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、quality `RAW/VALID/SUSPECT/FAULT`、点号 `P-HK01…P-BP04`）与答复一致 → **A-3 落地条件已满足**。⚠️ 共同分支/remote 线上推送仍待与 B 商定（不影响内容）。
+- **设备码大小写（A 决策）**：A 侧 `device.code` 由 `RADAR-001` **对齐契约为 `radar-001`**（V2 seed 已改），与 message-contract 上报口径一致。
+- **demo 阈值（B 建议，A 决策）**：真实 20260827 defo 范围约 **-3.6 ~ +3.3mm**，原 `defo_mm ≥10` 几乎不触发 → A 决策默认规则用**双向 |abs| ±3mm**：`defo_mm` gte +3.0/恢复1.0 与 lte −3.0/恢复−1.0（均 warning），随 A-3 写入 V2 seed；请 B 以 ~4mm 为参考对齐 `--inject-overlimit`。
 
 **收尾状态**
-- A 侧已落地：D3–D10（见 §3 清单，晚段 2 完成）；D1 口径已定。
-- M0 签字剩余项：Q1 原文进仓核验 → D1/D2 落地（A-3）→ 改 V2 + message-contract §2；Q4/Q5 答复。
+- 提问（契约口径 + Q1–Q6）均已答复；D1 口径已定；Q4/Q5 已闭合；设备码已对齐 `radar-001`。
+- M0 签字剩余：**① A-3 执行**——改 V2 测项种子为每点 2 项（`defo_mm/rate_mm_d`）、默认规则 ±3mm 双向（message-contract §2 已由 B 契约原文覆盖，无需 A 改）。契约原文已进仓、口径已齐，**执行时点由 A 安排**（用户决策：本轮只提交文档，metric 重构后置）。② 共同分支/remote 线上协作路径待与 B 定。无待答问题。

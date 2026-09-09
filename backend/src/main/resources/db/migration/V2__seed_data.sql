@@ -73,7 +73,7 @@ INSERT INTO metric (id, point_id, code, name, unit, sort_order, created_at, upda
 
 -- 设备：1 台毫米波雷达
 INSERT INTO device (id, code, name, type, serial_no, longitude, latitude, status, battery, last_report_time, created_at, updated_at)
-VALUES (1, 'RADAR-001', '毫米波点形变雷达 1 号', 'MILLIMETER_WAVE_RADAR', 'RADAR-2026-001',
+VALUES (1, 'radar-001', '毫米波点形变雷达 1 号', 'MILLIMETER_WAVE_RADAR', 'RADAR-2026-001',
         113.0200000, 23.7050000, 'ONLINE', 92.00, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
 -- 设备-测点绑定（1 台雷达绑定全部 7 个测点）
