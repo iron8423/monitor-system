@@ -1,0 +1,11 @@
+# 阶段 2 联调 / Docker Compose 使用：PostgreSQL 持久化
+# 启动：./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres
+spring:
+  datasource:
+    url: jdbc:postgresql://${PG_HOST:localhost}:${PG_PORT:5432}/${PG_DB:monitor}
+    driver-class-name: org.postgresql.Driver
+    username: ${PG_USER:monitor}
+    password: ${PG_PASSWORD:monitor}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration

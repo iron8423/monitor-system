@@ -1,0 +1,30 @@
+# Java / Maven
+backend/target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.pnpm-store/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+*.env
+.env.*
+application-local.yml

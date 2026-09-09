@@ -1,0 +1,65 @@
+# M0 接口冻结与衔接（A → B）
+
+> 日期：2026-09-09 · 发起：A · 接收：B
+> 背景：基于两份输入——你的《B侧接口契约_M0》+ 我（A）已落地的底座实现——对账后按 A 建议冻结 D1~D10（详见 `docs/daily/M0对齐_差异清单_A视角.md`，此处是发给你的最终口径，以本文为准）。
+> 状态：**大部分已冻结**，文末 §4 有 3 项等你今天答复后即可全部闭环。
+
+---
+
+## 1. 双方已经一致的基线（无需再议）
+
+| 项 | 口径 |
+|---|---|
+| 基础路径 | `/api/v1` |
+| 统一信封 | `{ "code": 0, "message": "success", "data": ... }`，`code=0` 成功，非 0 失败；成功消息文案 A 用 `message` 字段 |
+| 时间 | ISO8601 带时区（如 `2026-09-09T09:14:33.256+08:00`） |
+| 单位 | 位移 mm、速率 mm/d |
+| DB id | **一律数值 BIGINT**（A 的 identity，自增 1000 起，种子占用 1~N）；**字符串是 code（业务键）不是 id** |
+| 档案归属 | project/scene/object/point/device 档案 CRUD = A；你只读 `pointId/pointCode/deviceId/deviceCode` |
+| 数据/告警/实时/媒体 | ingest、latest/series/summary、alarm、stream、media = B |
+| 错误 | 你抛错用 A 的 `BizException`（同一 backend 工程可直接 import），不要自建 `BusinessException` |
+
+## 2. M0 冻结口径（请 B 按此调整你的实现/文档）
+
+| # | 主题 | 冻结结论 | 你需要做什么 |
+|---|---|---|---|
+| D1 | 测项编码 | 默认每点 **2 项**：`defo_mm`（位移 mm）/ `rate_mm_d`（速率 mm/d）。**若真实雷达含三分量 X/Y/Z，今天答复我，否则我按 2 项重写测项种子** | 消息/规则里的 metricCode 用 `defo_mm`、`rate_mm_d` |
+| D2 | 消息→落库 | V1 `measurement` 是**按测项一行**存储。你 ingest 收到一条含 N 个测项的消息 → **拆 N 行写入**，共用同一 `message_id`（幂等键 `device_id+message_id`，重复消息整条去重、不重复写不重复报警）。**不需要改表** | 你的 ingest 按拆分规则落库；拆分规则我会同步进 `message-contract.md` |
+| D3 | 附加字段 | 消息里的 `position/signal/state` 等存入 `measurement.attributes`（JSON，≤1024），无需加列 | 读取 latest 时从 attributes 还原 |
+| D4 | 设备状态归属 | `GET /api/v1/devices/{id}/status` **归 A**（已实现，返回 `deviceId/numeric`、`code`、`status(ONLINE/OFFLINE/FAULT)`、`online`、`battery`、`lowBattery`、`lastReportTime`）。**从你的清单里删除该接口**；你要的 `health`(含 DATA_ABNORMAL) 若要保留，由你基于 A 的 status + 数据质量另出，不重复"在线判定" | 删接口；需要 health 再单独对 |
+| D5 | 枚举 | 告警级别 `notice/warning/alarm`（小写）；警情状态 `PENDING/CONFIRMED/PROCESSING/OBSERVING/RESOLVED/FALSE_ALARM`；处置动作 `confirm/research/dispatch/handle/resolve/misreport`；规则类型 `THRESHOLD/RATE/CHANGE`；质量 `RAW/VALID/SUSPECT/FAULT`。A 的 V1 注释与种子将统一成这套 | 你的枚举别再用 `INFO/WARN/CRITICAL` 等其它取值 |
+| D6 | alarm_rule 结构 | A 将扩展列以承载你的规则对象：`point_id`(可空=全局)、`metric_code`、`rule_type(THRESHOLD/RATE/CHANGE)`、`operator(gte/lte)`、`threshold_value`、`window_minutes`、`recovery_value`、`level(notice/warning/alarm)`、`repeat_suppress_seconds`、`enabled`。默认规则种子改为 `defo_mm THRESHOLD gte 10 / 恢复 5` | 你的规则 CRUD 按此字段集实现，等 A 的 schema |
+| D7 | ingest 鉴权 | Demo 无网关 → A 放行 `/api/v1/ingest/**` 并校验共享密钥：请求头 `X-Ingest-Key: <key>`，key 从环境变量 `MONITOR_INGEST_KEY` 读取（缺省用 `application.yml` 的 dev 值）。密钥不符 → 401 | 你的模拟器/上报端带 `X-Ingest-Key` 头 |
+| D8 | SSE 鉴权 | `EventSource` 带不了 Header → A 的 `JwtAuthFilter` 支持 query token：`GET /api/v1/stream?token=<JWT>`。仅该路径走 query，其余仍走 `Authorization` 头 | 你前端用 `EventSource('/api/v1/stream?token='+token)` |
+| D9 | 异常 | 统一用 A 的 `BizException`，不要自建 | —（见 §1 错误行） |
+| D10 | id vs code | 响应中同时给数值 id 与字符串 code（如 `pointId: 1000, pointCode: "P-HK01"`）；路径参数用数值 id；上报消息里用 code | 修正你样例中的 `"pointId":"P1"` 这类字符串 id |
+
+## 3. A 侧可用/将改动清单（让你知道时间线）
+
+**已可依赖（已实现并验证）**：
+- `POST /api/v1/auth/login`、`GET /auth/me`（账号 admin/operator/analyst/maintainer，密码统一 123456，A 的 DataInitializer 幂等创建）
+- 档案读：`GET /api/v1/{organizations,projects,scenes,objects,points,metrics,devices}`（list 直接返回数组）
+- `GET /api/v1/devices/{id}/status`、`/devices/{id}/points`、维护记录、审计日志
+- Swagger：`/swagger-ui/index.html`、OpenAPI：`/v3/api-docs`
+
+**今天将改（不影响你已开工的纯 B 代码，只影响你等 schema/鉴权）**：
+1. `SecurityConfig`：放行 `/api/v1/ingest/**`（+`X-Ingest-Key` 校验）；`/api/v1/stream` 允许 query token
+2. `JwtAuthFilter`：仅 `/stream` 支持从 `?token=` 取 JWT
+3. V1：`alarm_rule` 扩展列（D6）+ 枚举注释统一（D5）
+4. V2：测项种子与默认告警规则按 D1 重写（**等 §4.Q2 答复后**）
+5. `message-contract.md`：写入 D2 拆分规则、D3 attributes、D7/D8 鉴权约定
+
+> 以上 schema 改动发生在 **M0 冻结前**（尚未提交/尚未给你联调用），改动安全。
+
+## 4. 需要你今天提供/确认（3 项，全部闭环就绪）
+
+- **Q1（最高优先）**：《雷达标准消息契约_v1》原文，放到 `docs/`。它是 D1/D2 唯一事实源。
+- **Q2**：真实雷达每点实际输出几个量？只有 `位移 defo_mm + 速率 rate_mm_d` 两项，还是含三分量 X/Y/Z？（决定 V2 测项种子 & 后续规则可选项）
+- **Q3**：`pointCode` 体系用谁的？默认采用 A 档案点号 `P-HK01…P-BP04`（上报即此码）；若雷达自带点编号请明示，A 会同步改 V2 种子。
+
+## 5. 请你同步更新你那份《B侧接口契约_M0》的地方
+
+1. 删去 `/api/v1/devices/{deviceId}/status`（归 A，见 D4）
+2. 消息/规则示例里的测项与点号按 D1/D10 对齐（`defo_mm/rate_mm_d`、`P-HK01…` 而非 `RT1`、id 用数值）
+3. ingest 请求补充 `X-Ingest-Key` 头（D7）；stream 订阅改 `?token=`（D8）
+4. 枚举统一为 §2-D5 表；异常统一用 `BizException`（D9）
