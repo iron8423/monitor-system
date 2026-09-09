@@ -2,6 +2,7 @@
 
 > 日期：2026-09-09 · 作者：A
 > 依据：《双人分工实施方案v2》§6/§7/§8（A0–A5、阶段 1/阶段 2、里程碑 M0–M5）
+> **更新（当日·协作模式定案）**：以 **B 的 GitHub 仓库 `iron8423/monitor-system`（私有，main）为唯一共享事实源**，A 侧全部历史/内容并入并上传；后续两人同步一律看仓库状态，不再 md 寄件。A 上传账号 = **`yanzu1024`**（待 B 加 collaborator），本机 SSH ed25519 密钥已生成待注册；合入方向 = 保留双方 commit、`git merge origin/main --allow-unrelated-histories`。阻塞：collaborator + 公钥注册（详见当日 A 日志晚段 6）。
 > 范围：只列 **A（底座）** 的后续动作；B 侧仅在与 A 的衔接点标注。勾选状态随进展更新。
 
 ---
@@ -10,7 +11,7 @@
 
 A 侧**阶段 1 交付已完成并通过端到端验证**（A0–A4 + M0 的 schema/种子/契约起草 + M0 对表 D3–D8 落地），
 git 已含首个提交 `221d96b`（A 交付基线，B 可拉分支协同）。
-**尚未到「阶段 1 整体完成」**：M0 契约差 B 签字——B 已答**全部提问**，且《雷达标准消息契约_v1》原文**已进仓**（`docs/message-contract.md`，2026-09-09 随本轮提交）→ **A-3（V2 每点 2 测项 + 默认规则 ±3mm 双向）内容就绪、待 A 执行**（用户决策：本轮只提交文档，metric 重构后置）；共同分支/remote 线上推送路径仍待与 B 商定；且后端闭环验收（M2：超限→告警→处置→解除）依赖 B 的 ingest/模拟器/告警模块。
+**尚未到「阶段 1 整体完成」**：M0 契约差 B 签字——B 已答**全部提问**，且《雷达标准消息契约_v1》原文**已进仓**（`docs/message-contract.md`，2026-09-09 随本轮提交）→ **A-3（V2 每点 2 测项 + 默认规则 ±3mm 双向）内容就绪、待 A 执行**（用户决策：本轮只提交文档，metric 重构后置）；~~共同分支/remote 线上推送路径仍待与 B 商定~~ → **已定（2026-09-09）：B 的 GitHub `iron8423/monitor-system` 单一事实源，A 并入上传；阻塞 = collaborator（yanzu1024）+ SSH 公钥注册**；且后端闭环验收（M2：超限→告警→处置→解除）依赖 B 的 ingest/模拟器/告警模块。
 
 ---
 
@@ -19,7 +20,7 @@ git 已含首个提交 `221d96b`（A 交付基线，B 可拉分支协同）。
 | # | 事项 | 阻塞 | 说明 |
 |---|---|---|---|
 | A-1 | **首个 git commit**（A 交付基线） | ✅ 已完成 | `221d96b feat(repo): 初始化通用监测管理系统（A0-A4 + M0 契约）` |
-| A-2 | **M0 冻结收口**：发 B《M0_接口冻结_致B_v1》，收 Q1–Q5 答复 | 商定共同分支/remote | 已发并收到 B 全部提问答复（2026-09-09，含 Q4/Q5 闭合）；剩 Q1 契约原文文件进仓：B 已作为 `message-contract.md` 提交共同分支，本仓无 remote → 与 B 商定分支/推送路径；demo 默认规则阈值决策已定（±3mm 双向，随 A-3 落） |
+| A-2 | **M0 冻结收口**：发 B《M0_接口冻结_致B_v1》，收 Q1–Q5 答复 | ~~商定共同分支/remote~~ → 等 B 加 collaborator（yanzu1024）+ SSH 公钥注册 | 已发并收到 B 全部提问答复（2026-09-09，含 Q4/Q5 闭合）；剩 Q1 契约原文文件进仓：B 已作为 `message-contract.md` 提交共同分支，本仓无 remote → **已定（2026-09-09）：B 的 GitHub `iron8423/monitor-system` 单一事实源**，等 collaborator + SSH 后 A 执行 merge+push；demo 默认规则阈值决策已定（±3mm 双向，随 A-3 落） |
 | A-3 | **D1/D2 收尾**（V2 测项种子/默认规则/契约对齐） | 无（内容就绪，由 A 排期） | **口径已定且原文已进仓**（message-contract.md）：每点 2 测项 `defo_mm`/`rate_mm_d`（无 X/Y/Z）、点号用 A 档案码、默认规则 metric_code→`defo_mm` 且**阈值双向 \|abs\| ±3mm**（gte +3.0/恢复1.0 + lte −3.0/恢复−1.0，均 warning）。message-contract §2 已由 B 契约原文覆盖。**用户决策：本轮不落 metric 重构，后置执行**（届时改 V2 metric 行 + alarm_rule 默认规则 + Metric 注释） |
 | A-4 | schema/seed **A 唯一维护**：B 加表/加列需求走 A 统一出 V3 | 无 | 防两人同仓改迁移脚本冲突（§10 风险 1）；M0 签字后 schema 视为冻结，只进 V3 不回头改 V1/V2 |
 | A-5 | **契约接口人**：配合 B 的 ingest 落库拆行、latest/series 返回、alarm_rule 字段答疑 | 随 B 开发节奏 | 只答疑/出 V3，不改已冻结 schema |
@@ -64,6 +65,6 @@ git 已含首个提交 `221d96b`（A 交付基线，B 可拉分支协同）。
 | 卡点 | 影响 | 对策 |
 |---|---|---|
 | ~~git 无首个提交~~ | ✅ 已提交 | `221d96b`，B 可拉分支协同 |
-| M0 未签字：契约原文已进仓（`message-contract.md`）、口径已齐；**A-3（metric 重构）待 A 执行**；共同分支/remote 线上推送路径待与 B 定 | A-3 未执行前 V2 别大动 | A 排期执行 A-3（V2 metric 2 项 + 默认规则 ±3mm 双向）；与 B 商定线上协作路径 |
+| M0 未签字：契约原文已进仓（`message-contract.md`）、口径已齐；**A-3（metric 重构）待 A 执行**；~~共同分支/remote 线上推送路径待与 B 定~~ → **已定（B GitHub 单一事实源）** | A-3 未执行前 V2 别大动 | A 排期执行 A-3（V2 metric 2 项 + 默认规则 ±3mm 双向）；线上路径已定，等 collaborator（yanzu1024）+ SSH 后 A 执行 merge+push |
 | B 转前端后 A 是后端唯一人 | 联调没人接 | A-5 契约接口人职责优先（§10 风险 2） |
 | 本机无 Docker/PG | A5 无法在本机验证 | B-3/B-4 需 Docker 环境，先补环境再动 |
