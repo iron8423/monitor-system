@@ -1,0 +1,231 @@
+{
+  "schemaVersion": "M0-align-1.0",
+  "purpose": "B 与 A 的 M0 契约对齐。baseline = B 侧契约基准（已填）；actual = A 侧实际实现（待 A 用 AI 填）。A 填完整份返回后，对比 baseline vs actual 即可找出差异。",
+  "howToUse": "把本文件发给 A（或其 AI）：A 打开后逐项看 baseline + note，对照自己的 schema/OpenAPI/代码，把 actual 填成 A 的真实实现值，然后原样返回。对比时：actual 缺失或与 baseline 不一致 = 待对齐项。",
+  "items": [
+    {
+      "id": "msg.metrics",
+      "group": "消息契约-测项",
+      "note": "点形变雷达主指标；若 A 用 dispX/Y/Z、horizontal 则为冲突",
+      "baseline": { "defo_mm": "mm", "rate_mm_d": "mm/d" },
+      "actual": null
+    },
+    {
+      "id": "msg.fieldset",
+      "group": "消息契约-字段",
+      "note": "单条消息应含这些字段；A 的 DTO 字段名/层级需一致",
+      "baseline": ["schemaVersion", "messageId", "deviceId", "pointCode", "collectTime", "receiveTime", "sequence", "metrics", "quality", "position{angleDeg,distanceM}", "signal", "state", "monitored"],
+      "actual": null
+    },
+    {
+      "id": "msg.idempotency",
+      "group": "消息契约-幂等",
+      "note": "[冻结A口径] 整条消息去重；重复不重复写、不重复告警",
+      "baseline": ["device_id", "message_id"],
+      "actual": null
+    },
+    {
+      "id": "msg.quality",
+      "group": "消息契约-质量标记",
+      "note": "异常数据默认不参与告警判定，不覆盖原值",
+      "baseline": ["RAW", "VALID", "SUSPECT", "FAULT"],
+      "actual": null
+    },
+    {
+      "id": "msg.time_units",
+      "group": "消息契约-时间/单位",
+      "note": "采集/接收时间分开；位移 mm、速率 mm/d",
+      "baseline": { "timeFormat": "ISO8601+08:00", "units": "mm / mm/d", "splitClock": ["collectTime", "receiveTime"] },
+      "actual": null
+    },
+    {
+      "id": "enum.alarmLevel",
+      "group": "枚举-告警级别",
+      "baseline": ["notice", "warning", "alarm"],
+      "actual": null
+    },
+    {
+      "id": "enum.alarmStatus",
+      "group": "枚举-警情状态",
+      "baseline": ["PENDING", "CONFIRMED", "PROCESSING", "OBSERVING", "RESOLVED", "FALSE_ALARM"],
+      "actual": null
+    },
+    {
+      "id": "enum.action",
+      "group": "枚举-处置动作",
+      "baseline": ["confirm", "research", "dispatch", "handle", "resolve", "misreport"],
+      "actual": null
+    },
+    {
+      "id": "enum.deviceHealth",
+      "group": "枚举-设备健康",
+      "baseline": ["NORMAL", "LOW_BATTERY", "OFFLINE", "DATA_ABNORMAL"],
+      "actual": null
+    },
+    {
+      "id": "enum.ruleType",
+      "group": "枚举-规则类型",
+      "baseline": ["THRESHOLD", "RATE", "CHANGE"],
+      "actual": null
+    },
+    {
+      "id": "api.ingest",
+      "group": "接口-接入",
+      "note": "单条或 {items:[...]}；返回 accepted/rejected/duplicates；/ingest 免 JWT(网关/共享密钥)",
+      "baseline": { "method": "POST", "path": "/api/v1/ingest/measurements", "req": "single|{items}", "resp": { "accepted": "int", "rejected": "int", "duplicates": "int", "results": [{ "pointCode": "string", "collectTime": "string", "status": "OK|DUPLICATE|REJECTED", "quality": "enum" }] }, "auth": "gateway/共享密钥" },
+      "actual": null
+    },
+    {
+      "id": "api.latest",
+      "group": "接口-最新值",
+      "baseline": { "method": "GET", "path": "/api/v1/points/{pointId}/latest", "respKeys": ["pointId", "pointCode", "latest{collectTime,defo_mm,rate_mm_d,quality,signal,position}", "state"] },
+      "actual": null
+    },
+    {
+      "id": "api.series",
+      "group": "接口-时序曲线",
+      "note": "query: metricCode(from defo_mm/rate_mm_d), from, to, granularity(raw|hour|day)",
+      "baseline": { "method": "GET", "path": "/api/v1/points/{pointId}/series", "query": ["metricCode", "from", "to", "granularity"], "resp": { "pointId": "string", "pointCode": "string", "metricCode": "string", "unit": "string", "points": [{ "t": "string", "v": "number" }] } },
+      "actual": null
+    },
+    {
+      "id": "api.summary",
+      "group": "接口-项目概览",
+      "baseline": { "method": "GET", "path": "/api/v1/projects/{projectId}/summary", "respKeys": ["projectId", "pointCount", "alertCount", "onlineDeviceCount", "maxDeformationMm"] },
+      "actual": null
+    },
+    {
+      "id": "api.alarms",
+      "group": "接口-告警",
+      "note": "列表筛选 level/status/pointId/from/to + 分页；详情含处置时间线",
+      "baseline": { "list": { "method": "GET", "path": "/api/v1/alarms", "filters": ["level", "status", "pointId", "from", "to", "page", "size"] }, "detail": { "method": "GET", "path": "/api/v1/alarms/{id}", "respKeys": ["id", "pointId", "pointCode", "level", "status", "triggeredAt", "snapshot", "timeline[]"] } },
+      "actual": null
+    },
+    {
+      "id": "api.alarmAction",
+      "group": "接口-处置",
+      "note": "body: action/comment/operator；返回更新后 status + timeline",
+      "baseline": { "method": "POST", "path": "/api/v1/alarms/{id}/actions", "body": { "action": "confirm|research|dispatch|handle|resolve|misreport", "comment": "string", "operator": "string" }, "respKeys": ["id", "status", "timeline[]"] },
+      "actual": null
+    },
+    {
+      "id": "api.alarmRules",
+      "group": "接口-规则CRUD",
+      "note": "[冻结A口径] 列名下划线；默认种子 defo_mm THRESHOLD gte 10 / 恢复 5",
+      "baseline": { "methods": ["GET", "POST", "PUT", "DELETE"], "path": "/api/v1/alarm-rules", "columnSet": ["point_id", "metric_code", "rule_type", "operator", "threshold_value", "window_minutes", "recovery_value", "level", "repeat_suppress_seconds", "enabled"] },
+      "actual": null
+    },
+    {
+      "id": "api.deviceStatus",
+      "group": "接口-设备状态",
+      "note": "[冻结A口径] 设备状态接口归 A（ONLINE/OFFLINE/FAULT）；B 不再提供。B 如需 health(含 DATA_ABNORMAL) 基于 A 状态+数据质量另出",
+      "baseline": { "owner": "A", "method": "GET", "path": "/api/v1/devices/{deviceId}/status", "respKeys": ["deviceId", "code", "status", "online", "battery", "lowBattery", "lastReportTime"] },
+      "actual": null
+    },
+    {
+      "id": "api.stream",
+      "group": "接口-实时SSE",
+      "note": "text/event-stream；事件 measurement / alarm",
+      "baseline": { "method": "GET", "path": "/api/v1/stream", "contentType": "text/event-stream", "events": ["measurement", "alarm"] },
+      "actual": null
+    },
+    {
+      "id": "api.media",
+      "group": "接口-媒体",
+      "baseline": { "upload": { "method": "POST", "path": "/api/v1/media", "form": ["file", "pointId", "takenAt", "note"] }, "list": { "method": "GET", "path": "/api/v1/points/{pointId}/media" } },
+      "actual": null
+    },
+    {
+      "id": "conv.basePath",
+      "group": "约定-路径",
+      "baseline": "/api/v1",
+      "actual": null
+    },
+    {
+      "id": "conv.envelope",
+      "group": "约定-响应信封",
+      "note": "A 的 common.Result<T>；code=0 成功",
+      "baseline": { "code": "int", "message": "string", "data": "object", "successCode": 0 },
+      "actual": null
+    },
+    {
+      "id": "conv.auth",
+      "group": "约定-鉴权",
+      "note": "[冻结A口径] /ingest 用 X-Ingest-Key；/stream 用 ?token=；其余 Bearer JWT",
+      "baseline": { "ingest": "X-Ingest-Key: <MONITOR_INGEST_KEY> header, no JWT", "stream": "GET /api/v1/stream?token=<JWT>", "others": "Authorization: Bearer <JWT>", "authorize": "method-level roles (RBAC)" },
+      "actual": null
+    },
+    {
+      "id": "conv.pagination",
+      "group": "约定-分页",
+      "baseline": { "page": 1, "size": 20, "totalKey": "total" },
+      "actual": null
+    },
+    {
+      "id": "table.measurement",
+      "group": "表-测量值时序",
+      "baseline": { "columns": ["pointCode", "metricCode", "collectTime", "value", "quality", "rawRef", "deviceId"], "index": ["pointCode,metricCode,collectTime"], "engine": "PostgreSQL(table+index) 或预留 TDengine" },
+      "actual": null
+    },
+    {
+      "id": "table.quality_device",
+      "group": "表-质量/设备状态",
+      "baseline": { "columns": ["deviceId", "online", "battery", "lastReportAt", "health", "dataQualityMark"] },
+      "actual": null
+    },
+    {
+      "id": "table.alarm_rule",
+      "group": "表-告警规则",
+      "baseline": { "columns": ["id", "pointCode", "metricCode", "type", "operator", "value", "windowMinutes", "level", "recoveryValue", "repeatSuppressSeconds", "enabled"] },
+      "actual": null
+    },
+    {
+      "id": "table.alarm_event",
+      "group": "表-警情",
+      "baseline": { "columns": ["id", "pointId", "pointCode", "level", "status", "triggeredAt", "snapshotJson"] },
+      "actual": null
+    },
+    {
+      "id": "table.alarm_action",
+      "group": "表-处置动作",
+      "baseline": { "columns": ["id", "alarmId", "time", "action", "operator", "comment"] },
+      "actual": null
+    },
+    {
+      "id": "table.media",
+      "group": "表-媒体",
+      "baseline": { "columns": ["id", "objectKey", "url", "pointId", "takenAt", "note"] },
+      "actual": null
+    },
+    {
+      "id": "ops.repo",
+      "group": "协作-仓库",
+      "baseline": "monorepo monitor-system: {backend,frontend,docs,plan}",
+      "actual": null
+    },
+    {
+      "id": "ops.gitattributes",
+      "group": "协作-行尾/编码",
+      "baseline": "LF; mvnw + mvnw.cmd; UTF-8; 相对路径",
+      "actual": null
+    },
+    {
+      "id": "ops.branch",
+      "group": "协作-分支",
+      "baseline": "main(protected) + feature/<module> + PR",
+      "actual": null
+    },
+    {
+      "id": "ops.daily",
+      "group": "协作-每日日志",
+      "baseline": "docs/daily/YYYY-MM-DD-A.md / YYYY-MM-DD-B.md 当天提交",
+      "actual": null
+    },
+    {
+      "id": "ops.devdb",
+      "group": "协作-开发库",
+      "baseline": "阶段1 用 H2 内存库（零配置）；PG/Docker 留阶段2",
+      "actual": null
+    }
+  ]
+}

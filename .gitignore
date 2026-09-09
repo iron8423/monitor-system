@@ -1,4 +1,5 @@
 # Java / Maven
+target/
 backend/target/
 *.class
 *.jar
@@ -12,10 +13,18 @@ backend/target/
 .project
 .settings/
 
-# Node / frontend
+# Node / Vue / frontend
+node_modules/
 frontend/node_modules/
+dist/
 frontend/dist/
 frontend/.pnpm-store/
+
+# Python（tools/radar_csv_replay 等）
+__pycache__/
+*.pyc
+.venv/
+venv/
 
 # Logs
 *.log
@@ -25,6 +34,8 @@ frontend/.pnpm-store/
 Thumbs.db
 
 # Env / secrets
+.env
 *.env
 .env.*
+*.local
 application-local.yml

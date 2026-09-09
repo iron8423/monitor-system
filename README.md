@@ -1,21 +1,27 @@
 # monitor-system · 通用监测管理系统
 
-通用多传感监测管理系统 Demo（V0.1 最小闭环）。
+通用多传感监测管理系统 Demo（V0.1 最小闭环）。数据源 = 毫米波点形变雷达；落地清远电厂灰库 / 库区边坡。
 
-- 数据源：毫米波点形变雷达（Demo 阶段走模拟器 + 标准消息）
-- 落地：清远电厂灰库 / 库区边坡
-- 结构：单仓库 monorepo —— `backend/`（Spring Boot）+ `frontend/`（Vue3，阶段 2）
-
-> 需求口径、分工、里程碑见 `docs/双人分工实施方案v2.md`。
+> 需求基线：`docs/通用多传感监测管理系统_需求分析与开发指引_v1.0.md`
+> 分工与里程碑：`docs/双人分工实施方案v2.md`（最终版；历史稿见 `docs/archive/`）
+> 消息契约：`docs/message-contract.md`（M0 冻结 · 唯一事实源）
 
 ## 目录
 
 ```
-monitor-system/
-├── docs/          # 分工方案、消息契约、每日日志
-├── plan/          # 需求与分工方案
-├── backend/       # Spring Boot 3 + Java 21 + MyBatis-Plus + Flyway
-└── frontend/      # Vue3（阶段 2 由 B 创建）
+monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system，A/B 共用）
+├── .gitattributes / .gitignore / README.md
+├── docs/                       需求/方案/接口契约/每日日志/归档
+│   ├── daily/                  每日工作日志 YYYY-MM-DD-A/B.md
+│   ├── message-contract.md     雷达标准消息契约
+│   ├── M0_接口冻结_致B_v1.md     M0 冻结口径与回执
+│   └── archive/                需求历史稿（只读）
+├── backend/                    Spring Boot 3 + Java 21 + MyBatis-Plus + Flyway
+│   └── com.monitor/
+│       ├── common·auth·organization·project·asset·audit   A 底座（A0–A4，已验收）
+│       └── telemetry            B1 ingest 接入骨架
+├── frontend/                   Vue3 + Cesium 前端（阶段 2，B 主导）
+└── tools/radar_csv_replay/     真雷达 CSV 回放适配器（Python，B 侧）
 ```
 
 ## 启动（阶段 1，后端）
@@ -29,5 +35,18 @@ cd backend
 - 默认 H2 内存库（零配置）；阶段 2 切 PostgreSQL + Docker Compose。
 - 健康检查：`GET http://localhost:8080/api/v1/health`
 - 接口文档：`http://localhost:8080/swagger-ui`
+- 演示账号：admin / operator / analyst / maintainer（密码 123456）
 
-> 完整启动步骤与演示账号在 A5（阶段 2）补齐。
+## 协作约定
+
+- 单仓库 monorepo；`main`（保护）+ `feature/<模块>` 分支 + PR；每日工作日志当天提交。
+- schema/seed 由 A 统一维护（要改走 V3，不与 B 同改 V1/V2）。
+- 行尾 LF（.gitattributes）；UTF-8；相对路径；Linux 用 `./mvnw`、Windows 用 `mvnw.cmd`。
+- ingest：请求头 `X-Ingest-Key`（dev 默认 `dev-ingest-key`，env `MONITOR_INGEST_KEY` 覆盖）。
+- stream(SSE)：`?token=<JWT>`（EventSource 带不了 Header）。
+
+## 当前进度
+
+- M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向（A-3 待落地）、`X-Ingest-Key` / `?token=` 鉴权。
+- A 底座 A0–A4 + schema/种子已入库并验证；B1 telemetry ingest 骨架 + CSV 回放已并入。
+- 下一步：A-3（V2 测项种子对齐每点 2 项 + 默认规则 ±3mm）→ M1 联调「模拟器/CSV → 落库 → latest/series」。
