@@ -3,6 +3,7 @@
 > 日期：2026-09-09 · 作者：A
 > 触发：收到 `docs/daily/B侧接口契约_M0.md`（14:38）。该文档引用了仓库内不存在的《雷达标准消息契约_v1》。
 > 关键词交叉核对结论：`defo_mm / rate_mm_d / RT1 / pointCode / 雷达标准消息契约` 在 A 手上的《需求分析与开发指引》与 `docs/message-contract.md` 中均 **0 处** → 双方契约不同源，必须先冻结消息契约，再谈字段。
+> **更新（同日傍晚）**：收到 B 对 Q1–Q3 的书面答复 + ingest 密钥口径 → ① Q2 确认真实雷达每点仅 `defo_mm`(累计形变)+`rate_mm_d`(速率)，**无 X/Y/Z** → **D1 收敛为 2 项已定案**；② Q3 确认点号用 A 档案码 `P-HK01…P-BP04` → 编码体系不动；③ Q1 的《雷达标准消息契约_v1》原文 B 称已放 `docs/`，但**仓库内暂未同步到** → D1/D2 落地等该原文进仓核验（A-3 顺延）；④ ingest dev 密钥**统一为 `dev-ingest-key`**（A 侧 `application.yml` 默认已同步）。B 答复全文与逐条回执见 §4。
 
 ---
 
@@ -22,16 +23,14 @@
 
 ## 1. 必须先冻结的两份契约（其余全靠这两份派生）
 
-1. **《雷达标准消息契约_v1》**：不在仓库。请 B 贴原文 / 放到 `docs/`。这是唯一事实源。
-2. **测点/测项/设备编码规范**：雷达上报的 `pointCode` 到底是什么体系？
-   - 若雷达本身有测点编号（如 `RT1`），则 V2 种子的 `P-HK01..` 编码体系要改成对得上，`point.code` 直接=上报 `pointCode`，去掉 A 自造体系。
-   - 若雷达测点就是「清远电厂灰库/库区边坡」这套点位，则由 A 的档案编码为准，B 上报用它。
+1. **《雷达标准消息契约_v1》**：~~不在仓库~~。**B 答复(同日)已贴/放 `docs/`，但 A 仓库暂未同步到该文件** → 待 B 确认实际落地路径或直接贴原文。仍是 D1/D2 落地的唯一事实源。
+2. **测点/测项/设备编码规范**：雷达上报的 `pointCode` 体系 —— **已定（B Q3 答复）**：用 A 档案点号 `P-HK01…P-BP04`（上报即此码）；B 的 CSV 回放适配器负责把雷达目标映射到这些码（可配置）。若雷达自带点编号，B 会另行告知 → V2 点号**无需改**。
 
 ## 2. 差异点与建议处理（A 视角，M0 会议逐条勾）
 
 | # | 差异 | 建议结论 |
 |---|---|---|
-| D1 | 测项编码 `X/Y/Z/DISP/VEL` vs `defo_mm/rate_mm_d` | 语义大概率同源：`DISP≈defo_mm`(合位移)、`VEL≈rate_mm_d`(速率)。**按真实雷达实际输出量纲定**：若雷达只出形变+速率 → A 收敛为 2 项；若含三分量 → 保留 X/Y/Z。A 改 V2 seed + message-contract，B 同步 |
+| D1 | 测项编码 `X/Y/Z/DISP/VEL` vs `defo_mm/rate_mm_d` | **已闭合·待落地**（B Q2 答复 2026-09-09）：真实点形变雷达每点仅输出 2 项——`defo_mm`(累计形变) + 由历史推导的 `rate_mm_d`(速率)，**无 X/Y/Z 三分量** → A 收敛为 2 项，`DISP≈defo_mm`、`VEL≈rate_mm_d`。A 改 V2 seed + message-contract，B 同步；**落地等《雷达标准消息契约_v1》原文进仓核验** |
 | D2 | 消息结构：单测项 vs 一消息多测项 | V1 `measurement` 已是**按测项一行**（`metric_code` + `measure_value`）。一消息 N 个测项 → 拆 N 行写，`message_id` 相同，天然幂等键可用。B 的 ingest 落库按此表写即可，**不需要改表**，但要在消息契约里写明"拆分规则" |
 | D3 | position/signal/state 无处放 | `measurement.attributes`(JSON, 1024) 承接：`{"position":{...},"signal":0.9,"state":"normal"}`。够用则不加列 |
 | D4 | `/devices/{id}/status` 双归属 | **保持 A 归属**（A3 已实现 + 档案域内聚）。B 的 `health` 枚举是另一层语义，建议 B 改读 A 的 status 接口做派生，或明确让 B 单独做 `health`，A 不重复。二选一，禁止两套并存 |
@@ -47,14 +46,20 @@
 - [x] `SecurityConfig`：放行 `/api/v1/ingest/**`（+共享密钥）；支持 `/stream` query token
 - [x] `JwtAuthFilter`：支持从 `?token=` 解析 JWT（仅限 SSE 场景）
 - [x] V1 `alarm_rule` 扩展列（point_id/metric/operator/value/window/repeat_suppress）；级别/动作/状态枚举值按 B 语义统一
-- [x] V2 测点/测项编码、默认告警规则与真实雷达量纲对齐（等 D1/D2 结论）
-- [x] `/devices/{id}/status`：与 B 定唯一归属后，决定保留 or 移交
+- [ ] V2 测点/测项编码、默认告警规则与真实雷达量纲对齐 —— **口径已定**（D1：每点 2 测项 `defo_mm`/`rate_mm_d`；默认规则 metric_code→`defo_mm`），**落地顺延**：等《雷达标准消息契约_v1》原文进仓核验后改 V2 + message-contract §2
+- [x] `/devices/{id}/status`：与 B 定唯一归属后，决定保留 or 移交（A 侧已定**保留**并实现，见 M0-D4；**尚待 B 答复确认**——见 §4-Q4）
 
-## 4. 请 B 提供 / 确认（A→B 提问清单）
+## 4. 请 B 提供 / 确认（A→B 提问清单 · 附 B 回执 2026-09-09）
 
 1. 《雷达标准消息契约_v1》原文（放 `docs/`）——**最高优先**
+   → **B：已放到 `docs/`。⚠️ A 仓库暂未同步到该文件**（本仓 docs/ 下无此文，git 亦无未提交新增）→ **待追 B**：确认提交路径/分支，或直接把原文贴给 A；到手后 D1/D2（A-3）才落地。
 2. 雷达实际输出的测项：是否只有形变+速率？有没有三分量 X/Y/Z？
+   → **B：真实点形变雷达每点仅 2 项**：`defo_mm`(累计形变) + 由历史推导的 `rate_mm_d`(速率)，**无 X/Y/Z 三分量** → D1 收敛为 2 项已定。
 3. `pointCode` 体系：雷达自带编号 还是 用我方档案点号？
+   → **B：用 A 档案点号 `P-HK01…P-BP04`**（上报即此码）；B 的 CSV 回放适配器把雷达目标映射到这些码（可配置）。若雷达自带点编号，B 另行告知 → 编码体系**不用改**。
 4. `/devices/status`：确认让 A 保留（B 只读派生）还是 B 接管？
+   → **未答复**（待 B）。A 侧已按 M0-D4 冻结为保留并实现。
 5. 告警级别语义：`notice/warning/alarm` 与 A 现在 seed 的默认规则(累计位移阈值)如何对应？
+   → **未答复**（待 B）。A 侧已按 D6 将默认规则定为 `defo_mm THRESHOLD gte 10 / recovery 5 / level=warning`，待 B 确认语义对应。
 6. `/ingest` 共享密钥的协商方式（env `MONITOR_INGEST_KEY`？）
+   → **B：A 侧校验请求头 `X-Ingest-Key`**；B 上报脚本默认占位 `dev-ingest-key`，用 `--ingest-key <值>` 或 env `MONITOR_INGEST_KEY` 覆盖。**已定：dev 值统一为 `dev-ingest-key`**（A 侧 `application.yml` 默认已同步，两侧默认一致）。

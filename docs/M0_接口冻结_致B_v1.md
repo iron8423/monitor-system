@@ -3,6 +3,7 @@
 > 日期：2026-09-09 · 发起：A · 接收：B
 > 背景：基于两份输入——你的《B侧接口契约_M0》+ 我（A）已落地的底座实现——对账后按 A 建议冻结 D1~D10（详见 `docs/daily/M0对齐_差异清单_A视角.md`，此处是发给你的最终口径，以本文为准）。
 > 状态：**大部分已冻结**，文末 §4 有 3 项等你今天答复后即可全部闭环。
+> 更新（同日）：已收到 B Q1–Q3 答复 + ingest 密钥口径，回执见文末 §6；D1 收敛为 2 项，落地待《雷达标准消息契约_v1》原文进仓核验。
 
 ---
 
@@ -23,7 +24,7 @@
 
 | # | 主题 | 冻结结论 | 你需要做什么 |
 |---|---|---|---|
-| D1 | 测项编码 | 默认每点 **2 项**：`defo_mm`（位移 mm）/ `rate_mm_d`（速率 mm/d）。**若真实雷达含三分量 X/Y/Z，今天答复我，否则我按 2 项重写测项种子** | 消息/规则里的 metricCode 用 `defo_mm`、`rate_mm_d` |
+| D1 | 测项编码 | 默认每点 **2 项**：`defo_mm`（位移 mm）/ `rate_mm_d`（速率 mm/d）。**（B 已答复：真实雷达每点仅 defo_mm+rate_mm_d、无三分量 → 按 2 项重写，见 §6）** | 消息/规则里的 metricCode 用 `defo_mm`、`rate_mm_d` |
 | D2 | 消息→落库 | V1 `measurement` 是**按测项一行**存储。你 ingest 收到一条含 N 个测项的消息 → **拆 N 行写入**，共用同一 `message_id`（幂等键 `device_id+message_id`，重复消息整条去重、不重复写不重复报警）。**不需要改表** | 你的 ingest 按拆分规则落库；拆分规则我会同步进 `message-contract.md` |
 | D3 | 附加字段 | 消息里的 `position/signal/state` 等存入 `measurement.attributes`（JSON，≤1024），无需加列 | 读取 latest 时从 attributes 还原 |
 | D4 | 设备状态归属 | `GET /api/v1/devices/{id}/status` **归 A**（已实现，返回 `deviceId/numeric`、`code`、`status(ONLINE/OFFLINE/FAULT)`、`online`、`battery`、`lowBattery`、`lastReportTime`）。**从你的清单里删除该接口**；你要的 `health`(含 DATA_ABNORMAL) 若要保留，由你基于 A 的 status + 数据质量另出，不重复"在线判定" | 删接口；需要 health 再单独对 |
@@ -53,6 +54,8 @@
 
 ## 4. 需要你今天提供/确认（3 项，全部闭环就绪）
 
+> 已收到 B Q1–Q3 答复（2026-09-09），逐条见 §6 回执。
+
 - **Q1（最高优先）**：《雷达标准消息契约_v1》原文，放到 `docs/`。它是 D1/D2 唯一事实源。
 - **Q2**：真实雷达每点实际输出几个量？只有 `位移 defo_mm + 速率 rate_mm_d` 两项，还是含三分量 X/Y/Z？（决定 V2 测项种子 & 后续规则可选项）
 - **Q3**：`pointCode` 体系用谁的？默认采用 A 档案点号 `P-HK01…P-BP04`（上报即此码）；若雷达自带点编号请明示，A 会同步改 V2 种子。
@@ -63,3 +66,32 @@
 2. 消息/规则示例里的测项与点号按 D1/D10 对齐（`defo_mm/rate_mm_d`、`P-HK01…` 而非 `RT1`、id 用数值）
 3. ingest 请求补充 `X-Ingest-Key` 头（D7）；stream 订阅改 `?token=`（D8）
 4. 枚举统一为 §2-D5 表；异常统一用 `BizException`（D9）
+
+---
+
+## 6. B 答复回执与收尾状态（2026-09-09，A 记）
+
+> 依据：B 对 Q1–Q3 的书面答复 + ingest 密钥口径（同日）。逐条记录，作为 M0 冻结收口依据。
+
+**Q1《雷达标准消息契约_v1》原文（最高优先）**
+→ B：已放到 `docs/`。⚠️ **A 仓库暂未同步到该文件**（本仓 docs/ 下无此文、git 亦无未提交新增）→ 请 B 确认提交分支/路径，或直接把原文贴给 A；到手后 A 落地 D1/D2（V2 测项种子 + message-contract §2）。
+
+**Q2 雷达每点输出量 → D1 定案**
+→ B：真实点形变雷达每点仅 **2 项**——`defo_mm`(累计形变) + 由历史推导的 `rate_mm_d`(速率)，**无 X/Y/Z 三分量**。
+→ 本文件 §2-D1「若含三分量则保留」分支关闭：A 按 **2 项** 重写 V2 测项种子，默认规则 metric_code→`defo_mm`。状态：**已闭合 · 待落地**（等 Q1 原文进仓核验，避免改两遍——A 侧决策）。
+
+**Q3 pointCode 体系 → V2 点号不变**
+→ B：用 A 档案点号 `P-HK01…P-BP04`（上报即此码）；B 的 CSV 回放适配器负责把雷达目标映射到这些码（可配置）。若雷达自带点编号，B 另行告知。
+→ A 侧 `monitor_point.code` 体系不动。
+
+**ingest 共享密钥（§2-D7 细化）**
+→ B：A 侧校验请求头 `X-Ingest-Key`；B 上报脚本默认占位 `dev-ingest-key`，用 `--ingest-key <值>` 或 env `MONITOR_INGEST_KEY` 覆盖。
+→ 双方 dev 值**统一为 `dev-ingest-key`**：A 侧 `application.yml` 默认已同步（`${MONITOR_INGEST_KEY:dev-ingest-key}`），两侧默认一致；生产/联调用 env 覆盖。
+
+**仍待 B（未答复）**
+- Q4 `/api/v1/devices/{id}/status` 归属：A 已按 D4 冻结为**保留**（B 从己方清单删除；如需 `health` 另对，不重复「在线判定」）。
+- Q5 告警级别语义：A 侧默认规则定为 `defo_mm THRESHOLD gte 10 / recovery 5 / level=warning`，与 `notice/warning/alarm` 的对应关系待 B 确认。
+
+**收尾状态**
+- A 侧已落地：D3–D10（见 §3 清单，晚段 2 完成）；D1 口径已定。
+- M0 签字剩余项：Q1 原文进仓核验 → D1/D2 落地（A-3）→ 改 V2 + message-contract §2；Q4/Q5 答复。
