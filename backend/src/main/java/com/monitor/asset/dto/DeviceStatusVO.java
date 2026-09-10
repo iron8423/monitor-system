@@ -3,7 +3,6 @@ package com.monitor.asset.dto;
 import lombok.Data;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 
 /**
  * 设备状态视图：在线/离线由最近上报时间推导，低电量按阈值判断。
@@ -17,5 +16,11 @@ public class DeviceStatusVO {
     private boolean online;
     private BigDecimal battery;
     private boolean lowBattery;
-    private LocalDateTime lastReportTime;
+
+    /**
+     * ISO8601 带时区（契约 §0）。{@code String} 而非 {@code LocalDateTime}：
+     * 裸时间字段会被 Jackson 按 ISO 序列化成 {@code 2026-08-27T15:05:00}——**不带偏移**，
+     * 前端无从判断时区；全仓其余时间字段都走 {@code Times.iso} 出 {@code +08:00}，此处对齐。
+     */
+    private String lastReportTime;
 }

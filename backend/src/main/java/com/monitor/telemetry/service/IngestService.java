@@ -169,9 +169,21 @@ public class IngestService {
         return it;
     }
 
+    /**
+     * 解析上报时间。带偏移的写法必须**换算**到平台时区（{@link Times#ZONE}），
+     * 不能只取 {@code toLocalDateTime()}——那会丢掉偏移只留墙上时间：
+     * 设备用 UTC 报 {@code 06:00Z} 会被存成 06:00 并当作 +08:00 回读，整错 8 小时；
+     * 对设备在线判定更致命，{@code last_report_time} 落到 8 小时前，
+     * 而 {@link com.monitor.asset.DeviceStatusPolicy} 的在线窗口只有 5 分钟，
+     * 设备一直在报数却永远显示离线。
+     */
     private LocalDateTime parseTime(String s) {
         if (notBlank(s)) {
-            try { return OffsetDateTime.parse(s).toLocalDateTime(); } catch (Exception ignored) {}
+            try {
+                return OffsetDateTime.parse(s).atZoneSameInstant(Times.ZONE).toLocalDateTime();
+            } catch (Exception ignored) {}
+            // 兜底：无偏移的本地写法按平台时区解释（契约要求带时区，这里只做容错）
+            try { return LocalDateTime.parse(s); } catch (Exception ignored) {}
         }
         return LocalDateTime.now();
     }

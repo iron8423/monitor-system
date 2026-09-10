@@ -63,6 +63,9 @@
 { "accepted": 2, "rejected": 0, "duplicates": 0,
   "results": [ { "pointCode": "P-HK01", "collectTime": "2026-08-27T09:14:33.256+08:00", "status": "OK", "quality": "VALID" } ] }
 ```
+> **量纲不同，注意**：`accepted` 按**落库行数**计（一条 2 测项消息 → `accepted: 2`，因拆 2 行）；
+> `duplicates`/`rejected` 按**消息条数**计。故一条 2 测项消息被去重命中时是 `duplicates: 1` 而非 2。
+> `results` 则**每条消息一项**。
 
 > 边界：`deviceId/pointCode` 不存在 → REJECTED；幂等命中 → DUPLICATE；质量规则见消息契约 §3。
 
@@ -92,10 +95,13 @@
 
 ### GET /api/v1/alarms（筛选：level/status/pointId/from/to/page/size）
 > 分页字段用 A 的公共信封 `common.PageResult`（`total/pageNum/pageSize/records`）——A 的全部 CRUD 列表端点都是这个形状，前端只需认一种。
+> `lastAction` / `lastActionAt` 是**系统或人工最后一次动作**，取值是原始动作串
+> （`trigger` 触发 / `recover` 自动解除 / `confirm` / `research` / `dispatch` / `handle` / `resolve` / `misreport`），
+> 不是中文标签——前端自行映射展示文案。
 ```json
 { "total": 2, "pageNum": 1, "pageSize": 20, "records": [
   { "id": 1, "pointId": 1000, "pointCode": "P-HK01", "level": "alarm", "status": "PENDING",
-    "triggeredAt": "2026-08-27T09:30:00+08:00", "lastAction": "触发", "lastActionAt": "2026-08-27T09:30:00+08:00" } ] }
+    "triggeredAt": "2026-08-27T09:30:00+08:00", "lastAction": "trigger", "lastActionAt": "2026-08-27T09:30:00+08:00" } ] }
 ```
 
 ### GET /api/v1/alarms/{id}

@@ -12,6 +12,7 @@ import com.monitor.audit.annotation.AuditAction;
 import com.monitor.common.Result;
 import com.monitor.common.base.BaseCrudController;
 import com.monitor.common.exception.BizException;
+import com.monitor.common.util.Times;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -58,7 +59,7 @@ public class DeviceController extends BaseCrudController<Device> {
         vo.setOnline(online);
         vo.setBattery(d.getBattery());
         vo.setLowBattery(lowBattery);
-        vo.setLastReportTime(d.getLastReportTime());
+        vo.setLastReportTime(Times.iso(d.getLastReportTime()));
         return Result.ok(vo);
     }
 

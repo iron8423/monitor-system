@@ -21,7 +21,9 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 │       ├── common·auth·organization·project·asset·audit   A 底座（A0–A4，已验收）
 │       └── telemetry            B1 ingest 接入骨架
 ├── frontend/                   Vue3 + Cesium 前端（阶段 2，B 主导）
-└── tools/radar_csv_replay/     真雷达 CSV 回放适配器（Python，B 侧）
+└── tools/
+    ├── radar_csv_replay/       真雷达 CSV 回放适配器（Python，B 侧）
+    └── acceptance/             后端验收套件（A 侧，§9 验收脚本可跑部分）
 ```
 
 ## 启动（阶段 1，后端）
@@ -36,6 +38,16 @@ cd backend
 - 健康检查：`GET http://localhost:8080/api/v1/health`
 - 接口文档：`http://localhost:8080/swagger-ui`
 - 演示账号：admin / operator / analyst / maintainer（密码 123456）
+
+## 验收（后端）
+
+```bash
+tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18080）跑完整套，跑完自动停
+tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上
+```
+
+6 个套件 / 117 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
+退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
 
 ## 协作约定
 
