@@ -3,6 +3,7 @@ package com.monitor.config;
 import com.monitor.auth.security.JwtAuthFilter;
 import com.monitor.auth.security.RestAccessDeniedHandler;
 import com.monitor.auth.security.RestAuthenticationEntryPoint;
+import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -59,6 +60,12 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // 容器内部的 ERROR 转发必须放行。否则任何未捕获异常（500）在转发到
+                // /error 时会被下面的 anyRequest().authenticated() 拦下，对外伪装成
+                // 401「未登录或令牌失效」——真实的 500 就此失踪，排查方向被带偏。
+                // 实测入口：/h2-console 用一个 H2 不自带的 language 值时 NPE（H2 只带
+                // _text_zh_cn.prop，没有 _text_zh.prop），本该 500，却报 401。
+                .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                 .requestMatchers("/api/v1/health", "/api/v1/auth/login", "/api/v1/auth/logout").permitAll()
                 // ingest 免 JWT（无网关，改用 X-Ingest-Key 共享密钥，见 IngestKeyFilter）
                 .requestMatchers("/api/v1/ingest/**").permitAll()
