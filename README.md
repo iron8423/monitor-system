@@ -74,5 +74,9 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **8 套件 / 173 条断言全绿**。
 - **验收链第一环（模拟器）已落地**：`tools/radar_simulator/` 按契约连续造数，不依赖真雷达 CSV；
   `radar_csv_replay/` 是回放器不是生成器（要真实数据），两者分工互补，都发同一条契约消息。
-- 阶段 1 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① M0 契约缺 B 的正式签字（提问已全答、原文已进仓，差形式确认）；
-  ② 低电量/数据中断告警未做——**用户定案暂不做**；③ 第 8 条 `docker compose up` + 数据持久属阶段 2，本机无 Docker。
+- **PostgreSQL 已验证**（B-4）：`postgres:16` 上 V1–V4 迁移全部成功，**173 条断言 173/173 全绿**，
+  重启后端数据不丢。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`
+  （`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`，默认 `localhost:5432/monitor`、`monitor/monitor`）。
+- 阶段 1 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① M0 契约缺 B 的正式签字——**已定案「等前端动工前收口」**，
+  届时需先抹平 `M0_接口冻结_致B_v1.md`（停在 09-09）与现状的矛盾；② 低电量/数据中断告警未做——**用户定案暂不做**；
+  ③ 第 8 条的 `docker compose up` 编排（B-3）未做——本机 Docker 已装，PG 侧已手工 `docker run` 验过。
