@@ -31,6 +31,7 @@ import java.util.Map;
  *  - 质量：quality 缺省按 信号/state/metrics 推导。
  */
 @Service
+@SuppressWarnings("null")
 public class IngestService {
 
     private final MeasurementMapper mapper;

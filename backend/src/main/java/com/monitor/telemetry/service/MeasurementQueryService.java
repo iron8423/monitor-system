@@ -32,6 +32,7 @@ import java.util.TreeMap;
  * id 用数值、code 用字符串、时间 ISO8601 带时区、位移 mm / 速率 mm/d。
  */
 @Service
+@SuppressWarnings("null")
 public class MeasurementQueryService {
 
     /** 时间按 +08:00 输出（与 application.yml 的 Asia/Shanghai 一致）。 */
