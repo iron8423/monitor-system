@@ -3,6 +3,7 @@ package com.monitor.telemetry.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.common.exception.BizException;
+import com.monitor.common.util.Times;
 import com.monitor.project.entity.Metric;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MetricMapper;
@@ -16,9 +17,6 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -35,8 +33,6 @@ import java.util.TreeMap;
 @SuppressWarnings("null")
 public class MeasurementQueryService {
 
-    /** 时间按 +08:00 输出（与 application.yml 的 Asia/Shanghai 一致）。 */
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final String DEFAULT_METRIC = "defo_mm";
 
     private final MeasurementMapper mapper;
@@ -77,7 +73,7 @@ public class MeasurementQueryService {
 
         Map<String, Object> att = parseAttributes(last.getAttributes());
         Map<String, Object> latest = new LinkedHashMap<>();
-        latest.put("collectTime", iso(last.getCollectTime()));
+        latest.put("collectTime", Times.iso(last.getCollectTime()));
         for (Measurement r : rows) {
             latest.put(r.getMetricCode(), r.getMeasureValue());
         }
@@ -97,8 +93,8 @@ public class MeasurementQueryService {
     public PointSeriesVO series(Long pointId, String metricCode, String from, String to, String granularity) {
         MonitorPoint p = requirePoint(pointId);
         String code = blank(metricCode) ? DEFAULT_METRIC : metricCode;
-        LocalDateTime f = parseTime(from, "from");
-        LocalDateTime t = parseTime(to, "to");
+        LocalDateTime f = Times.parse(from, "from");
+        LocalDateTime t = Times.parse(to, "to");
 
         List<Measurement> rows = mapper.selectList(new LambdaQueryWrapper<Measurement>()
                 .eq(Measurement::getPointId, pointId)
@@ -122,7 +118,7 @@ public class MeasurementQueryService {
         List<PointSeriesVO.Item> out = new ArrayList<>();
         if ("raw".equals(g)) {
             for (Measurement r : rows) {
-                out.add(new PointSeriesVO.Item(iso(r.getCollectTime()), r.getMeasureValue()));
+                out.add(new PointSeriesVO.Item(Times.iso(r.getCollectTime()), r.getMeasureValue()));
             }
             return out;
         }
@@ -142,7 +138,7 @@ public class MeasurementQueryService {
         }
         for (Map.Entry<LocalDateTime, List<Double>> e : grouped.entrySet()) {
             double avg = e.getValue().stream().mapToDouble(Double::doubleValue).average().orElse(0d);
-            out.add(new PointSeriesVO.Item(iso(e.getKey()), round(avg)));
+            out.add(new PointSeriesVO.Item(Times.iso(e.getKey()), round(avg)));
         }
         return out;
     }
@@ -179,31 +175,6 @@ public class MeasurementQueryService {
         }
     }
 
-    private String iso(LocalDateTime t) {
-        return t == null ? null
-                : t.atZone(ZONE).toOffsetDateTime().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-    }
-
-    private LocalDateTime parseTime(String s, String field) {
-        if (blank(s)) {
-            return null;
-        }
-        try {
-            return OffsetDateTime.parse(s).atZoneSameInstant(ZONE).toLocalDateTime();
-        } catch (Exception ignored) {
-            // 继续尝试无时区的写法
-        }
-        try {
-            return LocalDateTime.parse(s);
-        } catch (Exception ignored) {
-            // 继续尝试 "yyyy-MM-dd HH:mm:ss"
-        }
-        try {
-            return LocalDateTime.parse(s, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-        } catch (Exception e) {
-            throw new BizException(field + " 时间格式非法（应为 ISO8601）: " + s);
-        }
-    }
 
     private static Double round(double v) {
         return BigDecimal.valueOf(v).setScale(4, RoundingMode.HALF_UP).doubleValue();
