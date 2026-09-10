@@ -41,5 +41,7 @@ Thumbs.db
 .env
 *.env
 .env.*
+# 但模板要入库：它是「有哪些变量、默认值是什么」的唯一说明
+!.env.example
 *.local
 application-local.yml

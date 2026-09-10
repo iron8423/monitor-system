@@ -27,7 +27,23 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
     └── acceptance/             后端验收套件（A 侧，§9 验收脚本可跑部分）
 ```
 
-## 启动（阶段 1，后端）
+## 启动方式一：Docker Compose（含 PostgreSQL，推荐）
+
+```bash
+docker compose up -d          # 起 db + backend（首次要构建镜像，见下方注意）
+docker compose ps             # 两个服务都该是 healthy
+docker compose down           # 停；数据留在具名卷里，下次 up 还在
+docker compose down -v        # 连数据一起删（只有清干净重来才用）
+```
+
+- PostgreSQL 16 持久化在 `monitor-system_pgdata` 卷；上传的影像在 `monitor-system_media` 卷。
+- 配置（端口/密码/密钥）：`cp .env.example .env` 再改；`.env` 不入库。
+- **首次 `up` 很慢**（本机实测约 20 分钟）：要拉 `maven` 基础镜像，并把 pom 里全部依赖从
+  Maven Central 下一遍。这一步缓存在独立的构建层里，**之后只改 Java 代码重构建只要几十秒**。
+- 国内网络两个坑（换机器照抄）：官方的 `get.docker.com` 脚本固定去 `download.docker.com`
+  取 GPG key，本机被重置，改走清华源装 `docker.io`；拉镜像必须配 `registry-mirrors`。
+
+## 启动方式二：本地 Maven（H2 内存库，零配置）
 
 ```bash
 cd backend
@@ -35,20 +51,23 @@ cd backend
 # Windows: mvnw.cmd spring-boot:run
 ```
 
-- 默认 H2 内存库（零配置）；阶段 2 切 PostgreSQL + Docker Compose。
+- 默认 H2 内存库，重启即清空——要持久化就用上面的 Compose。
 - 健康检查：`GET http://localhost:8080/api/v1/health`
-- 接口文档：`http://localhost:8080/swagger-ui`
+- 接口文档：`http://localhost:8080/swagger-ui.html`
 - 演示账号：admin / operator / analyst / maintainer（密码 123456）
 
 ## 验收（后端）
 
 ```bash
 tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18080）跑完整套，跑完自动停
-tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上
+tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上（8080）
 ```
 
 8 个套件 / 173 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
 退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
+
+套件只认 `BASE` 一个地址，所以 **`docker compose up` 之后直接 `run-all.sh` 就是「一键过验收脚本」**
+（§9 第 8 条的后半句）——跑的是容器里的后端，不是宿主机的 `./mvnw`。
 
 验收链的第一环（**模拟器**）由 `tools/radar_simulator/` 提供，`08-simulator.sh` 用它造数并断言：
 造数 → 落库 → 立即可查 → 超限触发 → 等级升级 → 自动恢复 全链打通。
@@ -77,6 +96,11 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - **PostgreSQL 已验证**（B-4）：`postgres:16` 上 V1–V4 迁移全部成功，**173 条断言 173/173 全绿**，
   重启后端数据不丢。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`
   （`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`，默认 `localhost:5432/monitor`、`monitor/monitor`）。
+- **Docker Compose 一键启动已落地**（B-3）：`docker compose up -d` 起 db + backend，
+  已实测 —— 容器重建后数据仍在（`measurement/alarm/monitor_point` 计数与 schema 版本前后一致、
+  Flyway 不重跑）、影像落卷、对容器跑验收 **173/173 全绿**。
+  验收第 8 条的**前端部分仍未达**：`frontend/` 还是空的，浏览器可访问面目前只有后端自己的
+  swagger-ui；`docker-compose.yml` 末尾留了前端服务该长什么样的注释块。
 - **契约不再走「签字」**：项目用单仓库单一事实源，双方读同一份文档与代码，git 历史即记录。
   现行事实源 = `docs/message-contract.md`（消息契约）+ `docs/B侧接口契约_M0.md`（接口/字段/枚举）；
   `M0_接口冻结_致B_v1.md` 已就地作废（D1–D10 编号仍由它定义，数值以现行文档/代码为准）。
