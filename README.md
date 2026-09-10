@@ -101,6 +101,9 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   Flyway 不重跑）、影像落卷、对容器跑验收 **173/173 全绿**。
   验收第 8 条的**前端部分仍未达**：`frontend/` 还是空的，浏览器可访问面目前只有后端自己的
   swagger-ui；`docker-compose.yml` 末尾留了前端服务该长什么样的注释块。
+- **调试面已按 profile 收窄**（B-7）：H2 控制台只在基础 profile 开着，`postgres` profile 显式关闭，
+  且 `SecurityConfig` 的放行跟着这个开关走；`frameOptions` 由 `disable()` 收成 `sameOrigin()`。
+  swagger 保留放行（联调期前端要读 OpenAPI）。
 - **契约不再走「签字」**：项目用单仓库单一事实源，双方读同一份文档与代码，git 历史即记录。
   现行事实源 = `docs/message-contract.md`（消息契约）+ `docs/B侧接口契约_M0.md`（接口/字段/枚举）；
   `M0_接口冻结_致B_v1.md` 已就地作废（D1–D10 编号仍由它定义，数值以现行文档/代码为准）。
