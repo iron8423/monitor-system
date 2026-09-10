@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.alarm.service.AlarmEngine;
 import com.monitor.asset.entity.Device;
 import com.monitor.asset.mapper.DeviceMapper;
+import com.monitor.common.exception.BizException;
 import com.monitor.common.sse.SseBroadcaster;
 import com.monitor.common.util.Times;
 import com.monitor.project.entity.MonitorPoint;
@@ -19,7 +20,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -28,7 +28,8 @@ import java.util.Map;
  *  - 幂等：device_id + message_id（重复整条去重）；
  *  - 落库：一条含 N 测项 -> 拆 N 行 measurement，共用 message_id；
  *  - 附加字段 position/signal/state -> attributes(JSON <=1024)；
- *  - 质量：quality 缺省按 信号/state/metrics 推导。
+ *  - 质量：quality 缺省按 信号/state/metrics 推导；
+ *  - 时间：collectTime 必填且必须可解析（非法 -> 整条 REJECTED）；receiveTime 缺省取当前时间。
  */
 @Service
 @SuppressWarnings("null")
@@ -58,7 +59,9 @@ public class IngestService {
         }
         for (IngestMessage m : req.getItems()) {
             if (m == null) continue;
-            if (!valid(m)) {
+            // collectTime 是设备侧时间，缺失/格式非法一律拒收（见 parseCollectTime 的说明）
+            LocalDateTime collectAt = parseCollectTime(m.getCollectTime());
+            if (!valid(m) || collectAt == null) {
                 res.setRejected(res.getRejected() + 1);
                 res.getResults().add(item(m, "REJECTED", null));
                 continue;
@@ -79,7 +82,6 @@ public class IngestService {
             }
             String q = (m.getQuality() != null && !m.getQuality().isEmpty())
                     ? m.getQuality() : deriveQuality(m);
-            LocalDateTime collectAt = parseTime(m.getCollectTime());
             int rows = 0;
             if (m.getMetrics() != null) {
                 for (Map.Entry<String, Double> e : m.getMetrics().entrySet()) {
@@ -101,7 +103,7 @@ public class IngestService {
 
             // 回写设备最近上报时间：A 的在线判定（DeviceStatusPolicy）只认这个字段，
             // 不写则设备即使一直在报数也永远显示离线。取平台接收时间（无则当前时间）
-            device.setLastReportTime(parseTime(m.getReceiveTime()));
+            device.setLastReportTime(parseReceiveTime(m.getReceiveTime()));
             deviceMapper.updateById(device);
 
             // 规则评估（M2：超限即生成警情）。引擎内部已隔离异常，不影响接入主流程
@@ -139,7 +141,7 @@ public class IngestService {
         row.setPointCode(m.getPointCode());
         row.setMetricCode(metricCode);
         row.setCollectTime(collectAt);
-        row.setReceiveTime(parseTime(m.getReceiveTime()));
+        row.setReceiveTime(parseReceiveTime(m.getReceiveTime()));
         row.setMeasureValue(value);
         row.setQuality(quality);
         row.setAttributes(toAttributes(m));
@@ -170,22 +172,33 @@ public class IngestService {
     }
 
     /**
-     * 解析上报时间。带偏移的写法必须**换算**到平台时区（{@link Times#ZONE}），
-     * 不能只取 {@code toLocalDateTime()}——那会丢掉偏移只留墙上时间：
-     * 设备用 UTC 报 {@code 06:00Z} 会被存成 06:00 并当作 +08:00 回读，整错 8 小时；
-     * 对设备在线判定更致命，{@code last_report_time} 落到 8 小时前，
-     * 而 {@link com.monitor.asset.DeviceStatusPolicy} 的在线窗口只有 5 分钟，
-     * 设备一直在报数却永远显示离线。
+     * 解析设备侧的 {@code collectTime}；**缺失或格式非法返回 {@code null}**，由调用方按整条
+     * {@code REJECTED} 处理，不替设备编一个时间。
+     *
+     * <p>早期实现是「解析不了就取 {@code now()}」，那不只是数据不准，还会**掩盖设备离线**：
+     * 设备发来坏时间戳，平台按「刚刚收到」盖章，而 {@link com.monitor.asset.DeviceStatusPolicy}
+     * 只认 {@code last_report_time}——于是设备一直在报垃圾却永远显示在线，离线告警永远不会响。
+     * 时间戳是设备的契约义务（message-contract §2），坏数据应当明确拒收、计入 {@code rejected}。</p>
+     *
+     * <p>带偏移的写法必须**换算**到平台时区（{@link Times#ZONE}），不能只取 {@code toLocalDateTime()}——
+     * 那会丢掉偏移只留墙上时间：设备用 UTC 报 {@code 06:00Z} 会被存成 06:00 并当作 +08:00 回读，整错 8 小时。
+     * 宽容度与查询侧一致，统一委托 {@link Times#parse}。</p>
      */
-    private LocalDateTime parseTime(String s) {
-        if (notBlank(s)) {
-            try {
-                return OffsetDateTime.parse(s).atZoneSameInstant(Times.ZONE).toLocalDateTime();
-            } catch (Exception ignored) {}
-            // 兜底：无偏移的本地写法按平台时区解释（契约要求带时区，这里只做容错）
-            try { return LocalDateTime.parse(s); } catch (Exception ignored) {}
+    private LocalDateTime parseCollectTime(String s) {
+        try {
+            return Times.parse(s, "collectTime");
+        } catch (BizException e) {
+            return null;
         }
-        return LocalDateTime.now();
+    }
+
+    /**
+     * 解析平台侧的 {@code receiveTime}：没给就取当前时间——**这是对的**，
+     * 它本就是「平台什么时候收到的」，兜底取 now() 不会凭空造出错误的时间语义。
+     */
+    private LocalDateTime parseReceiveTime(String s) {
+        LocalDateTime t = parseCollectTime(s);
+        return t == null ? LocalDateTime.now() : t;
     }
 
     /** 点号 -> 档案主键。用档案点号（P-HK01…P-BP04）落 point_id，兼容 D10（id 数值 / code 字符串）。 */

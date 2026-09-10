@@ -7,13 +7,19 @@ import java.util.Map;
 
 /**
  * 警情详情（《B侧接口契约_M0》§4）：快照 + 处置时间线。
+ *
+ * <p>{@code snapshot} 按 {@code alarmType} 变化：测点警情是「测项 -&gt; 触发值 + 阈值 + 规则」，
+ * 设备告警是「设备码 + 最后上报时间 + 离线判据分钟数」。</p>
  */
 @Data
 public class AlarmDetailVO {
 
     private Long id;
+    private String alarmType;
     private Long pointId;
     private String pointCode;
+    private Long deviceId;
+    private String deviceCode;
     private String level;
     private String status;
     private String triggeredAt;

@@ -59,4 +59,19 @@ check "不存在的项目 -> 404" "404" "$(http_code "$BASE/projects/99999" -H "
 check "不存在的测点 -> 404" "404" "$(http_code "$BASE/points/99999" -H "$AUTH")"
 check "不存在的设备状态 -> 404" "404" "$(http_code "$BASE/devices/99999/status" -H "$AUTH")"
 
+section "⑦ 档案时间带时区（契约 §0）"
+# 档案 CRUD 直接把实体原样返回（BaseCrudController），实体里是裸 LocalDateTime。
+# Jackson 默认会把 LocalDateTime 写成 "2026-08-27T15:05:00"——不带偏移，前端无从判断时区。
+# 全仓由 JacksonTimeConfig 统一补 +08:00；这里抽查两类不同实体的 createdAt，证明是全局行为而非逐字段特判。
+has_zone() {
+  python3 -c "
+import sys,json
+v=str(json.load(sys.stdin)['data']$1)
+print(v.endswith('+08:00'))"
+}
+check "测点 createdAt 带偏移" "True" "$(curl -s "$BASE/points/1" -H "$AUTH" | has_zone "['createdAt']")"
+check "项目 updatedAt 带偏移" "True" "$(curl -s "$BASE/projects/1" -H "$AUTH" | has_zone "['updatedAt']")"
+check "设备 updatedAt 带偏移" "True" "$(curl -s "$BASE/devices/1" -H "$AUTH" | has_zone "['updatedAt']")"
+info "示例 points/1.createdAt = $(curl -s "$BASE/points/1" -H "$AUTH" | data_of "['createdAt']")"
+
 summary

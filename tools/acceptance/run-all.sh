@@ -48,8 +48,10 @@ if [ "$FRESH" = 1 ]; then
     exit 2
   fi
   printf '%s启动全新后端：端口 %s（H2 内存库，空库）...%s\n' "$C_DIM" "$PORT" "$C_OFF"
+  # --monitor.device-offline.sweep-ms=2000：07 套件要等设备离线扫描出结果，
+  # 线上默认 10s 也能过（套件按 40s 上限轮询），这里调快纯粹是省时间。
   ( cd "$ROOT/backend" && exec setsid ./mvnw $MVNW_OPTS spring-boot:run \
-      -Dspring-boot.run.arguments="--server.port=$PORT" ) > "$LOG" 2>&1 &
+      -Dspring-boot.run.arguments="--server.port=$PORT --monitor.device-offline.sweep-ms=2000" ) > "$LOG" 2>&1 &
   BG_PID=$!
 
   printf '等待就绪'
@@ -76,7 +78,7 @@ fi
 
 printf '\n%s验收目标：%s%s\n' "$C_DIM" "$BASE" "$C_OFF"
 
-SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh)
+SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh)
 TOTAL_PASS=0; TOTAL_FAIL=0; FAILED_SUITES=()
 
 for s in "${SUITES[@]}"; do

@@ -95,6 +95,35 @@ ts=[p['t'] for p in json.load(sys.stdin)['data']['points'] if p['v']==0.4]
 print(ts[0] if ts else '<未找到>')")
 check "06:00Z 应存为并回读为 14:00+08:00" "2026-08-27T14:00:00+08:00" "$GOT"
 
+section "⑩ collectTime 缺失/非法 -> 整条 REJECTED（不替设备编时间）"
+# 早期实现是「解析不了就取 now()」。那不只是数据不准：设备发坏时间戳、平台按「刚刚收到」盖章，
+# 而设备在线判定（DeviceStatusPolicy）只认 last_report_time —— 设备一直在报垃圾却永远显示在线，
+# 离线告警永远不会响。坏时间戳是设备的契约违约，应当明确拒收。
+BAD_BEFORE=$(curl -s "$BASE/points/$PID/series?metricCode=defo_mm" -H "$AUTH" \
+             | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")
+for bad in "not-a-time" "" "2026-13-45T99:99:99+08:00"; do
+  B=$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
+      -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-bad-$RANDOM\",\"deviceId\":\"radar-001\",\"pointCode\":\"$POINT\",\"collectTime\":\"$bad\",\"metrics\":{\"defo_mm\":1.0}}]}")
+  check "collectTime=\"$bad\" -> rejected=1" "1" "$(printf '%s' "$B" | data_of "['rejected']")"
+  check "collectTime=\"$bad\" -> accepted=0" "0" "$(printf '%s' "$B" | data_of "['accepted']")"
+done
+# 字段整个不写也一样
+NOC=$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
+      -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-noc\",\"deviceId\":\"radar-001\",\"pointCode\":\"$POINT\",\"metrics\":{\"defo_mm\":1.0}}]}")
+check "未带 collectTime -> rejected=1" "1" "$(printf '%s' "$NOC" | data_of "['rejected']")"
+check "拒收的那几条没有落库" "$BAD_BEFORE" \
+  "$(curl -s "$BASE/points/$PID/series?metricCode=defo_mm" -H "$AUTH" \
+     | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")"
+
+section "⑪ latest 次排序键：同一 collect_time 有两条时，取后写库的那条"
+# 只按 collect_time 排序的话取到哪行由数据库返回顺序决定，「最新值」不可复现，
+# 兄弟测项也会跟着那一行的 messageId 走。用 id 兜底后：后写的一定覆盖先写的。
+CT="2026-08-27T17:00:00+08:00"
+ingest_id "ing2-$RUN_ID-lat1" "$POINT" "$CT" '"defo_mm":1.11' >/dev/null
+ingest_id "ing2-$RUN_ID-lat2" "$POINT" "$CT" '"defo_mm":2.22' >/dev/null
+check "同 collect_time 取后写的一条" "2.22" \
+  "$(curl -s "$BASE/points/$PID/latest" -H "$AUTH" | data_of "['latest']['defo_mm']")"
+
 DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
 [ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
 

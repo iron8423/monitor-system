@@ -35,9 +35,11 @@ public class AlarmController {
                                             @RequestParam(required = false) String level,
                                             @RequestParam(required = false) String status,
                                             @RequestParam(required = false) Long pointId,
+                                            @RequestParam(required = false) Long deviceId,
+                                            @RequestParam(required = false) String alarmType,
                                             @RequestParam(required = false) String from,
                                             @RequestParam(required = false) String to) {
-        return Result.ok(alarmService.list(level, status, pointId, from, to, pageNum, pageSize));
+        return Result.ok(alarmService.list(level, status, pointId, deviceId, alarmType, from, to, pageNum, pageSize));
     }
 
     @GetMapping("/{id}")

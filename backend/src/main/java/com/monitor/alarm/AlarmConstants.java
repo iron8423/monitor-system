@@ -3,6 +3,7 @@ package com.monitor.alarm;
 import com.monitor.common.exception.BizException;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -28,10 +29,34 @@ public final class AlarmConstants {
     /** 终态：不再算作「未解除警情」。 */
     public static final Set<String> CLOSED = Set.of(RESOLVED, FALSE_ALARM);
 
+    /** 警情来源：挂测点的形变警情 / 挂设备的状态告警。 */
+    public static final String TYPE_POINT = "POINT";
+    public static final String TYPE_DEVICE = "DEVICE";
+
     /** 系统自动动作（非人工处置）。 */
     public static final String ACTION_TRIGGER = "trigger";
     public static final String ACTION_RECOVER = "recover";
+    /**
+     * 升级：同一测点已有未解除警情时，更高等级的规则触发不再另开一条，而是就地抬高等级
+     * （验收第 3 条「等级升高能升级」）。与 trigger/recover 一样是系统动作，不在处置动作枚举里。
+     */
+    public static final String ACTION_ESCALATE = "escalate";
     public static final String SYSTEM = "system";
+
+    /** 等级由弱到强（D5 冻结枚举）。 */
+    private static final List<String> LEVELS = List.of("notice", "warning", "alarm");
+
+    /**
+     * 等级强弱序号，用于比较「谁更高」。未知 / null 一律返回 -1（最低），
+     * 这样一条等级写错的规则不会把已有警情降级。
+     */
+    public static int rankOf(String level) {
+        if (level == null) {
+            return -1;
+        }
+        int i = LEVELS.indexOf(level.trim().toLowerCase());
+        return i < 0 ? -1 : i;
+    }
 
     private static final Map<String, String> ACTION_TO_STATUS = new LinkedHashMap<>();
 

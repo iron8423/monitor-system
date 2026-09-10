@@ -13,6 +13,8 @@ A 侧**阶段 1 交付已完成并通过端到端验证**（A0–A4 + M0 的 sch
 git 已含首个提交 `221d96b`（A 交付基线，B 可拉分支协同）。
 **尚未到「阶段 1 整体完成」**：M0 契约差 B 签字——B 已答**全部提问**，且《雷达标准消息契约_v1》原文**已进仓**（`docs/message-contract.md`，2026-09-09 随本轮提交）→ **A-3（V2 每点 2 测项 + 默认规则 ±3mm 双向）内容就绪、待 A 执行**（用户决策：本轮只提交文档，metric 重构后置）；~~共同分支/remote 线上推送路径仍待与 B 商定~~ → **已定（2026-09-09）：B 的 GitHub `iron8423/monitor-system` 单一事实源，A 并入上传；阻塞 = collaborator（yanzu1024）+ SSH 公钥注册**；且后端闭环验收（M2：超限→告警→处置→解除）依赖 B 的 ingest/模拟器/告警模块。
 
+> **更新（2026-09-10 晚）**：B 转前端后其 M1/M2 后端部分由 A 就地补齐，**后端闭环已在 A 侧跑通**——验收套件扩到 **7 套件 / 156 条断言**且全绿（`--fresh` 空库 + 同库连跑三轮）。本轮定案并落地了 §2 的 **B-8～B-12** 五项（档案时间全局带时区、`latest` 次排序键、设备告警、等级升级、collectTime 非法拒收）。**验收第 5 条（设备告警）与第 3 条（等级升级）自此不再是缺口**；仍未覆盖的是第 8 条（Docker/PG，B-3/B-4）与各条的前端呈现。
+
 ---
 
 ## 1. 阶段 1 内 · A 剩余清单（本周）
@@ -39,11 +41,12 @@ git 已含首个提交 `221d96b`（A 交付基线，B 可拉分支协同）。
 | B-4 | **PostgreSQL 迁移验证** | A5/B-3 | 切 `application-postgres.yml` 跑通；H2 内存库重启即清 → PG 持久化（对应验收脚本第 8 条「重启数据不丢」） |
 | B-5 | README 完善 | 阶段 1 演示可用 | 启动步骤 + 演示账号（admin/operator/analyst/maintainer，123456）+ 触发告警/断连/重复的演示脚本 |
 | B-6 | OpenAPI 契约维护 + 联调响应 | 全程 | A 是「契约接口人」，联调优先级高于收尾（§10 风险 2） |
-| B-8 | **档案 CRUD 时间统一带时区** | 无（影响面大，需定夺） | `BaseEntity.createdAt/updatedAt` 是裸 `LocalDateTime`，被 `BaseCrudController` 原样返回 → `GET /projects`、`/points` 等**所有**档案端点的时间**无偏移**，违反契约 §0「时间 ISO8601 带时区」（`alarms.triggeredAt` 那些走 `Times.iso` 是带 `+08:00` 的）。<br>同日已单独修掉 `DeviceStatusVO.lastReportTime`（同类缺陷、且是契约点名的字段），但档案时间属**全局响应契约**，宜注册 Jackson 序列化器统一走 `Times.iso` 一次修净。<br>**前端尚未开始写，是改的窗口期**；越晚改波及越大。 |
-| B-9 | `latest` 加次排序键 | 无 | `MeasurementQueryService#latest` 用 `orderByDesc(collectTime).last("LIMIT 1")`，**无第二排序键**：同一测点同一 `collect_time` 有两条（不同 messageId）时，「最新值」取哪一行随数据库返回顺序而变，兄弟测项也跟着那一行的 messageId 走。建议按 `receive_time` 或 `id` 兜底排序。发现于 2026-09-10（验收套件双跑时暴露，非套件本身问题）。 |
-| B-10 | 验收第 5 条「生成设备告警」归属与形态 | 与 B 对表 | 全仓唯一 `@Scheduled` 是 SSE 心跳，`OFFLINE` 只在 `DeviceStatusPolicy`（读时算、拉）。`/devices/{id}/status` 已实现且离线/恢复正确，但**没有任何东西生成设备告警**；而本清单 §4 写「第 1/2/3/5 条主体 B」——**接口两侧都假定对方生成**。<br>待定：归谁做、是否进警情列表（`alarm.point_id` 为 `NOT NULL`，设备告警无点可挂，要么走 V3 加表、要么借 `device_point` 挂到关联测点）、什么 level。 |
-| B-11 | 验收第 3 条「等级升高能升级」 | 需先定语义 | `AlarmEngine` 在同规则已有未解除警情时只判恢复（`if (open != null) { shouldRecover ? 恢复 : 什么都不做 }`），**无升级路径**；不同 level 是不同规则，会各自成警情。「持续超限不刷屏」那半句已实现并有覆盖（04 套件 ⑦）。 |
 | B-7 | **生产 profile 收窄调试面**（H2 console / swagger） | B-4 PostgreSQL 迁移 | `SecurityConfig` 有意放行 `/h2-console/**`、`/swagger-ui/**`、`/v3/api-docs/**`；`spring.h2.console.enabled: true` 写在**基础** `application.yml`。<br>已核实三点，威胁是现实的而非假设：① `H2ConsoleAutoConfiguration` 的生效条件只有 servlet 应用 + classpath 有 `JakartaWebServlet` + 该开关为 true（`javap` 查 3.5.16 的注解），**没有一条与数据源类型有关**；② H2 是 `runtime` scope → 各 profile 的 runtime classpath 上都有；③ `application-postgres.yml` 只覆盖了 datasource，**未**关该开关。<br>后果：切 `postgres` profile 后 console 仍注册，且**无需任何凭证**即可访问、可自行指定任意 JDBC URL（含 PG 库）。<br>落地要求：PG/生产 profile 显式 `spring.h2.console.enabled: false`，console 放行按 profile 收窄到 dev（swagger 视联调需要可保留）。<br>发现于 2026-09-10：借该 console 直写库验证告警引擎兜底时**无凭证即进入**。 |
+| B-8 | **档案 CRUD 时间统一带时区** | ✅ 已完成（2026-09-10） | 加 `config/JacksonTimeConfig`：注册 `LocalDateTime` 序列化器统一走 `Times.iso`，把被 `BaseCrudController` 原样返回的实体时间一次修净（8 个 `BaseEntity` 子类及其后新增字段全部覆盖）。同时删掉 `application.yml` 里**误导性**的 `spring.jackson.date-format`——它只作用于 `java.util.Date`，对 JSR-310 无效，正是这条配置让人以为时间格式已经配好了。01 套件加 3 条断言锁住（测点 / 项目 / 设备各一）。 |
+| B-9 | `latest` 加次排序键 | ✅ 已完成（2026-09-10） | `orderByDesc(collectTime)` 后补 `orderByDesc(id)`。选 `id` 不选 `receive_time`：主键单调递增、等价于「后写库的覆盖先写的」，且没有 NULL 排序的方言差异（PG 的 DESC 把 NULL 排最前、H2 排最后）。02 套件加断言：同一 `collect_time` 两条时取后写的那条。 |
+| B-10 | 验收第 5 条「生成设备告警」 | ✅ 已完成（2026-09-10，用户定案） | **形态：V3 给 `alarm` 加 `alarm_type`/`device_id` 并放开 `point_id NOT NULL`，复用同一张表**——设备告警因此直接走现成的状态机、处置动作、时间线留痕与 SSE，不必复制第二份警情域。**归属：A 做**（`DeviceAlarmMonitor`，`@Scheduled` 扫描，判据复用 `DeviceStatusPolicy.OFFLINE_MINUTES`；从不报数的设备不告警；等级取 `notice`）。07 套件 21 条断言覆盖。 |
+| B-11 | 验收第 3 条「等级升高能升级」 | ✅ 已完成（2026-09-10，用户定案） | **语义：同一测点 + 测项未解除的警情至多一条，命中更高等级规则时就地升级**（`level` 抬高 + 时间线追加 `escalate`），不另开平行警情；升级只改等级、不改所属规则，恢复仍按最初触发那条规则判定。另发现**演示前提缺失**：种子原本两条规则都是 `warning`，没有更高等级可升——V4 补 `defo_mm gte +5.0/恢复 +2.0`（alarm）。04 套件 ⑨ 覆盖。 |
+| B-12 | `collectTime` 非法兜底取 `now()` | ✅ 已完成（2026-09-10，用户定案） | `IngestService#parseTime` 解析失败静默取 `now()`：既污染数据，又**掩盖设备离线**——坏时间戳被盖上「刚刚收到」的章，而在线判定只认 `last_report_time`，设备一直在报垃圾却永远显示在线。改为 `collectTime` 非法即整条 `REJECTED`；`receiveTime`（平台侧时间）缺省才取当前时间。契约 §2 已注明知会 B。 |
 
 > ⚠️ 本机无 Docker/PG（此前确认）→ A5（B-3/B-4）需要一台能跑 Docker 的环境验证，落地时先补环境。
 

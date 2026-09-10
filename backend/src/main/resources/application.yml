@@ -15,7 +15,9 @@ spring:
     enabled: true
     locations: classpath:db/migration
   jackson:
-    date-format: yyyy-MM-dd HH:mm:ss
+    # 注意：date-format 只影响 java.util.Date，对 JSR-310（LocalDateTime）**无效**，
+    # 曾因此让档案时间裸出 "2026-08-27T15:05:00" 无偏移。时间口径现由
+    # JacksonTimeConfig 统一走 Times.iso（ISO8601 带 +08:00），不要再靠这里配置。
     time-zone: Asia/Shanghai
   servlet:
     multipart:
@@ -53,6 +55,11 @@ monitor:
     expiration: ${JWT_EXPIRATION:86400000}
   upload:
     dir: ${UPLOAD_DIR:./data/media}
+  # 设备离线扫描（验收第 5 条：断连 -> 设备告警）。
+  # 判据复用 DeviceStatusPolicy.OFFLINE_MINUTES（5 分钟未上报视为离线），这里只管「多久扫一次」：
+  # 默认 10s 是演示观感与开销的折中——断连后最多 10s 就出告警，而一次扫描只是几条内存比较。
+  device-offline:
+    sweep-ms: ${DEVICE_OFFLINE_SWEEP_MS:10000}
   # ingest 接入共享密钥（M0-D7）：无网关，/api/v1/ingest/** 校验 X-Ingest-Key 头
   # dev 默认值已与 B 统一为 dev-ingest-key（B 上报脚本默认同此值，见 B 答复 2026-09-09）；
   # 联调/生产用环境变量 MONITOR_INGEST_KEY 覆盖此默认值（与 B 协商一致的密钥）

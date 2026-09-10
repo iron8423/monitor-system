@@ -7,9 +7,9 @@
 #   沿用固定测点会导致 5 分钟内重跑必然「无警情」，那不是代码错而是防刷屏真的生效了。
 #   新建点每轮都是干净的，断言因此可精确到条数。
 #
-#   ⚠️ 验收第 3 条还有半句「等级升高能升级」——当前**未实现**：AlarmEngine 在同规则已有
-#   未解除警情时只判恢复（`if (open != null) { shouldRecover ? 恢复 : 什么都不做 }`），
-#   不存在升级路径；不同 level 是不同规则，会各自成警情。详见当日工作日志，未在本脚本断言。
+#   验收第 3 条后半句「等级升高能升级」在 ⑨ 单独验证：同一测点同一测项未解除的警情只保留一条，
+#   值继续恶化命中更高等级规则时**就地升级**（等级抬高 + 时间线追加 escalate），不另开平行警情。
+#   该语义于 2026-09-10 与用户定案（升级只改等级、不改所属规则，恢复仍按最初触发那条规则判定）。
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/lib.sh"
@@ -109,7 +109,34 @@ NEWR=$(curl -s -X POST "$BASE/alarm-rules" -H "$AUTH" -H "$JSON" \
 check "建 THRESHOLD 规则业务码" "0" "$(printf '%s' "$NEWR" | code_of)"
 check "回读 type" "THRESHOLD" "$(printf '%s' "$NEWR" | data_of "['type']")"
 
-section "⑨ 鉴权"
+section "⑨ 等级升级：同点同测项只保留一条未解除警情，命中更高等级规则时就地升级（验收第 3 条）"
+# 换一个干净测点：本套件已在 $NP 上产生过 +3.0 规则的警情，同点同规则在抑制窗口内不会再触发，
+# 沿用 $NP 的话「先开出 warning」这一步根本做不出来。
+EP="P-ESC-$RUN_ID"
+EPID=$(curl -s -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
+       -d "{\"objectId\":1,\"code\":\"$EP\",\"name\":\"等级升级验收临时测点\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
+       | data_of "['id']")
+# 4.2 越过 +3.0（warning）但不到 +5.0（alarm，V4 种子规则）
+ingest_id "esc-$RUN_ID-1" "$EP" "2026-08-27T13:00:00+08:00" '"defo_mm":4.2' >/dev/null
+check "先开出 warning 级警情" "1" "$(curl -s "$BASE/alarms?pointId=$EPID&status=PENDING" -H "$AUTH" | data_of "['total']")"
+EID=$(curl -s "$BASE/alarms?pointId=$EPID&status=PENDING" -H "$AUTH" | python3 -c "
+import sys,json;print(max(r['id'] for r in json.load(sys.stdin)['data']['records']))")
+check "初始等级" "warning" "$(curl -s "$BASE/alarms/$EID" -H "$AUTH" | data_of "['level']")"
+# 6.0 越过 +5.0 -> 就地升级，不得多出一条
+ingest_id "esc-$RUN_ID-2" "$EP" "2026-08-27T13:05:00+08:00" '"defo_mm":6.0' >/dev/null
+check "仍是同一条警情（没有多出平行警情）" "1" \
+  "$(curl -s "$BASE/alarms?pointId=$EPID&status=PENDING" -H "$AUTH" | data_of "['total']")"
+check "等级已升为 alarm" "alarm" "$(curl -s "$BASE/alarms/$EID" -H "$AUTH" | data_of "['level']")"
+check "时间线记了 escalate" "True" "$(curl -s "$BASE/alarms/$EID" -H "$AUTH" | python3 -c "
+import sys,json;print(any(t['action']=='escalate' for t in json.load(sys.stdin)['data']['timeline']))")"
+# 恢复到 0.5：按**最初触发**那条规则（gte +3.0 / 恢复 +1.0）解除，而不是升级到的那条（恢复 +2.0）
+ingest_id "esc-$RUN_ID-3" "$EP" "2026-08-27T13:10:00+08:00" '"defo_mm":0.5' >/dev/null
+check "回落至最初规则恢复值内 -> 自动解除" "0" \
+  "$(curl -s "$BASE/alarms?pointId=$EPID&status=PENDING" -H "$AUTH" | data_of "['total']")"
+DEL2=$(http_code -X DELETE "$BASE/points/$EPID" -H "$AUTH")
+[ "$DEL2" = "200" ] && info "已回收临时测点 $EP" || info "临时测点 $EP 未回收（HTTP $DEL2），可忽略"
+
+section "⑩ 鉴权"
 check "警情列表无 JWT -> 401" "401" "$(http_code "$BASE/alarms")"
 check "规则列表无 JWT -> 401" "401" "$(http_code "$BASE/alarm-rules")"
 

@@ -46,7 +46,7 @@ tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18
 tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上
 ```
 
-6 个套件 / 117 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
+7 个套件 / 156 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
 退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
 
 ## 协作约定
