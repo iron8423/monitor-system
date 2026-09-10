@@ -38,6 +38,7 @@ git 已含首个提交 `221d96b`（A 交付基线，B 可拉分支协同）。
 | B-4 | **PostgreSQL 迁移验证** | A5/B-3 | 切 `application-postgres.yml` 跑通；H2 内存库重启即清 → PG 持久化（对应验收脚本第 8 条「重启数据不丢」） |
 | B-5 | README 完善 | 阶段 1 演示可用 | 启动步骤 + 演示账号（admin/operator/analyst/maintainer，123456）+ 触发告警/断连/重复的演示脚本 |
 | B-6 | OpenAPI 契约维护 + 联调响应 | 全程 | A 是「契约接口人」，联调优先级高于收尾（§10 风险 2） |
+| B-7 | **生产 profile 收窄调试面**（H2 console / swagger） | B-4 PostgreSQL 迁移 | `SecurityConfig` 有意放行 `/h2-console/**`、`/swagger-ui/**`、`/v3/api-docs/**`；`spring.h2.console.enabled: true` 写在**基础** `application.yml`。<br>已核实三点，威胁是现实的而非假设：① `H2ConsoleAutoConfiguration` 的生效条件只有 servlet 应用 + classpath 有 `JakartaWebServlet` + 该开关为 true（`javap` 查 3.5.16 的注解），**没有一条与数据源类型有关**；② H2 是 `runtime` scope → 各 profile 的 runtime classpath 上都有；③ `application-postgres.yml` 只覆盖了 datasource，**未**关该开关。<br>后果：切 `postgres` profile 后 console 仍注册，且**无需任何凭证**即可访问、可自行指定任意 JDBC URL（含 PG 库）。<br>落地要求：PG/生产 profile 显式 `spring.h2.console.enabled: false`，console 放行按 profile 收窄到 dev（swagger 视联调需要可保留）。<br>发现于 2026-09-10：借该 console 直写库验证告警引擎兜底时**无凭证即进入**。 |
 
 > ⚠️ 本机无 Docker/PG（此前确认）→ A5（B-3/B-4）需要一台能跑 Docker 的环境验证，落地时先补环境。
 
