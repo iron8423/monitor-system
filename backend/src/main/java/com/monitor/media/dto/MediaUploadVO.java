@@ -5,17 +5,17 @@ import lombok.Data;
 /**
  * 上传结果（《B侧接口契约_M0》§7）。
  *
- * <p>契约示例把 {@code mediaId} 写成 {@code "M001"} 这种字符串，但库里 id 是数值
- * （D10：id 数值 / code 字符串，media 表无 code 列）——故此处按 D10 返回<b>数值 id</b>，
- * 与其余接口的 {@code pointId}/{@code alarmId} 一致；URL 也据此拼。</p>
+ * <p>{@code mediaId} 按契约用<b>字符串编码</b>（如 {@code "M001"}，见 {@link com.monitor.media.MediaCode}），
+ * 与 {@code url} 中的 {@code {mediaId}} 同一取值。库内主键仍是数值，
+ * 编码由主键派生——D10 的「id 数值 / code 字符串」在对外这一层即体现为只给出编码。</p>
  */
 @Data
 public class MediaUploadVO {
 
-    private Long mediaId;
+    private String mediaId;
     /** 对外对象键 {@code media/<pointCode>/<uuid>.<ext>}。 */
     private String objectKey;
-    /** 访问地址 {@code /api/v1/media/{id}/content}。 */
+    /** 访问地址 {@code /api/v1/media/{mediaId}/content}。 */
     private String url;
     private Long pointId;
     private String takenAt;

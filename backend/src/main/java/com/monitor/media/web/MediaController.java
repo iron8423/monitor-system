@@ -24,9 +24,10 @@ import java.util.List;
 /**
  * 媒体接口（《B侧接口契约_M0》§7）。
  *
- * <p>{@code /media/{id}/content} 返回的是二进制本体，走 {@code ResponseEntity<Resource>}
+ * <p>{@code /media/{mediaId}/content} 返回的是二进制本体，走 {@code ResponseEntity<Resource>}
  * 而非统一信封——前端 {@code <img>} 直接引；该路径允许 {@code ?token=} 鉴权
- * （{@code <img>} 带不了请求头，见 {@code JwtAuthFilter}）。</p>
+ * （{@code <img>} 带不了请求头，见 {@code JwtAuthFilter}）。
+ * {@code {mediaId}} 是字符串编码（{@code M001}），见 {@code MediaCode}。</p>
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -53,10 +54,10 @@ public class MediaController {
         return Result.ok(mediaService.listByPoint(pointId));
     }
 
-    /** 影像内容（二进制）。 */
-    @GetMapping("/media/{id}/content")
-    public ResponseEntity<Resource> content(@PathVariable Long id) {
-        Media media = mediaService.require(id);
+    /** 影像内容（二进制）。路径变量是<b>对外编码</b>（{@code M001}），也容忍裸数字 id。 */
+    @GetMapping("/media/{mediaId}/content")
+    public ResponseEntity<Resource> content(@PathVariable String mediaId) {
+        Media media = mediaService.requireByCode(mediaId);
         Resource resource = mediaService.content(media);
         return ResponseEntity.ok()
                 .contentType(contentTypeOf(media))

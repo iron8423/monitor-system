@@ -3,6 +3,7 @@ package com.monitor.media.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.monitor.common.exception.BizException;
 import com.monitor.common.util.Times;
+import com.monitor.media.MediaCode;
 import com.monitor.media.dto.MediaUploadVO;
 import com.monitor.media.dto.MediaVO;
 import com.monitor.media.entity.Media;
@@ -104,7 +105,7 @@ public class MediaService {
         mediaMapper.updateById(media);
 
         MediaUploadVO vo = new MediaUploadVO();
-        vo.setMediaId(media.getId());
+        vo.setMediaId(MediaCode.of(media.getId()));
         vo.setObjectKey(media.getObjectKey());
         vo.setUrl(media.getUrl());
         vo.setPointId(media.getPointId());
@@ -123,7 +124,7 @@ public class MediaService {
         List<MediaVO> items = new ArrayList<>(rows.size());
         for (Media m : rows) {
             MediaVO vo = new MediaVO();
-            vo.setMediaId(m.getId());
+            vo.setMediaId(MediaCode.of(m.getId()));
             vo.setUrl(m.getUrl() == null ? contentUrl(m.getId()) : m.getUrl());
             vo.setTakenAt(Times.iso(m.getTakenAt()));
             vo.setNote(m.getNote());
@@ -139,6 +140,15 @@ public class MediaService {
             throw new BizException(404, "影像不存在: " + id);
         }
         return m;
+    }
+
+    /** 按对外编码（{@code "M001"}，或裸数字 id）取影像元数据。 */
+    public Media requireByCode(String mediaId) {
+        Long id = MediaCode.parse(mediaId);
+        if (id == null) {
+            throw new BizException(404, "影像不存在: " + mediaId);
+        }
+        return require(id);
     }
 
     /**
@@ -201,7 +211,7 @@ public class MediaService {
     }
 
     private static String contentUrl(Long id) {
-        return "/api/v1/media/" + id + "/content";
+        return "/api/v1/media/" + MediaCode.of(id) + "/content";
     }
 
     private Path root() {
