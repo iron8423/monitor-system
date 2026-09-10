@@ -23,6 +23,7 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 ├── frontend/                   Vue3 + Cesium 前端（阶段 2，B 主导）
 └── tools/
     ├── radar_csv_replay/       真雷达 CSV 回放适配器（Python，B 侧）
+    ├── radar_simulator/        雷达数据模拟器（Python，无外部依赖，验收链第一环）
     └── acceptance/             后端验收套件（A 侧，§9 验收脚本可跑部分）
 ```
 
@@ -46,8 +47,16 @@ tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18
 tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上
 ```
 
-7 个套件 / 156 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
+8 个套件 / 173 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
 退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
+
+验收链的第一环（**模拟器**）由 `tools/radar_simulator/` 提供，`08-simulator.sh` 用它造数并断言：
+造数 → 落库 → 立即可查 → 超限触发 → 等级升级 → 自动恢复 全链打通。
+
+```bash
+python3 tools/radar_simulator/radar_simulator.py --dry-run    # 只看报文
+python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-after 6
+```
 
 ## 协作约定
 
@@ -62,7 +71,8 @@ tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上
 - M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向、`X-Ingest-Key` / `?token=` 鉴权。
 - A 底座 A0–A4 + schema/种子已入库并验证；B1 telemetry ingest 骨架 + CSV 回放已并入。
 - **后端闭环已跑通**（A-3 已落地）：ingest 校验/去重 → 落库 → 规则触发（含等级升级）→ 警情生成 → 处置留痕 → 自动恢复，外加设备离线告警。
-  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **7 套件 / 156 条断言全绿**。
-- 阶段 1 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① **模拟器未落地**——`tools/radar_csv_replay/` 是回放器不是生成器，
-  要真实雷达 CSV（默认指向 B 的 Windows 桌面），本机无数据 → 验收链的第一环从未真跑过，套件都是 curl 合成报文；
-  ② M0 契约缺 B 的正式签字；③ D8 运维闭环只做了「离线」，「低电量告警」「数据中断」未生成告警。
+  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **8 套件 / 173 条断言全绿**。
+- **验收链第一环（模拟器）已落地**：`tools/radar_simulator/` 按契约连续造数，不依赖真雷达 CSV；
+  `radar_csv_replay/` 是回放器不是生成器（要真实数据），两者分工互补，都发同一条契约消息。
+- 阶段 1 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① M0 契约缺 B 的正式签字（提问已全答、原文已进仓，差形式确认）；
+  ② 低电量/数据中断告警未做——**用户定案暂不做**；③ 第 8 条 `docker compose up` + 数据持久属阶段 2，本机无 Docker。
