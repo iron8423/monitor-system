@@ -77,6 +77,8 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - **PostgreSQL 已验证**（B-4）：`postgres:16` 上 V1–V4 迁移全部成功，**173 条断言 173/173 全绿**，
   重启后端数据不丢。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`
   （`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`，默认 `localhost:5432/monitor`、`monitor/monitor`）。
-- 阶段 1 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① M0 契约缺 B 的正式签字——**已定案「等前端动工前收口」**，
-  届时需先抹平 `M0_接口冻结_致B_v1.md`（停在 09-09）与现状的矛盾；② 低电量/数据中断告警未做——**用户定案暂不做**；
-  ③ 第 8 条的 `docker compose up` 编排（B-3）未做——本机 Docker 已装，PG 侧已手工 `docker run` 验过。
+- **契约不再走「签字」**：项目用单仓库单一事实源，双方读同一份文档与代码，git 历史即记录。
+  现行事实源 = `docs/message-contract.md`（消息契约）+ `docs/B侧接口契约_M0.md`（接口/字段/枚举）；
+  `M0_接口冻结_致B_v1.md` 已就地作废（D1–D10 编号仍由它定义，数值以现行文档/代码为准）。
+- 阶段 1 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量/数据中断告警未做——**用户定案暂不做**；
+  ② 第 8 条的 `docker compose up` 编排（B-3）未做——本机 Docker 已装，PG 侧已手工 `docker run` 验过。

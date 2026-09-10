@@ -7,6 +7,25 @@
 
 ---
 
+> ## ⚠️ 本文已停止作为开发依据（2026-09-10 定）
+>
+> **现行事实源**：`docs/B侧接口契约_M0.md`（接口/字段/枚举）+ `docs/message-contract.md`（消息契约），二者均已同步到代码现状。
+>
+> **为什么留在这里不删**：**D1–D10 的编号定义只在本文件**，`message-contract.md`（「D2/D3/D7/D8」）与 `B侧接口契约_M0.md`（「见 §4-D6」）都在引用。整体移走会让这些引用悬空。所以就地作废：**编号仍以本文为准，表内数值一律以现行文档与代码为准**。
+>
+> **签字流程已取消**：本文原为「发给 B 签字的冻结口径」。项目已改为**单仓库（monorepo）单一事实源**——双方直接读同一份文档、同一份代码，git 历史本身就是「谁在何时同意了什么」。签字这个动作的全部价值是「在没有共享事实源时留一条双方同意的记录」，单仓之后它成了没有信息量的一层仪式，故取消。M0 的收口方式改为：**仓库文档与代码保持一致**，不再走签字。
+>
+> **本文与现状不符之处**（照本文实现会出错的地方，逐条列出）：
+>
+> | 位置 | 本文写的 | 实际（以现行文档/代码为准） |
+> |---|---|---|
+> | §2-D5 | 规则类型 `THRESHOLD/RATE/CHANGE` 均为合法取值 | **只收 `THRESHOLD`**；传 `RATE`/`CHANGE` → 400（`AlarmRuleService`）。速率类告警请对 `rate_mm_d` 建 `THRESHOLD` 规则 |
+> | §2-D6 | 默认规则 `defo_mm THRESHOLD gte 10 / 恢复 5` | **三条**：`gte +3.0/恢复+1.0`、`lte −3.0/恢复−1.0`（均 warning）、`gte +5.0/恢复+2.0`（alarm，V4 补）。原 `gte 10` 因真实数据范围仅约 −3.6~+3.3mm 而**永不触发** |
+> | §2-D2 | 「**不需要改表**」 | 已到 **V3**（`alarm` 加 `alarm_type`/`device_id`、放开 `point_id NOT NULL`）与 **V4**（升级档规则） |
+> | §1 归属行 | 数据/告警/实时/媒体 = B | B 已转前端，这些模块**由 A 就地补齐**并验收（1–8 套件） |
+>
+> 另有两处**本文未覆盖**、后续才定的口径：`collectTime` 必填且必须可解析、非法即整条 `REJECTED`（见 `B侧接口契约_M0.md §2`）；全仓时间输出统一带 `+08:00`（`JacksonTimeConfig`）。
+
 ## 1. 双方已经一致的基线（无需再议）
 
 | 项 | 口径 |
@@ -17,7 +36,7 @@
 | 单位 | 位移 mm、速率 mm/d |
 | DB id | **一律数值 BIGINT**（A 的 identity，自增 1000 起，种子占用 1~N）；**字符串是 code（业务键）不是 id** |
 | 档案归属 | project/scene/object/point/device 档案 CRUD = A；你只读 `pointId/pointCode/deviceId/deviceCode` |
-| 数据/告警/实时/媒体 | ingest、latest/series/summary、alarm、stream、media = B |
+| 数据/告警/实时/媒体 | ingest、latest/series/summary、alarm、stream、media = ~~B~~ → **A**（2026-09-10：B 转前端，这些模块由 A 就地补齐并通过 8 套件验收） |
 | 错误 | 你抛错用 A 的 `BizException`（同一 backend 工程可直接 import），不要自建 `BusinessException` |
 
 ## 2. M0 冻结口径（请 B 按此调整你的实现/文档）
@@ -25,11 +44,11 @@
 | # | 主题 | 冻结结论 | 你需要做什么 |
 |---|---|---|---|
 | D1 | 测项编码 | 默认每点 **2 项**：`defo_mm`（位移 mm）/ `rate_mm_d`（速率 mm/d）。**（B 已答复：真实雷达每点仅 defo_mm+rate_mm_d、无三分量 → 按 2 项重写，见 §6）** | 消息/规则里的 metricCode 用 `defo_mm`、`rate_mm_d` |
-| D2 | 消息→落库 | V1 `measurement` 是**按测项一行**存储。你 ingest 收到一条含 N 个测项的消息 → **拆 N 行写入**，共用同一 `message_id`（幂等键 `device_id+message_id`，重复消息整条去重、不重复写不重复报警）。**不需要改表** | 你的 ingest 按拆分规则落库；拆分规则我会同步进 `message-contract.md` |
+| D2 | 消息→落库 | V1 `measurement` 是**按测项一行**存储。你 ingest 收到一条含 N 个测项的消息 → **拆 N 行写入**，共用同一 `message_id`（幂等键 `device_id+message_id`，重复消息整条去重、不重复写不重复报警）。~~**不需要改表**~~ <br>⚠️ **2026-09-10 更正**：`measurement` 表本身确实没改，但 `alarm` 表改了（V3 加 `alarm_type`/`device_id` 并放开 `point_id NOT NULL`，V4 补升级档规则）——照「不需要改表」理解会漏掉这两个迁移 | 你的 ingest 按拆分规则落库；拆分规则我会同步进 `message-contract.md` |
 | D3 | 附加字段 | 消息里的 `position/signal/state` 等存入 `measurement.attributes`（JSON，≤1024），无需加列 | 读取 latest 时从 attributes 还原 |
 | D4 | 设备状态归属 | `GET /api/v1/devices/{id}/status` **归 A**（已实现，返回 `deviceId/numeric`、`code`、`status(ONLINE/OFFLINE/FAULT)`、`online`、`battery`、`lowBattery`、`lastReportTime`）。**从你的清单里删除该接口**；你要的 `health`(含 DATA_ABNORMAL) 若要保留，由你基于 A 的 status + 数据质量另出，不重复"在线判定" | 删接口；需要 health 再单独对 |
-| D5 | 枚举 | 告警级别 `notice/warning/alarm`（小写）；警情状态 `PENDING/CONFIRMED/PROCESSING/OBSERVING/RESOLVED/FALSE_ALARM`；处置动作 `confirm/research/dispatch/handle/resolve/misreport`；规则类型 `THRESHOLD/RATE/CHANGE`；质量 `RAW/VALID/SUSPECT/FAULT`。A 的 V1 注释与种子将统一成这套 | 你的枚举别再用 `INFO/WARN/CRITICAL` 等其它取值 |
-| D6 | alarm_rule 结构 | A 将扩展列以承载你的规则对象：`point_id`(可空=全局)、`metric_code`、`rule_type(THRESHOLD/RATE/CHANGE)`、`operator(gte/lte)`、`threshold_value`、`window_minutes`、`recovery_value`、`level(notice/warning/alarm)`、`repeat_suppress_seconds`、`enabled`。默认规则种子改为 `defo_mm THRESHOLD gte 10 / 恢复 5` | 你的规则 CRUD 按此字段集实现，等 A 的 schema |
+| D5 | 枚举 | 告警级别 `notice/warning/alarm`（小写）；警情状态 `PENDING/CONFIRMED/PROCESSING/OBSERVING/RESOLVED/FALSE_ALARM`；处置动作 `confirm/research/dispatch/handle/resolve/misreport`；~~规则类型 `THRESHOLD/RATE/CHANGE`~~；质量 `RAW/VALID/SUSPECT/FAULT`。A 的 V1 注释与种子将统一成这套 <br>⚠️ **2026-09-10 更正**：规则类型**只收 `THRESHOLD`**，传 `RATE`/`CHANGE` → 400。其余枚举不变 | 你的枚举别再用 `INFO/WARN/CRITICAL` 等其它取值 |
+| D6 | alarm_rule 结构 | A 将扩展列以承载你的规则对象：`point_id`(可空=全局)、`metric_code`、`rule_type(THRESHOLD/RATE/CHANGE)`、`operator(gte/lte)`、`threshold_value`、`window_minutes`、`recovery_value`、`level(notice/warning/alarm)`、`repeat_suppress_seconds`、`enabled`。~~默认规则种子改为 `defo_mm THRESHOLD gte 10 / 恢复 5`~~ <br>⚠️ **2026-09-10 更正**：字段集不变，但默认规则是**三条**——`gte +3.0/恢复+1.0`、`lte −3.0/恢复−1.0`（均 warning）、`gte +5.0/恢复+2.0`（alarm，V4 补）。原 `gte 10` 因真实数据范围仅约 −3.6~+3.3mm 而永不触发（详见 §6 末）| 你的规则 CRUD 按此字段集实现，等 A 的 schema |
 | D7 | ingest 鉴权 | Demo 无网关 → A 放行 `/api/v1/ingest/**` 并校验共享密钥：请求头 `X-Ingest-Key: <key>`，key 从环境变量 `MONITOR_INGEST_KEY` 读取（缺省用 `application.yml` 的 dev 值）。密钥不符 → 401 | 你的模拟器/上报端带 `X-Ingest-Key` 头 |
 | D8 | SSE 鉴权 | `EventSource` 带不了 Header → A 的 `JwtAuthFilter` 支持 query token：`GET /api/v1/stream?token=<JWT>`。仅该路径走 query，其余仍走 `Authorization` 头 | 你前端用 `EventSource('/api/v1/stream?token='+token)` |
 | D9 | 异常 | 统一用 A 的 `BizException`，不要自建 | —（见 §1 错误行） |
@@ -97,4 +116,7 @@
 
 **收尾状态**
 - 提问（契约口径 + Q1–Q6）均已答复；D1 口径已定；Q4/Q5 已闭合；设备码已对齐 `radar-001`。
-- M0 签字剩余：**① A-3 执行**——改 V2 测项种子为每点 2 项（`defo_mm/rate_mm_d`）、默认规则 ±3mm 双向（message-contract §2 已由 B 契约原文覆盖，无需 A 改）。契约原文已进仓、口径已齐，**执行时点由 A 安排**（用户决策：本轮只提交文档，metric 重构后置）。② 共同分支/remote 线上协作路径待与 B 定。无待答问题。
+- ~~M0 签字剩余：① A-3 执行 ② 共同分支/remote 线上协作路径待与 B 定。无待答问题。~~
+  - **① A-3 已完成**（2026-09-10）：V2 测项种子为每点 2 项（`defo_mm`/`rate_mm_d`），默认规则 ±3.0 双向。
+  - **② remote 已定并已在使用**：B 的 GitHub `iron8423/monitor-system` 为单一事实源，A 持续推送。
+  - **签字流程本身已取消**（2026-09-10 定，理由见文首横幅）：单仓之后双方读同一份文档、同一份代码，git 历史即「谁在何时同意了什么」，签字成了没有信息量的一层仪式。M0 的收口方式改为**仓库文档与代码保持一致**。
