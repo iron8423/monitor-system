@@ -33,43 +33,23 @@ INSERT INTO monitor_point (id, object_id, code, name, type, longitude, latitude,
 (6, 2, 'P-BP03', '边坡测点3', 'POINT_DEFORMATION', 113.0506000, 23.7213000, 62.000, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
 (7, 2, 'P-BP04', '边坡测点4', 'POINT_DEFORMATION', 113.0521000, 23.7218000, 66.000, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
--- 测项：每点 5 项（累计形变 X/Y/Z、合位移、速率）
+-- 测项：每点 2 项（D1 定案 2026-09-09，对齐 docs/message-contract.md）
+--   真实毫米波点形变雷达每点仅输出：defo_mm(累计形变) + rate_mm_d(速率，由历史推导)，无 X/Y/Z 三分量
 INSERT INTO metric (id, point_id, code, name, unit, sort_order, created_at, updated_at) VALUES
-(1,  1, 'X',    '累计形变X', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(2,  1, 'Y',    '累计形变Y', 'mm',   2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(3,  1, 'Z',    '累计形变Z', 'mm',   3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(4,  1, 'DISP', '合位移',    'mm',   4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(5,  1, 'VEL',  '速率',      'mm/d', 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(6,  2, 'X',    '累计形变X', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(7,  2, 'Y',    '累计形变Y', 'mm',   2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(8,  2, 'Z',    '累计形变Z', 'mm',   3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(9,  2, 'DISP', '合位移',    'mm',   4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(10, 2, 'VEL',  '速率',      'mm/d', 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(11, 3, 'X',    '累计形变X', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(12, 3, 'Y',    '累计形变Y', 'mm',   2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(13, 3, 'Z',    '累计形变Z', 'mm',   3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(14, 3, 'DISP', '合位移',    'mm',   4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(15, 3, 'VEL',  '速率',      'mm/d', 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(16, 4, 'X',    '累计形变X', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(17, 4, 'Y',    '累计形变Y', 'mm',   2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(18, 4, 'Z',    '累计形变Z', 'mm',   3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(19, 4, 'DISP', '合位移',    'mm',   4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(20, 4, 'VEL',  '速率',      'mm/d', 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(21, 5, 'X',    '累计形变X', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(22, 5, 'Y',    '累计形变Y', 'mm',   2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(23, 5, 'Z',    '累计形变Z', 'mm',   3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(24, 5, 'DISP', '合位移',    'mm',   4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(25, 5, 'VEL',  '速率',      'mm/d', 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(26, 6, 'X',    '累计形变X', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(27, 6, 'Y',    '累计形变Y', 'mm',   2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(28, 6, 'Z',    '累计形变Z', 'mm',   3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(29, 6, 'DISP', '合位移',    'mm',   4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(30, 6, 'VEL',  '速率',      'mm/d', 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(31, 7, 'X',    '累计形变X', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(32, 7, 'Y',    '累计形变Y', 'mm',   2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(33, 7, 'Z',    '累计形变Z', 'mm',   3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(34, 7, 'DISP', '合位移',    'mm',   4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(35, 7, 'VEL',  '速率',      'mm/d', 5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+(1,  1, 'defo_mm',   '累计形变', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(2,  1, 'rate_mm_d', '形变速率', 'mm/d', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(3,  2, 'defo_mm',   '累计形变', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(4,  2, 'rate_mm_d', '形变速率', 'mm/d', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(5,  3, 'defo_mm',   '累计形变', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(6,  3, 'rate_mm_d', '形变速率', 'mm/d', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(7,  4, 'defo_mm',   '累计形变', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(8,  4, 'rate_mm_d', '形变速率', 'mm/d', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(9,  5, 'defo_mm',   '累计形变', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(10, 5, 'rate_mm_d', '形变速率', 'mm/d', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(11, 6, 'defo_mm',   '累计形变', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(12, 6, 'rate_mm_d', '形变速率', 'mm/d', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(13, 7, 'defo_mm',   '累计形变', 'mm',   1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(14, 7, 'rate_mm_d', '形变速率', 'mm/d', 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
 -- 设备：1 台毫米波雷达
 INSERT INTO device (id, code, name, type, serial_no, longitude, latitude, status, battery, last_report_time, created_at, updated_at)
@@ -80,7 +60,9 @@ VALUES (1, 'radar-001', '毫米波点形变雷达 1 号', 'MILLIMETER_WAVE_RADAR
 INSERT INTO device_point (id, device_id, point_id) VALUES
 (1, 1, 1), (2, 1, 2), (3, 1, 3), (4, 1, 4), (5, 1, 5), (6, 1, 6), (7, 1, 7);
 
--- 默认告警规则：合位移(累计) >= 10mm 触发 warning，回落到 5mm 恢复（全局规则 point_id=NULL）
--- 注：metric_code 暂用现有测项 DISP，D1 冻结后与 defo_mm/rate_mm_d 对齐
+-- 默认告警规则：双向 |abs| ±3mm（A-3 决策 2026-09-09，全局规则 point_id=NULL）
+-- 依据：真实 20260827 defo 范围约 -3.6 ~ +3.3mm，原 gte 10 几乎不触发；
+--       B 的 --inject-overlimit 以 ~4mm 为参考注入，故阈值取 ±3.0（含恢复 ±1.0）
 INSERT INTO alarm_rule (id, name, point_id, metric_code, rule_type, operator, threshold_value, window_minutes, recovery_value, alarm_level, repeat_suppress_seconds, enabled, created_at, updated_at)
-VALUES (1, '合位移累计阈值', NULL, 'DISP', 'THRESHOLD', 'gte', 10.000000, NULL, 5.000000, 'warning', 300, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+VALUES (1, '形变正向超限阈值', NULL, 'defo_mm', 'THRESHOLD', 'gte',  3.000000, NULL,  1.000000, 'warning', 300, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+       (2, '形变负向超限阈值', NULL, 'defo_mm', 'THRESHOLD', 'lte', -3.000000, NULL, -1.000000, 'warning', 300, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);

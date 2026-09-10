@@ -3,6 +3,7 @@ package com.monitor.common.exception;
 import com.monitor.common.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.BindException;
@@ -22,12 +23,15 @@ import jakarta.validation.ConstraintViolationException;
  */
 @Slf4j
 @RestControllerAdvice
+@SuppressWarnings("null")
 public class GlobalExceptionHandler {
 
+    /** 业务异常：HTTP 状态与 body.code 一致（如 404 测点不存在 → HTTP 404）。 */
     @ExceptionHandler(BizException.class)
-    public Result<Void> handleBiz(BizException e) {
+    public ResponseEntity<Result<Void>> handleBiz(BizException e) {
         log.warn("业务异常: {}", e.getMessage());
-        return Result.fail(e.getCode(), e.getMessage());
+        return ResponseEntity.status(httpStatusOf(e.getCode()))
+                .body(Result.fail(e.getCode(), e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -75,9 +79,16 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public Result<Void> handleOther(Exception e) {
+    public ResponseEntity<Result<Void>> handleOther(Exception e) {
         log.error("系统异常", e);
-        return Result.fail(500, "系统内部错误");
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Result.fail(500, "系统内部错误"));
+    }
+
+    /** body.code 走 HTTP 语义码；遇到非标准码按客户端错误处理。 */
+    private static HttpStatus httpStatusOf(int code) {
+        HttpStatus status = HttpStatus.resolve(code);
+        return status != null ? status : HttpStatus.BAD_REQUEST;
     }
 
     private String firstFieldError(FieldError fe) {
