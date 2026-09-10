@@ -9,7 +9,6 @@ import com.monitor.common.exception.BizException;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MonitorPointMapper;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -21,15 +20,17 @@ import java.util.stream.Collectors;
 
 /**
  * 告警规则 CRUD（《B侧接口契约_M0》§4）。对外用 type / value / level，库内为 rule_type / threshold_value / alarm_level。
+ *
+ * <p>{@code type} 目前只接受 {@code THRESHOLD}：速率类告警可用雷达已上报的 {@code rate_mm_d}
+ * 测项配 {@code THRESHOLD} 规则覆盖，无需引擎另算窗口速率（两个口径会打架）。
+ * {@code CHANGE}（窗口内变化量）无测项可替代，待有明确需求并定下语义后再实现。</p>
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 @SuppressWarnings("null")
 public class AlarmRuleService {
 
     private static final Set<String> OPERATORS = Set.of("gte", "lte");
-    private static final Set<String> RULE_TYPES = Set.of("THRESHOLD", "RATE", "CHANGE");
     private static final Set<String> LEVELS = Set.of("notice", "warning", "alarm");
 
     private final AlarmRuleMapper ruleMapper;
@@ -58,7 +59,6 @@ public class AlarmRuleService {
         AlarmRule rule = new AlarmRule();
         apply(rule, req);
         ruleMapper.insert(rule);
-        warnIfNotEvaluated(rule);
         return withCode(rule);
     }
 
@@ -67,7 +67,6 @@ public class AlarmRuleService {
         validate(req);
         apply(rule, req);
         ruleMapper.updateById(rule);
-        warnIfNotEvaluated(rule);
         return withCode(rule);
     }
 
@@ -91,8 +90,12 @@ public class AlarmRuleService {
         if (req.getOperator() != null && !OPERATORS.contains(req.getOperator().toLowerCase())) {
             throw new BizException("operator 仅支持 gte / lte: " + req.getOperator());
         }
-        if (req.getType() != null && !RULE_TYPES.contains(req.getType().toUpperCase())) {
-            throw new BizException("type 仅支持 THRESHOLD / RATE / CHANGE: " + req.getType());
+        // 只收 THRESHOLD：RATE/CHANGE 需要窗口聚合，引擎不评估。
+        // 若放行，规则会以 THRESHOLD 语义被评估（拿原始值比阈值），
+        // 用户以为建的是「速率」规则却按原始值告警——静默的错误行为，比拒绝建更危险
+        if (req.getType() != null && !"THRESHOLD".equalsIgnoreCase(req.getType())) {
+            throw new BizException("暂只支持 THRESHOLD 规则；速率类告警请对 rate_mm_d 建 THRESHOLD 规则"
+                    + "（雷达已直接上报该测项）。收到 type: " + req.getType());
         }
         if (req.getLevel() != null && !LEVELS.contains(req.getLevel().toLowerCase())) {
             throw new BizException("level 仅支持 notice / warning / alarm: " + req.getLevel());
@@ -111,18 +114,6 @@ public class AlarmRuleService {
         rule.setAlarmLevel(req.getLevel() == null ? "warning" : req.getLevel().toLowerCase());
         rule.setRepeatSuppressSeconds(req.getRepeatSuppressSeconds());
         rule.setEnabled(req.getEnabled() == null ? Boolean.TRUE : req.getEnabled());
-    }
-
-    /**
-     * {@code RATE}/{@code CHANGE} 目前引擎不评估（需 {@code windowMinutes} 窗口聚合），
-     * 建了也不会触发——这里留一条服务端日志，避免「能建、能存、不生效」完全无声。
-     * 注：速率其实已有 {@code rate_mm_d} 测项，用 {@code THRESHOLD} 规则即可覆盖。
-     */
-    private void warnIfNotEvaluated(AlarmRule rule) {
-        if (rule.getRuleType() != null && !"THRESHOLD".equalsIgnoreCase(rule.getRuleType())) {
-            log.warn("规则类型 {} 当前不参与评估，不会触发: ruleId={} name={}",
-                    rule.getRuleType(), rule.getId(), rule.getName());
-        }
     }
 
     private AlarmRule require(Long id) {

@@ -91,8 +91,9 @@
 ## 4. 告警（枚举按 D5，规则字段按 D6）
 
 ### GET /api/v1/alarms（筛选：level/status/pointId/from/to/page/size）
+> 分页字段用 A 的公共信封 `common.PageResult`（`total/pageNum/pageSize/records`）——A 的全部 CRUD 列表端点都是这个形状，前端只需认一种。
 ```json
-{ "total": 2, "items": [
+{ "total": 2, "pageNum": 1, "pageSize": 20, "records": [
   { "id": 1, "pointId": 1000, "pointCode": "P-HK01", "level": "alarm", "status": "PENDING",
     "triggeredAt": "2026-08-27T09:30:00+08:00", "lastAction": "触发", "lastActionAt": "2026-08-27T09:30:00+08:00" } ] }
 ```
@@ -119,6 +120,7 @@
   "level": "warning", "recoveryValue": 1.0, "repeatSuppressSeconds": 300, "enabled": true }
 ```
 > A 字段：`point_id`、`metric_code`、`rule_type`、`operator`、`threshold_value`、`window_minutes`、`recovery_value`、`level`、`repeat_suppress_seconds`、`enabled`。
+> **`type` 目前只接受 `THRESHOLD`**（传 `RATE`/`CHANGE` → 400）。速率类告警请对雷达已上报的 `rate_mm_d` 测项建 `THRESHOLD` 规则；`CHANGE`（窗口内变化量）引擎不评估，待定语义后再实现。`windowMinutes` 字段保留（D6 字段集）但当前不参与判定。
 > **默认规则（A 已冻结，双向）**：`defo_mm` 规则① `THRESHOLD gte +3.0 / 恢复 +1.0`；规则② `THRESHOLD lte -3.0 / 恢复 -1.0`；均 `level=warning`。Demo 用 `--inject-overlimit` 把 defo 凑到 ~4mm（或 ~-4mm）即触发。
 
 ## 5. 设备状态——归 A（B 不再提供）
@@ -141,13 +143,15 @@ data: {"id":1,"pointCode":"P-HK01","level":"alarm","status":"PENDING","triggered
 ## 7. 媒体
 
 ### POST /api/v1/media（multipart：`file`、`pointId`、`takenAt`、`note`）
+> `mediaId` 是**不透明字符串编码**：`M` + 主键（左补零至 3 位）。主键起点 1000（与其余表一致），故首个编码为 `M1000`。前端不要解析数字部分。
 ```json
-{ "mediaId": "M001", "objectKey": "media/P-HK01/xxx.jpg", "url": "/api/v1/media/M001/content", "pointId": 1000, "takenAt": "2026-08-27T10:00:00+08:00" }
+{ "mediaId": "M1000", "objectKey": "media/P-HK01/xxx.jpg", "url": "/api/v1/media/M1000/content", "pointId": 1000, "takenAt": "2026-08-27T10:00:00+08:00" }
 ```
 
 ### GET /api/v1/points/{pointId}/media
+> 非分页列表，直接返回数组（与 A 的 `GET /projects` 等一致）。
 ```json
-{ "items": [ { "mediaId": "M001", "url": "/api/v1/media/M001/content", "takenAt": "2026-08-27T10:00:00+08:00", "note": "" } ] }
+[ { "mediaId": "M1000", "url": "/api/v1/media/M1000/content", "takenAt": "2026-08-27T10:00:00+08:00", "note": "" } ]
 ```
 
 ## 8. 枚举（D5，冻结）
@@ -159,7 +163,7 @@ data: {"id":1,"pointCode":"P-HK01","level":"alarm","status":"PENDING","triggered
 | 警情状态 | `PENDING` / `CONFIRMED` / `PROCESSING` / `OBSERVING` / `RESOLVED` / `FALSE_ALARM` |
 | 处置动作 | `confirm` / `research` / `dispatch` / `handle` / `resolve` / `misreport` |
 | 设备健康 | `NORMAL` / `LOW_BATTERY` / `OFFLINE` / `DATA_ABNORMAL` |
-| 规则类型 | `THRESHOLD` / `RATE` / `CHANGE` |
+| 规则类型 | `THRESHOLD` / `RATE` / `CHANGE`（当前只实现 `THRESHOLD`，见 §4） |
 
 ## 9. 给 A 的依赖（已冻结）
 

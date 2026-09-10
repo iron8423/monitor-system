@@ -19,6 +19,8 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 告警引擎：测量值落库后按规则评估，产生 / 自动解除警情（M2 闭环起点）。
@@ -31,7 +33,10 @@ import java.util.List;
  *
  * <p>评估异常一律吞掉并记日志——接入是主流程，不能因告警判定失败而回滚落库。</p>
  *
- * <p>未实现：{@code RATE}/{@code CHANGE} 规则类型（需 {@code windowMinutes} 窗口聚合），当前只评估 {@code THRESHOLD}。</p>
+ * <p>只评估 {@code THRESHOLD}。{@code RATE}/{@code CHANGE} 需 {@code windowMinutes} 窗口聚合，
+ * 接口层已拒绝创建（见 {@code AlarmRuleService#validate}）；引擎这里再过滤一次，
+ * 防直接写库的遗留行被当成 {@code THRESHOLD} 评估——那会让一条声明为「速率」的规则
+ * 拿原始值去比阈值，错误是静默的。</p>
  */
 @Slf4j
 @Service
@@ -44,6 +49,9 @@ public class AlarmEngine {
     private final AlarmActionMapper actionMapper;
     private final MonitorPointMapper pointMapper;
     private final SseBroadcaster broadcaster;
+
+    /** 已就「类型不参与评估」告过警的规则，避免每条测值刷屏。 */
+    private final Set<Long> warnedTypes = ConcurrentHashMap.newKeySet();
 
     /** 对一条刚落库的测值做规则评估。 */
     public void evaluate(Long pointId, String metricCode, Double value, String quality) {
@@ -72,6 +80,15 @@ public class AlarmEngine {
 
         BigDecimal v = BigDecimal.valueOf(value);
         for (AlarmRule rule : rules) {
+            if (!isEvaluable(rule)) {
+                // 直接写库/历史遗留的非 THRESHOLD 规则会被忽略。不记这一条的话，
+                // 「规则建了却不按它声明的类型生效」没有任何痕迹——接口层已拦，这里是兜底
+                if (rule.getId() != null && warnedTypes.add(rule.getId())) {
+                    log.warn("规则类型 {} 不参与评估，将被忽略: ruleId={} name={}",
+                            rule.getRuleType(), rule.getId(), rule.getName());
+                }
+                continue;
+            }
             Alarm open = findOpen(pointId, rule.getId());
             if (open != null) {
                 if (shouldRecover(rule, v)) {
@@ -83,6 +100,14 @@ public class AlarmEngine {
                 trigger(pointId, rule, metricCode, v);
             }
         }
+    }
+
+    /**
+     * 只有 {@code THRESHOLD} 参与评估。{@code ruleType} 为空的旧数据按 {@code THRESHOLD} 处理
+     * （接口层已不接受其他类型，见 {@code AlarmRuleService#validate}）。
+     */
+    private static boolean isEvaluable(AlarmRule rule) {
+        return rule.getRuleType() == null || "THRESHOLD".equalsIgnoreCase(rule.getRuleType());
     }
 
     private boolean shouldTrigger(AlarmRule r, BigDecimal v) {
