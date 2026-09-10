@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.monitor.alarm.AlarmConstants;
 import com.monitor.alarm.dto.AlarmActionRequest;
 import com.monitor.alarm.dto.AlarmDetailVO;
+import com.monitor.alarm.dto.AlarmEvent;
 import com.monitor.alarm.dto.AlarmVO;
 import com.monitor.alarm.entity.Alarm;
 import com.monitor.alarm.entity.AlarmAction;
@@ -14,6 +15,7 @@ import com.monitor.alarm.mapper.AlarmMapper;
 import com.monitor.alarm.mapper.AlarmRuleMapper;
 import com.monitor.common.PageResult;
 import com.monitor.common.exception.BizException;
+import com.monitor.common.sse.SseBroadcaster;
 import com.monitor.common.util.Times;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MonitorPointMapper;
@@ -43,6 +45,7 @@ public class AlarmService {
     private final AlarmActionMapper actionMapper;
     private final AlarmRuleMapper ruleMapper;
     private final MonitorPointMapper pointMapper;
+    private final SseBroadcaster broadcaster;
 
     /** 警情列表，支持 level / status / pointId / from / to 筛选。 */
     public PageResult<AlarmVO> list(String level, String status, Long pointId,
@@ -134,6 +137,9 @@ public class AlarmService {
         act.setNote(req.getComment());
         actionMapper.insert(act);
 
+        // 处置后广播新状态：驾驶舱的警情列表/角标要跟着变（事务中，实际推在提交后）
+        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM,
+                AlarmEvent.of(a, pointCodes(Set.of(a.getPointId())).get(a.getPointId())));
         return detail(id);
     }
 

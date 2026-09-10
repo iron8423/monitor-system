@@ -9,6 +9,7 @@ import com.monitor.common.exception.BizException;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MonitorPointMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -21,6 +22,7 @@ import java.util.stream.Collectors;
 /**
  * 告警规则 CRUD（《B侧接口契约_M0》§4）。对外用 type / value / level，库内为 rule_type / threshold_value / alarm_level。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @SuppressWarnings("null")
@@ -56,6 +58,7 @@ public class AlarmRuleService {
         AlarmRule rule = new AlarmRule();
         apply(rule, req);
         ruleMapper.insert(rule);
+        warnIfNotEvaluated(rule);
         return withCode(rule);
     }
 
@@ -64,6 +67,7 @@ public class AlarmRuleService {
         validate(req);
         apply(rule, req);
         ruleMapper.updateById(rule);
+        warnIfNotEvaluated(rule);
         return withCode(rule);
     }
 
@@ -107,6 +111,18 @@ public class AlarmRuleService {
         rule.setAlarmLevel(req.getLevel() == null ? "warning" : req.getLevel().toLowerCase());
         rule.setRepeatSuppressSeconds(req.getRepeatSuppressSeconds());
         rule.setEnabled(req.getEnabled() == null ? Boolean.TRUE : req.getEnabled());
+    }
+
+    /**
+     * {@code RATE}/{@code CHANGE} 目前引擎不评估（需 {@code windowMinutes} 窗口聚合），
+     * 建了也不会触发——这里留一条服务端日志，避免「能建、能存、不生效」完全无声。
+     * 注：速率其实已有 {@code rate_mm_d} 测项，用 {@code THRESHOLD} 规则即可覆盖。
+     */
+    private void warnIfNotEvaluated(AlarmRule rule) {
+        if (rule.getRuleType() != null && !"THRESHOLD".equalsIgnoreCase(rule.getRuleType())) {
+            log.warn("规则类型 {} 当前不参与评估，不会触发: ruleId={} name={}",
+                    rule.getRuleType(), rule.getId(), rule.getName());
+        }
     }
 
     private AlarmRule require(Long id) {

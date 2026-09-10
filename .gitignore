@@ -26,6 +26,10 @@ __pycache__/
 .venv/
 venv/
 
+# 运行时上传的影像（monitor.upload.dir 默认 ./data/media，相对 backend 工作目录）
+data/
+backend/data/
+
 # Logs
 *.log
 

@@ -2,12 +2,16 @@ package com.monitor.alarm.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.monitor.alarm.AlarmConstants;
+import com.monitor.alarm.dto.AlarmEvent;
 import com.monitor.alarm.entity.Alarm;
 import com.monitor.alarm.entity.AlarmAction;
 import com.monitor.alarm.entity.AlarmRule;
 import com.monitor.alarm.mapper.AlarmActionMapper;
 import com.monitor.alarm.mapper.AlarmMapper;
 import com.monitor.alarm.mapper.AlarmRuleMapper;
+import com.monitor.common.sse.SseBroadcaster;
+import com.monitor.project.entity.MonitorPoint;
+import com.monitor.project.mapper.MonitorPointMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -38,6 +42,8 @@ public class AlarmEngine {
     private final AlarmRuleMapper ruleMapper;
     private final AlarmMapper alarmMapper;
     private final AlarmActionMapper actionMapper;
+    private final MonitorPointMapper pointMapper;
+    private final SseBroadcaster broadcaster;
 
     /** 对一条刚落库的测值做规则评估。 */
     public void evaluate(Long pointId, String metricCode, Double value, String quality) {
@@ -132,6 +138,7 @@ public class AlarmEngine {
         String note = String.format("%s = %s 触发规则「%s」（%s %s）", metricCode, plain(v),
                 rule.getName(), rule.getOperator(), plain(rule.getThresholdValue()));
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_TRIGGER, AlarmConstants.SYSTEM, note));
+        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, pointCode(pointId)));
         log.info("告警触发 alarmId={} pointId={} rule={} value={}", a.getId(), pointId, rule.getName(), v);
     }
 
@@ -141,7 +148,14 @@ public class AlarmEngine {
         alarmMapper.updateById(a);
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_RECOVER, AlarmConstants.SYSTEM,
                 String.format("%s = %s 已回落至恢复阈值内，系统自动解除", metricCode, plain(v))));
+        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, pointCode(a.getPointId())));
         log.info("告警自动解除 alarmId={} value={}", a.getId(), v);
+    }
+
+    /** 事件载荷要带业务点号（D10：id 数值 / code 字符串）。 */
+    private String pointCode(Long pointId) {
+        MonitorPoint p = pointId == null ? null : pointMapper.selectById(pointId);
+        return p == null ? null : p.getCode();
     }
 
     private AlarmAction action(Long alarmId, String type, String operator, String note) {
