@@ -59,6 +59,10 @@ tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上
 
 ## 当前进度
 
-- M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向（A-3 待落地）、`X-Ingest-Key` / `?token=` 鉴权。
+- M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向、`X-Ingest-Key` / `?token=` 鉴权。
 - A 底座 A0–A4 + schema/种子已入库并验证；B1 telemetry ingest 骨架 + CSV 回放已并入。
-- 下一步：A-3（V2 测项种子对齐每点 2 项 + 默认规则 ±3mm）→ M1 联调「模拟器/CSV → 落库 → latest/series」。
+- **后端闭环已跑通**（A-3 已落地）：ingest 校验/去重 → 落库 → 规则触发（含等级升级）→ 警情生成 → 处置留痕 → 自动恢复，外加设备离线告警。
+  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **7 套件 / 156 条断言全绿**。
+- 阶段 1 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① **模拟器未落地**——`tools/radar_csv_replay/` 是回放器不是生成器，
+  要真实雷达 CSV（默认指向 B 的 Windows 桌面），本机无数据 → 验收链的第一环从未真跑过，套件都是 curl 合成报文；
+  ② M0 契约缺 B 的正式签字；③ D8 运维闭环只做了「离线」，「低电量告警」「数据中断」未生成告警。
