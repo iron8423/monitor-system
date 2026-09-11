@@ -10,9 +10,8 @@
 #
 # 想改端口/密码/密钥：复制 .env.example 为 .env 再改（.env 不入库）。
 #
-# 关于「不含前端服务」：验收第 8 条最终要的是「浏览器完整可访问」，
-# 但那要求前端构建产物存在——`frontend/` 目前是空的（阶段 2 才动工）。
-# 这里不做半成品的 nginx 占位，等前端有了再按文件末尾的注释块补上。
+# 前端也已进编排：访问 http://localhost 就是完整应用（工作台 + 3D 大屏），
+# 不再是只能开后端自己的 swagger-ui。验收第 8 条「浏览器完整可访问」的落点。
 
 name: monitor-system
 
@@ -75,29 +74,30 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # 前端（Vue3 + Cesium）—— 阶段 2 前端动工后再放开本块
-  #
-  # 需要三样东西同时到位：
-  #   1) frontend/ 下有可构建的工程（现在只有 README + .gitkeep）
-  #   2) frontend/Dockerfile：node 阶段 `npm ci && npm run build` → nginx 阶段托管 dist/
-  #   3) nginx 配置把 /api 反代到 backend:8080（否则前端拿不到接口，还要处理跨域）
-  #
-  # 放开后它应该长这样（示意，未验证）：
-  #
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #   depends_on:
-  #     backend:
-  #       condition: service_healthy
-  #   ports:
-  #     - "${FRONTEND_PORT:-80}:80"
-  #   restart: unless-stopped
-  #
-  # 到那时「浏览器完整可访问」才真正成立：访问 80 端口就是完整应用，
-  # 而不是像现在这样只能访问后端自己的 swagger-ui。
-  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Cesium ion token 是**构建期**内联进产物的，不是运行时读的——
+        # 改它必须 `docker compose build frontend` 重建镜像，只 restart 不会生效。
+        # 留空则大屏走「无地形兜底底图」的降级路径（不白屏，功能正常，只是没地形）。
+        VITE_CESIUM_ION_TOKEN: ${VITE_CESIUM_ION_TOKEN:-}
+        VITE_TERRAIN_MODE: ${VITE_TERRAIN_MODE:-ion}
+    depends_on:
+      backend:
+        # 等后端能应答 health 再起：nginx 自己不怕后端晚起，但这样
+        # 「up 完就能用」成立，不必先刷出几个 502 再等
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    healthcheck:
+      # nginx:alpine 是 busybox，有 wget 没 curl
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
 
 volumes:
   pgdata:

@@ -1,0 +1,16 @@
+# 构建上下文只需要源码。下面这些要么是宿主机产物，要么会在容器里重新生成。
+node_modules/
+dist/
+
+# Cesium 运行时资源由 npm ci 的 postinstall（scripts/copy-cesium.mjs）在容器内
+# 从 node_modules/cesium 复制生成，宿主机这份（约 8MB）传进去纯属浪费。
+# 注意：正因为不传，Dockerfile 里 copy-cesium 必须在 `COPY . .` 之前跑完。
+public/cesium/
+
+# 真实配置不入镜像：Cesium token 走 build arg 传，其它 VITE_* 有代码兜底。
+# 留着 .env.local 会让「镜像里到底是哪个 token」取决于构建机上恰好有什么文件。
+.env
+.env.local
+.env.*.local
+
+npm-debug.log*
