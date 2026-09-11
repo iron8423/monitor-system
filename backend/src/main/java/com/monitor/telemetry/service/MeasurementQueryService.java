@@ -51,11 +51,9 @@ public class MeasurementQueryService {
     /**
      * 测点最新值：取该点 collect_time 最大的一行，再拉同 message_id 的兄弟行凑齐各测项。
      *
-     * <p>{@code collect_time} 相同时必须再有确定的次序：同一测点在**同一次采集时刻**出现两行
-     * （设备重传换了 messageId、或两台设备覆盖同一点）时，只按 collect_time 排序的话取到哪一行
-     * 由数据库返回顺序决定，「最新值」不可复现，兄弟测项也会跟着那一行的 messageId 走。
-     * 用 {@code id} 兜底：主键单调递增，等价于「后写库的那条覆盖先写的」，
-     * 且不像 {@code receive_time} 那样有 NULL 排序的方言差异（PG 的 DESC 把 NULL 排在最前、H2 排在最后）。</p>
+     * <p>「最新一行」的判据由 {@link MeasurementMapper#latestRowOf} 单点定义
+     * （{@code collect_time DESC, id DESC}）——{@link ProjectSummaryService} 取最新形变时走同一个方法。
+     * 此前两处各写各的排序，一处带 id 兜底一处不带，同刻两行时同一测点会给出两个值。</p>
      */
     public PointLatestVO latest(Long pointId) {
         MonitorPoint p = requirePoint(pointId);
@@ -63,12 +61,7 @@ public class MeasurementQueryService {
         vo.setPointId(p.getId());
         vo.setPointCode(p.getCode());
 
-        Measurement last = mapper.selectOne(new LambdaQueryWrapper<Measurement>()
-                .eq(Measurement::getPointId, pointId)
-                .isNotNull(Measurement::getCollectTime)
-                .orderByDesc(Measurement::getCollectTime)
-                .orderByDesc(Measurement::getId)
-                .last("LIMIT 1"));
+        Measurement last = mapper.selectOne(mapper.latestRowOf(pointId, null).last("LIMIT 1"));
         if (last == null) {
             return vo;   // 测点存在但暂无数据 -> latest / state 为 null
         }

@@ -72,6 +72,41 @@ check "不存在测点 latest -> 404" "404" "$(http_code "$BASE/points/99999/lat
 check "不存在测点 series -> 404" "404" "$(http_code "$BASE/points/99999/series" -H "$AUTH")"
 check "无 JWT -> 401" "401" "$(http_code "$BASE/points/$PID/latest")"
 
+section "⑨ 同刻多行：latest 与 summary 必须取到同一行"
+# 同一点、同一 collect_time、两次不同 messageId 的上报会落两行——幂等键是 device+message，
+# 不含 collect_time，所以这不是「重复上报」。此时「最新一行」必须只有一个判据，
+# 否则 /points/{id}/latest 与 /projects/{id}/summary 会各自取到不同行，同一测点两个值。
+#
+# 夹具自带 project→scene→object→point 四级，是为了让断言**自足**：该临时项目下只有这一个测点，
+# summary 的最大形变必然等于它，不依赖库里其它测点当时恰好是什么值。
+# （不必担心污染正式项目：删测点是逻辑删除 deleted=1，全局逻辑删除配置会让它和它的
+#   measurement 行对所有查询不可见——所以挂在正式项目下也不会顶掉别人的最大形变。
+#   这里隔离纯粹是为了断言不依赖外部状态。）
+T_PRJ=$(curl -s -X POST "$BASE/projects" -H "$AUTH" -H "$JSON" \
+        -d "{\"organizationId\":1,\"name\":\"口径一致性验收\",\"code\":\"PRJ-DUP-$RUN_ID\"}" | data_of "['id']")
+T_SCN=$(curl -s -X POST "$BASE/scenes" -H "$AUTH" -H "$JSON" \
+        -d "{\"projectId\":$T_PRJ,\"name\":\"临时场景\",\"type\":\"SLOPE\"}" | data_of "['id']")
+T_OBJ=$(curl -s -X POST "$BASE/objects" -H "$AUTH" -H "$JSON" \
+        -d "{\"sceneId\":$T_SCN,\"name\":\"临时对象\",\"type\":\"SLOPE_BODY\"}" | data_of "['id']")
+D_PID=$(curl -s -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
+        -d "{\"objectId\":$T_OBJ,\"code\":\"P-DUP-$RUN_ID\",\"name\":\"同刻多行临时测点\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
+        | data_of "['id']")
+D_CT="2026-09-11T09:00:00+08:00"
+ingest2 "dup-$RUN_ID-a" "P-DUP-$RUN_ID" "$D_CT" 111.1 0.1 >/dev/null
+ingest2 "dup-$RUN_ID-b" "P-DUP-$RUN_ID" "$D_CT" 222.2 0.2 >/dev/null
+info "同刻两行已上报：先 111.1、后 222.2（pointId=$D_PID）"
+
+L_DEFO=$(curl -s "$BASE/points/$D_PID/latest" -H "$AUTH" | data_of "['latest']['defo_mm']")
+S_DEFO=$(curl -s "$BASE/projects/$T_PRJ/summary" -H "$AUTH" | data_of "['maxDeformationMm']")
+check "latest 取后写库的那条" "222.2" "$L_DEFO"
+check "summary 与 latest 取到同一行" "$L_DEFO" "$S_DEFO"
+
+for r in "points/$D_PID" "objects/$T_OBJ" "scenes/$T_SCN" "projects/$T_PRJ"; do
+  C=$(http_code -X DELETE "$BASE/$r" -H "$AUTH")
+  [ "$C" = "200" ] || info "临时 $r 未回收（HTTP $C），可忽略"
+done
+info "已回收临时项目链"
+
 DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
 [ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
 

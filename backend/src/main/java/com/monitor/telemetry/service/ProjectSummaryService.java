@@ -115,16 +115,17 @@ public class ProjectSummaryService {
     /**
      * 各测点取最新一行 defo_mm，再取绝对值最大者（负向形变同样算「最大形变」）。
      * 逐点带 LIMIT 1，扫描量与数据总量无关，只与测点数成正比。
+     *
+     * <p>「最新一行」的判据走 {@link MeasurementMapper#latestRowOf}，与
+     * {@link MeasurementQueryService#latest} 是同一个方法——两处若各写一份排序，
+     * 同刻多行时 {@code /points/{id}/latest} 与本端点的最大形变会取到不同行。
+     * 本方法此前正是漏了 id 兜底的那一处。</p>
      */
     private Double maxDeformation(List<Long> pointIds) {
         Double max = null;
         for (Long pointId : pointIds) {
-            Measurement last = measurementMapper.selectOne(new LambdaQueryWrapper<Measurement>()
-                    .eq(Measurement::getPointId, pointId)
-                    .eq(Measurement::getMetricCode, DEFO_METRIC)
-                    .isNotNull(Measurement::getCollectTime)
-                    .orderByDesc(Measurement::getCollectTime)
-                    .last("LIMIT 1"));
+            Measurement last = measurementMapper.selectOne(
+                    measurementMapper.latestRowOf(pointId, DEFO_METRIC).last("LIMIT 1"));
             if (last == null || last.getMeasureValue() == null) {
                 continue;
             }
