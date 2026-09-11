@@ -72,7 +72,10 @@ const kpis = computed(() => [
     danger: true,
     tip: '状态为 PENDING 的警情。值班员可执行：确认 / 派单 / 处置 / 解除 / 误报',
   },
-  { key: 'alerts', label: '未解除警情', value: summary.value?.alertCount, unit: '', danger: true },
+  // 「测点告警」与「设备告警」合并计数：设备告警只挂 deviceId、不挂测点，
+  // 只看队列容易以为漏了（后端 ProjectSummaryService.activeAlarmCount 两条都算）
+  { key: 'alerts', label: '未解除警情', value: summary.value?.alertCount, unit: '', danger: true,
+    tip: '本项目下所有非终态警情，含设备告警（设备离线这类只挂设备、不挂测点）' },
   { key: 'devices', label: '在线设备', value: summary.value?.onlineDeviceCount, unit: '', ok: true },
   { key: 'hour', label: '近 1 小时新增', value: lastHourTotal.value, unit: '' },
 ])

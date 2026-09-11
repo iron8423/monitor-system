@@ -116,7 +116,10 @@ const kpis = computed(() => [
     unit: '',
     tip: '历史累计，不是待办——仅用于看误报量',
   },
-  { key: 'alerts', label: '未解除警情', value: summary.value?.alertCount, unit: '', danger: true },
+  // 含设备告警：设备离线这类只挂 deviceId、不挂测点，本页左侧队列里看不到它们，
+  // 所以这个数会比队列条数大（后端 ProjectSummaryService.activeAlarmCount 两条都算）
+  { key: 'alerts', label: '未解除警情', value: summary.value?.alertCount, unit: '', danger: true,
+    tip: '本项目下所有非终态警情，含设备告警。设备告警不挂测点，故不在左侧队列里' },
 ])
 
 const chartPoints = computed(() => series.value?.points || [])

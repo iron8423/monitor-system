@@ -4,6 +4,10 @@
 #   为什么单独一套件：设备告警走的是定时扫描（DeviceAlarmMonitor），与 05 的 SSE 链路不是一条；
 #   而且它需要一个「很久没上报」的设备，用种子里那台雷达做不出来（05 会把它的上报时间拨到现在）。
 #
+#   另外它也是**设备告警进入项目概览**那条口径唯一的落脚点：告警两条来源挂的字段不同
+#   （POINT 写 point_id、DEVICE 写 device_id），summary 曾只判 point_id 而整类漏算设备告警（B-14）。
+#   ①-b / ② / ③ 三条断言把这口径钉住，改 summary 时会红。
+#
 #   扫描间隔默认 10s（monitor.device-offline.sweep-ms）；run-all.sh --fresh 会调成 2s 加快本套件。
 #   这里一律轮询等待，不赌固定 sleep。
 set -uo pipefail
@@ -13,10 +17,22 @@ source "$HERE/lib.sh"
 TOKEN=$(login)
 AUTH="Authorization: Bearer $TOKEN"
 
+# 夹具自带 project→scene→object→point 四级：⑤ 的 alertCount 断言要的是**这个项目**下的
+# 未解除警情数，只有项目下干净（本项目只有这一个测点、一台设备）才能断言绝对条数，
+# 不必赌此刻库里别处没有别人的警情在办。同 03-query.sh ⑨ 的做法。
+PRJ=$(curl -s -X POST "$BASE/projects" -H "$AUTH" -H "$JSON" \
+      -d "{\"organizationId\":1,\"name\":\"设备告警验收\",\"code\":\"PRJ-DEV-$RUN_ID\"}" | data_of "['id']")
+SCN=$(curl -s -X POST "$BASE/scenes" -H "$AUTH" -H "$JSON" \
+      -d "{\"projectId\":$PRJ,\"name\":\"临时场景\",\"type\":\"SLOPE\"}" | data_of "['id']")
+OBJ=$(curl -s -X POST "$BASE/objects" -H "$AUTH" -H "$JSON" \
+      -d "{\"sceneId\":$SCN,\"name\":\"临时对象\",\"type\":\"SLOPE_BODY\"}" | data_of "['id']")
 NP="P-DEV-$RUN_ID"
 PID=$(curl -s -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
-      -d "{\"objectId\":1,\"code\":\"$NP\",\"name\":\"设备告警验收临时测点\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
+      -d "{\"objectId\":$OBJ,\"code\":\"$NP\",\"name\":\"设备告警验收临时测点\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
       | data_of "['id']")
+
+# alert_count：该项目当前的「未解除警情」数（= summary 的 alertCount）
+alert_count() { curl -s "$BASE/projects/$PRJ/summary" -H "$AUTH" | data_of "['alertCount']"; }
 
 # pend_alarm <deviceId>：该设备当前未解除的设备告警 id（没有则空串）
 pend_alarm() {
@@ -41,6 +57,11 @@ DID2=$(curl -s -X POST "$BASE/devices" -H "$AUTH" -H "$JSON" \
        -d "{\"code\":\"$NEVER\",\"name\":\"从未上报的设备\",\"type\":\"MILLIMETER_WAVE_RADAR\"}" \
        | data_of "['id']")
 info "deviceId=$DID（停报）/ $DID2（从未上报）"
+# 把停报设备挂到本项目那个临时测点上——设备告警靠 device_point 反查才归属到项目，
+# 不挂的话它对本项目就是「无主」的，summary 数不到它不是缺陷而是对的。
+BIND=$(http_code -X POST "$BASE/devices/$DID/points/$PID" -H "$AUTH")
+check "设备与测点绑定成功" "200" "$BIND"
+check "绑定前该项目无未解除警情" "0" "$(alert_count)"
 check "停报设备的状态接口已判离线" "OFFLINE" \
   "$(curl -s "$BASE/devices/$DID/status" -H "$AUTH" | data_of "['status']")"
 check "从未上报的设备同样显示离线" "OFFLINE" \
@@ -73,6 +94,12 @@ check "快照带离线判据分钟数" "5" "$(printf '%s' "$DET" | data_of "['sn
 check "时间线首条为系统触发" "trigger" "$(printf '%s' "$DET" | python3 -c "
 import sys,json;print(json.load(sys.stdin)['data']['timeline'][0]['action'])")"
 
+section "①-b 设备告警必须计入项目概览的「未解除警情」（回归：曾整类漏算）"
+# 两条来源挂的东西不一样：POINT 只写 point_id，DEVICE 只写 device_id（另一侧 NULL）。
+# summary 原先只判 point_id IN (...)，而 SQL 里 NULL IN (...) 不成立 -> 设备告警一条也数不进来。
+# 这条如果不是 1，说明又退回了只判 point_id 的写法。
+check "项目 summary 的 alertCount 含这条设备告警" "1" "$(alert_count)"
+
 section "② 设备告警复用同一套处置管线（同一张表、同一个状态机、同一套留痕）"
 check "出现在全局警情列表里" "True" "$(curl -s "$BASE/alarms?pageSize=200" -H "$AUTH" | python3 -c "
 import sys,json
@@ -82,6 +109,8 @@ check "confirm -> CONFIRMED" "CONFIRMED" \
      -d '{"action":"confirm","comment":"值班确认设备离线","operator":"验收员"}' | data_of "['status']")"
 check "处置留痕操作人" "验收员" "$(curl -s "$BASE/alarms/$AID" -H "$AUTH" | python3 -c "
 import sys,json;print(json.load(sys.stdin)['data']['timeline'][-1]['operator'])")"
+# CONFIRMED 不是终态，「在办」仍要计入——顺带证明纳入设备告警不是无脑全算
+check "确认后仍在办（CONFIRMED 未解除）" "1" "$(alert_count)"
 
 section "③ 恢复上报 -> 告警自动解除"
 # 设备带这条消息的 deviceId 上报 -> IngestService 回写 last_report_time=now -> 下一轮扫描应解除
@@ -96,6 +125,8 @@ if [ -n "$OK" ]; then pass "告警已自动解除"; else fail "40s 内未自动�
 check "解除动作记为 recover" "recover" "$(curl -s "$BASE/alarms/$AID" -H "$AUTH" | python3 -c "
 import sys,json;print(json.load(sys.stdin)['data']['timeline'][-1]['action'])")"
 check "解除后该设备无未解除警情" "" "$(pend_alarm "$DID")"
+# 终态要能减掉：证明纳入设备告警的是「未解除」而不是「全部设备告警」
+check "解除后项目 alertCount 归零" "0" "$(alert_count)"
 
 section "④ 从未上报过的设备不告警（建档不是事件）"
 # 上面几轮等待已跨过多次扫描，这里不必再等：不是「还没来得及扫」，是真的不产生告警
@@ -118,7 +149,11 @@ for d in "$DID" "$DID2"; do
   DEL=$(http_code -X DELETE "$BASE/devices/$d" -H "$AUTH")
   [ "$DEL" = "200" ] && info "已回收临时设备 $d" || info "临时设备 $d 未回收（HTTP $DEL），可忽略"
 done
-DELP=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
-[ "$DELP" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DELP），可忽略"
+# 项目链从叶子往上删（同 03-query.sh）。删测点是逻辑删除，measurement 随之对所有查询不可见。
+for r in "points/$PID" "objects/$OBJ" "scenes/$SCN" "projects/$PRJ"; do
+  C=$(http_code -X DELETE "$BASE/$r" -H "$AUTH")
+  [ "$C" = "200" ] || info "临时 $r 未回收（HTTP $C），可忽略"
+done
+info "已回收临时项目链"
 
 summary

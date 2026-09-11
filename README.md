@@ -66,9 +66,10 @@ tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18
 tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上（8080）
 ```
 
-8 个套件 / 188 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
+8 个套件 / 193 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
 退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
-H2 空库（`--fresh`）**实测 188/188**；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（46/46）。两者执行计划不同，
+H2 空库（`--fresh`）**实测 193/193**；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（46/46）与
+`07-device-alarm.sh`（26/26）。两者执行计划不同，
 有些缺陷只会在其中一个上现形（见下方「取最新一行」那条）。
 
 套件只认 `BASE` 一个地址，所以 **`docker compose up` 之后直接 `run-all.sh` 就是「一键过验收脚本」**
@@ -95,7 +96,7 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向、`X-Ingest-Key` / `?token=` 鉴权。
 - A 底座 A0–A4 + schema/种子已入库并验证；B1 telemetry ingest 骨架 + CSV 回放已并入。
 - **后端闭环已跑通**（A-3 已落地）：ingest 校验/去重 → 落库 → 规则触发（含等级升级）→ 警情生成 → 处置留痕 → 自动恢复，外加设备离线告警。
-  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **8 套件 / 188 条断言全绿**。
+  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **8 套件 / 193 条断言全绿**。
 - **验收链第一环（模拟器）已落地**：`tools/radar_simulator/` 按契约连续造数，不依赖真雷达 CSV；
   `radar_csv_replay/` 是回放器不是生成器（要真实数据），两者分工互补，都发同一条契约消息。
 - **PostgreSQL 已验证**（B-4）：`postgres:16` 上 V1–V4 迁移全部成功，验收在 PG 上全绿
@@ -130,6 +131,12 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   执行计划决定。此前 `MeasurementQueryService#latest` 有兜底、`ProjectSummaryService#maxDeformation`
   没有，两个端点会给同一测点两个值；现统一走 `MeasurementMapper#latestRowOf`，
   `03-query.sh` ⑨ 有回归断言。
+- **项目概览的「未解除警情」必须同时算上设备告警**（2026-09-11 修）：告警有两条来源，挂的字段不同——
+  `POINT` 类型只写 `point_id`、`DEVICE` 类型只写 `device_id`（另一侧为 NULL）。`ProjectSummaryService`
+  原先只判 `point_id IN (...)`，而 SQL 里 `NULL IN (...)` 不成立，**设备告警一条也数不进来**（B-14）。
+  现改为 `point_id IN (...) OR device_id IN (...)`，设备侧由 `device_point` 反查。注意空集合：
+  MyBatis-Plus 的 `in(空集合)` 会丢掉整条条件，所以 `or` 那一支只在设备非空时才挂，否则会反向退化成
+  「所有设备告警都算」。`07-device-alarm.sh` ①-b 有回归断言（**改回旧写法实测会红**）。
 - **SSE 长连接必须在整页卸载时显式 `close()`**（2026-09-11 实测定位）：`AppLayout` 里那条全局
   SSE 原先只在 `onBeforeUnmount` 里关，而**整页卸载（F5 / 直接输地址）不会触发它**——文档是被
   丢弃的。此时浏览器发的 FIN 仍要等对端收尾，可 nginx 的非缓冲反代只能靠「向客户端写失败」

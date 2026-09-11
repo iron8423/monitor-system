@@ -85,25 +85,54 @@ public class ProjectSummaryService {
                 .stream().map(MonitorPoint::getId).toList();
     }
 
-    /** 未解除警情（已确认/处置中/观察中仍算「在办」，只有终态不算）。 */
+    /**
+     * 未解除警情（已确认/处置中/观察中仍算「在办」，只有终态不算）。
+     *
+     * <p><b>必须把设备告警也算进来。</b>告警有两条来源，挂的东西不一样：{@code POINT} 类型
+     * 只写 {@code point_id}，{@code DEVICE} 类型只写 {@code device_id}（另一侧为 NULL，
+     * 见 {@code AlarmEngine.trigger} 与 {@code DeviceAlarmMonitor.raise}）。所以只判
+     * {@code point_id IN (...)} 是漏的——设备告警那一侧永远是 NULL，而 SQL 里
+     * {@code NULL IN (...)} 不成立，于是一条也数不进来，项目下的设备离线告警集体失踪。</p>
+     *
+     * <p>本端点自己的定义就是「status 不属于 RESOLVED/FALSE_ALARM 的警情」，
+     * 没有排除设备告警这一说。</p>
+     */
     private long activeAlarmCount(List<Long> pointIds) {
         if (pointIds.isEmpty()) {
             return 0L;
         }
+        List<Long> deviceIds = deviceIdsOf(pointIds);
         Long count = alarmMapper.selectCount(new LambdaQueryWrapper<Alarm>()
-                .in(Alarm::getPointId, pointIds)
+                .and(w -> {
+                    w.in(Alarm::getPointId, pointIds);
+                    // 空集合下**绝不能**挂这个 or：MyBatis-Plus 的 in(空集合) 会把条件整条
+                    // 丢掉，而外层 and 里兄弟条件还在，于是退化成「所有设备告警都算」——
+                    // 比不加这一支还错。项目下没有挂设备时，只剩前半句。
+                    if (!deviceIds.isEmpty()) {
+                        w.or().in(Alarm::getDeviceId, deviceIds);
+                    }
+                })
                 .notIn(Alarm::getStatus, AlarmConstants.CLOSED));
         return count == null ? 0L : count;
     }
 
-    /** 只认状态串为 ONLINE 的设备：标记 FAULT 的即使仍在报数也不计入「在线」。 */
-    private long onlineDeviceCount(List<Long> pointIds) {
+    /**
+     * 项目下的设备：测点经 {@code device_point} 反查。一台设备可挂多个测点，故 distinct。
+     *
+     * <p>空入参必须在这里拦下：{@code in(空集合)} 会把条件整条丢掉，调用方拿到的会是全表设备。</p>
+     */
+    private List<Long> deviceIdsOf(List<Long> pointIds) {
         if (pointIds.isEmpty()) {
-            return 0L;
+            return List.of();
         }
-        List<Long> deviceIds = devicePointMapper.selectList(new LambdaQueryWrapper<DevicePoint>()
+        return devicePointMapper.selectList(new LambdaQueryWrapper<DevicePoint>()
                         .in(DevicePoint::getPointId, pointIds))
                 .stream().map(DevicePoint::getDeviceId).distinct().toList();
+    }
+
+    /** 只认状态串为 ONLINE 的设备：标记 FAULT 的即使仍在报数也不计入「在线」。 */
+    private long onlineDeviceCount(List<Long> pointIds) {
+        List<Long> deviceIds = deviceIdsOf(pointIds);
         if (deviceIds.isEmpty()) {
             return 0L;
         }
