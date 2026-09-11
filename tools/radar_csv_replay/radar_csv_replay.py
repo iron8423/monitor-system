@@ -277,7 +277,8 @@ def main():
         for m in times:
             count += 1
             if args.send:
-                code, resp = post(args.endpoint, m, ingest_key)
+                # B1 的 IngestRequest 只接受批量 { "items": [ ...] }；每条消息包一层
+                code, resp = post(args.endpoint, {"items": [m]}, ingest_key)
                 if code not in (200, 201, 202):
                     print(f"    [x] HTTP {code} {m['pointCode']} {m['collectTime']} -> {resp[:120]}")
                 elif count % 20 == 0:
