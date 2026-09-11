@@ -99,18 +99,26 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - **Docker Compose 一键启动已落地**（B-3）：`docker compose up -d` 起 db + backend，
   已实测 —— 容器重建后数据仍在（`measurement/alarm/monitor_point` 计数与 schema 版本前后一致、
   Flyway 不重跑）、影像落卷、对容器跑验收 **173/173 全绿**。
-- **前端已可访问**（Vue3 + Vite + Element Plus + ECharts）：`cd frontend && npm install && npm run dev`
-  → <http://localhost:5173>，`admin / 123456` 登录。已落地总览 / 测点与曲线 / 设备状态 /
-  告警中心（含处置时间线）/ 管理端（只读）五个页面，SSE 实时连接在顶栏可见；
-  **3D 大屏与影像挂点仍是待做**（`frontend/README.md` 有阶段表与已知限制）。
+- **前端已可访问**（Vue3 + Vite + Element Plus + ECharts，阶段 3a 起含 Cesium）：
+  `cd frontend && npm install && npm run dev` → <http://localhost:5173>，`admin / 123456` 登录。
+  已落地工作台五个页面（总览 / 测点与曲线 / 设备状态 / 告警中心含处置时间线 / 管理端只读）
+  与独立整屏的 **3D 大屏 `/screen`**（真实地形 + 卫星影像 + 测点按状态着色 + 三级降级）；
+  **影像挂点仍是待做**（`frontend/README.md` 有阶段表与已知限制）。
   浏览器端到端已实测（守卫 / 登录回跳 / 曲线渲染 / 无控制台报错）。
-  ⚠️ 验收第 8 条的**「一键」尚未覆盖前端**：构建产物还没进 compose，
+  ⚠️ 两处未完成：① 顶栏的 SSE 实时连接**尚无页面消费事件**（只有连接状态标签，
+  页面级消费由 B 的 3b 接手）；② 验收第 8 条的**「一键」尚未覆盖前端**——构建产物还没进 compose，
   `docker-compose.yml` 末尾留了前端服务该长什么样的注释块。
+- **「取最新一行」的口径已收成单一实现**：`measurement` 同测点同 `collect_time` 可合法落多行
+  （幂等键是 `device+message`，不含 collect_time），此时排序必须带 `id` 兜底，否则取到哪行由
+  执行计划决定。此前 `MeasurementQueryService#latest` 有兜底、`ProjectSummaryService#maxDeformation`
+  没有，两个端点会给同一测点两个值；现统一走 `MeasurementMapper#latestRowOf`，
+  `03-query.sh` ⑨ 有回归断言。
 - **调试面已按 profile 收窄**（B-7）：H2 控制台只在基础 profile 开着，`postgres` profile 显式关闭，
   且 `SecurityConfig` 的放行跟着这个开关走；`frameOptions` 由 `disable()` 收成 `sameOrigin()`。
   swagger 保留放行（联调期前端要读 OpenAPI）。
 - **契约不再走「签字」**：项目用单仓库单一事实源，双方读同一份文档与代码，git 历史即记录。
   现行事实源 = `docs/message-contract.md`（消息契约）+ `docs/B侧接口契约_M0.md`（接口/字段/枚举）；
   `M0_接口冻结_致B_v1.md` 已就地作废（D1–D10 编号仍由它定义，数值以现行文档/代码为准）。
-- 阶段 1 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量/数据中断告警未做——**用户定案暂不做**；
-  ② 3D 大屏 `/screen`（阶段 3）与影像挂点 `/media`（阶段 5）未做；③ 管理端写操作未做（当前只读）。
+- 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量/数据中断告警未做——**用户定案暂不做**；
+  ② 影像挂点 `/media`（阶段 5）未做；③ 管理端写操作未做（当前只读）；
+  ④ SSE 的页面级消费未做（连接已在，事件没人订阅，归 B 的 3b）。
