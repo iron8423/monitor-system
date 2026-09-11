@@ -1,0 +1,66 @@
+:root {
+  --mk-bg: #f4f6f9;
+  --mk-panel: #ffffff;
+  --mk-border: #e4e7ed;
+  --mk-text: #1f2d3d;
+  --mk-text-sub: #6b7a90;
+  --mk-primary: #1f6feb;
+  --mk-dark-1: #06101f;
+  --mk-dark-2: #0d2137;
+  --mk-dark-line: rgba(90, 170, 255, 0.25);
+  --mk-text-primary: var(--mk-text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Microsoft YaHei', 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  color: var(--mk-text);
+  background: var(--mk-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--mk-primary);
+  text-decoration: none;
+}
+
+/* 路由切换过渡 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c6ccd6;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a9b2c0;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
