@@ -19,6 +19,7 @@ frontend/node_modules/
 dist/
 frontend/dist/
 frontend/.pnpm-store/
+frontend/.vite/
 
 # Python（tools/radar_csv_replay 等）
 __pycache__/

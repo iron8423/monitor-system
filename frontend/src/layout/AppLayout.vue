@@ -1,8 +1,9 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+import { openStream } from '@/api/monitor'
 import { useUserStore } from '@/stores/user'
 
 defineOptions({ name: 'AppLayout' })
@@ -16,14 +17,47 @@ const collapsed = ref(false)
 // 菜单 = 阶段 2~5 的交付清单。已实现的能点，未实现的 disabled，避免点了白页。
 const menus = [
   { path: '/home', title: '总览', icon: 'Odometer', ready: true },
-  { path: '/points', title: '测点与曲线', icon: 'DataLine', ready: false, stage: '阶段 2' },
+  { path: '/points', title: '测点与曲线', icon: 'DataLine', ready: true },
+  { path: '/devices', title: '设备状态', icon: 'Cpu', ready: true },
   { path: '/screen', title: '3D 大屏', icon: 'Location', ready: false, stage: '阶段 3' },
-  { path: '/alarms', title: '告警中心', icon: 'Bell', ready: false, stage: '阶段 4' },
-  { path: '/admin', title: '管理端', icon: 'Setting', ready: false, stage: '阶段 4' },
+  { path: '/alarms', title: '告警中心', icon: 'Bell', ready: true },
+  { path: '/admin', title: '管理端', icon: 'Setting', ready: true, roles: ['ADMIN'] },
   { path: '/media', title: '影像挂点', icon: 'Picture', ready: false, stage: '阶段 5' },
 ]
 
+// 菜单里的角色收口只是界面引导，真正的边界在后端 @PreAuthorize
+const visibleMenus = computed(() =>
+  menus.filter((m) => !m.roles?.length || m.roles.includes(userStore.role)),
+)
+
 const currentTitle = computed(() => route.meta?.title || '')
+
+/**
+ * 全局 SSE（契约 D8）：只在这里开**一条**连接并保持住。
+ *
+ * 放在布局而不是各页面里，是因为页面组件会随路由切换销毁——
+ * 每页各开一条的话，切一次路由就断一次，断开期间的事件直接丢掉，
+ * 而事件本身没有重放机制。布局是唯一稳定存活的那一层。
+ */
+const live = ref(false)
+let stream = null
+
+function connectStream() {
+  if (!userStore.token || stream) return
+  // token 走 query：EventSource 发不了请求头，这是契约给 SSE 开的唯一例外
+  stream = openStream(userStore.token)
+  stream.addEventListener('open', () => (live.value = true))
+  stream.addEventListener('error', () => (live.value = false))
+  // 事件内容由各页面自己订阅；这里只需要知道「连接活着」，
+  // 顺便把连接建立起来，页面挂载时订阅就不会漏掉开头的事件。
+}
+
+onMounted(connectStream)
+
+onBeforeUnmount(() => {
+  stream?.close()
+  stream = null
+})
 
 async function handleCommand(command) {
   if (command !== 'logout') return
@@ -54,7 +88,9 @@ async function handleCommand(command) {
       </div>
 
       <div class="header-right">
-        <el-tag type="info" effect="plain" size="small">阶段 2 · 前端</el-tag>
+        <el-tag :type="live ? 'success' : 'info'" effect="plain" size="small">
+          {{ live ? '实时已连接' : '实时未连接' }}
+        </el-tag>
         <el-dropdown trigger="click" @command="handleCommand">
           <span class="user">
             <el-avatar :size="28" class="user-avatar">{{ userStore.displayName.slice(0, 1) }}</el-avatar>
@@ -82,7 +118,7 @@ async function handleCommand(command) {
       <el-aside :width="collapsed ? '64px' : '210px'" class="aside">
         <el-menu :default-active="route.path" :collapse="collapsed" class="menu" router>
           <el-menu-item
-            v-for="menu in menus"
+            v-for="menu in visibleMenus"
             :key="menu.path"
             :index="menu.path"
             :disabled="!menu.ready"

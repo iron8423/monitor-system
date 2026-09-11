@@ -9,6 +9,74 @@
   --mk-dark-2: #0d2137;
   --mk-dark-line: rgba(90, 170, 255, 0.25);
   --mk-text-primary: var(--mk-text);
+
+  /* 告警等级 / 设备状态色。与 utils/labels.js 里的 LEVEL_TAG 是两套东西：
+     那边给 el-tag 选类型，这边给自绘的数值文本上色。 */
+  --mk-level-notice: #909399;
+  --mk-level-warning: #e6a23c;
+  --mk-level-alarm: #f56c6c;
+  --mk-online: #35b37e;
+}
+
+/* ---------- 页面通用件 ----------
+   多个页面共用的容器与文本样式。放全局而不是每个组件各写一份，
+   否则同一个「面板边框」在五个页面里迟早会漂成五种颜色。 */
+
+.mk-panel {
+  background: var(--mk-panel);
+  border: 1px solid var(--mk-border);
+  border-radius: 6px;
+}
+
+.mk-panel-title {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--mk-text);
+  border-bottom: 1px solid var(--mk-border);
+}
+
+.mk-muted {
+  color: var(--mk-text-sub);
+}
+
+.mk-mono {
+  font-family: Consolas, Monaco, 'Courier New', monospace;
+}
+
+.mk-danger {
+  color: var(--mk-level-alarm);
+}
+
+.mk-warn {
+  color: var(--mk-level-warning);
+}
+
+.mk-ok {
+  color: var(--mk-online);
+}
+
+.mk-spacer {
+  flex: 1;
+}
+
+/* 数值面板（总览 KPI、最新值）里的大号数字 */
+.mk-metric {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--mk-primary);
+}
+
+/* 页面底部的口径说明。用来说明「这个数是谁算的」，避免前端各算一套 */
+.mk-footnote {
+  padding: 10px 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--mk-text-sub);
+  border-top: 1px solid var(--mk-border);
 }
 
 * {

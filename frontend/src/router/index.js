@@ -20,6 +20,30 @@ const routes = [
         component: () => import('@/views/HomeView.vue'),
         meta: { title: '总览', icon: 'Odometer' },
       },
+      {
+        path: 'points',
+        name: 'points',
+        component: () => import('@/views/PointsView.vue'),
+        meta: { title: '测点与曲线', icon: 'DataLine' },
+      },
+      {
+        path: 'devices',
+        name: 'devices',
+        component: () => import('@/views/DeviceView.vue'),
+        meta: { title: '设备状态', icon: 'Cpu' },
+      },
+      {
+        path: 'alarms',
+        name: 'alarms',
+        component: () => import('@/views/AlarmView.vue'),
+        meta: { title: '告警中心', icon: 'Bell' },
+      },
+      {
+        path: 'admin',
+        name: 'admin',
+        component: () => import('@/views/AdminView.vue'),
+        meta: { title: '管理端', icon: 'Setting', roles: ['ADMIN'] },
+      },
     ],
   },
   {
@@ -50,6 +74,13 @@ router.beforeEach((to) => {
 
   if (!userStore.isLoggedIn) {
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+
+  // 角色门禁。注意这**只是界面收口**：真正的边界在后端 @PreAuthorize，
+  // 前端藏掉入口是为了不让用户点进去看一屏 403，不是安全措施。
+  const roles = to.meta?.roles
+  if (roles?.length && !roles.includes(userStore.role)) {
+    return { path: '/home' }
   }
 
   return true

@@ -1,216 +1,279 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { fetchMe } from '@/api/auth'
-import { getToken } from '@/utils/token'
-import { useUserStore } from '@/stores/user'
+import * as api from '@/api/monitor'
+import {
+  ALARM_TYPE_LABELS, LEVEL_LABELS, LEVEL_TAG, STATUS_LABELS, STATUS_TAG, label,
+} from '@/utils/labels'
+
+/**
+ * 总览（阶段 2）。
+ *
+ * 本页只做「当前态」的汇总：KPI 全部来自后端 `GET /projects/{id}/summary`，
+ * 前端一个数都不自己算。设备在线数尤其不能自己数——离线判据在后端
+ * `DeviceStatusPolicy`（5 分钟未上报），前端再算一遍就会和告警对不上。
+ *
+ * 3D 大屏是独立的 `/screen`（阶段 3），不在这里放半张地图充数。
+ */
 
 defineOptions({ name: 'HomeView' })
 
-const userStore = useUserStore()
+const router = useRouter()
 
-const checking = ref(false)
-const meResult = ref(null)
-const meError = ref('')
-const backendDown = ref(false)
+const summary = ref(null)
+const projects = ref([])
+const points = ref([])
+const recentAlarms = ref([])
+const loading = ref(true)
+const errorMsg = ref('')
 
-const apiBase = import.meta.env.VITE_API_BASE_URL || '/api'
-const backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN || 'http://localhost:8080'
+const projectName = computed(() => projects.value[0]?.name || '—')
 
-const maskedToken = computed(() => {
-  const token = getToken()
-  if (!token) return '（无）'
-  return `${token.slice(0, 18)}… （共 ${token.length} 字符）`
-})
-
-// 规划路线：也是阶段 1 的验收清单
-const roadmap = [
-  { title: '工程骨架（Vite + Vue3 + Element Plus + ECharts）', done: true },
-  { title: '登录页 + JWT 存储 + 请求头注入 + 路由守卫', done: true },
-  { title: '总览 / 测点页（points、latest、series、summary）', done: false, stage: '阶段 2' },
-  { title: 'Cesium 3D 大屏（地形 + 标点着色 + 弹窗 + 时间轴/热力图）', done: false, stage: '阶段 3' },
-  { title: '告警中心 + 管理端（alarms / actions / 规则 CRUD）', done: false, stage: '阶段 4' },
-  { title: '无人机影像挂点（media 上传 / 列表 / 预览）', done: false, stage: '阶段 5' },
-]
-
-async function check() {
-  checking.value = true
-  meError.value = ''
-  backendDown.value = false
+async function load() {
+  loading.value = true
+  errorMsg.value = ''
   try {
-    meResult.value = await fetchMe()
-  } catch (error) {
-    meResult.value = null
-    if (error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED') {
-      backendDown.value = true
-      meError.value = `连不上后端：${backendOrigin}`
-    } else {
-      meError.value = error.message || '校验失败'
-    }
+    // 项目 id 从 /projects 取，不写死——写死 1 在换库/换种子后会静默指向别的项目
+    const [prjs, pts] = await Promise.all([api.listProjects(), api.listPoints()])
+    projects.value = prjs || []
+    points.value = pts || []
+
+    const pid = projects.value[0]?.id
+    const [sum, alarms] = await Promise.all([
+      pid ? api.projectSummary(pid).catch(() => null) : null,
+      api.listAlarms({ pageNum: 1, pageSize: 5 }).catch(() => null),
+    ])
+    summary.value = sum
+    recentAlarms.value = alarms?.records || []
+  } catch (e) {
+    errorMsg.value = e.message || '加载失败'
   } finally {
-    checking.value = false
+    loading.value = false
   }
 }
 
-onMounted(check)
+let timer = null
+
+onMounted(() => {
+  load()
+  // 汇总没有推送通道（SSE 只推 measurement/alarm 事件，不推 summary），
+  // 所以靠轮询兜底。30s 与后端统计口径同量级，不追求实时。
+  timer = setInterval(load, 30000)
+})
+
+onBeforeUnmount(() => clearInterval(timer))
+
+/**
+ * 「最大形变」是**带符号**的：后端取各测点最新值中绝对值最大的那个，负向形变不取绝对值
+ * （`ProjectSummaryService#maxDeformation`）。所以这里可能是负数，卡片上要解释一句，
+ * 否则一个 −1.22mm 摆在「最大」旁边会让人以为算错了。
+ */
+const kpis = computed(() => [
+  { key: 'points', label: '测点总数', value: summary.value?.pointCount, unit: '' },
+  { key: 'alerts', label: '未解除警情', value: summary.value?.alertCount, unit: '', danger: true },
+  { key: 'devices', label: '在线设备', value: summary.value?.onlineDeviceCount, unit: '', ok: true },
+  {
+    key: 'deform',
+    label: '最大形变',
+    value: summary.value?.maxDeformationMm,
+    unit: 'mm',
+    tip: '各测点最新形变中绝对值最大的一个，保留正负号（负向形变同样计入）',
+  },
+])
+
+const fmt = (v) => (v === null || v === undefined ? '—' : v)
 </script>
 
 <template>
-  <div class="home">
-    <el-card shadow="never" class="welcome">
-      <div class="welcome-main">
-        <div>
-          <h2 class="welcome-title">
-            你好，{{ userStore.displayName }}
-            <el-tag size="small" effect="plain">{{ userStore.roleLabel }}</el-tag>
-          </h2>
-          <p class="welcome-sub">
-            阶段 1（工程骨架 + 登录）已完成。下面这张「环境自检」卡片用来确认前后端已经连通，
-            确认无误后我们就进入阶段 2（总览 / 测点页）。
-          </p>
-        </div>
-        <el-button type="primary" :loading="checking" @click="check">重新检测</el-button>
+  <div class="home" v-loading="loading">
+    <el-alert
+      v-if="errorMsg"
+      type="error"
+      :closable="false"
+      show-icon
+      :title="errorMsg"
+      class="mb"
+    />
+
+    <div class="kpi-row">
+      <div v-for="k in kpis" :key="k.key" class="mk-panel kpi">
+        <span class="mk-muted kpi-label">
+          {{ k.label }}
+          <el-tooltip v-if="k.tip" :content="k.tip" placement="top">
+            <el-icon class="kpi-tip"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </span>
+        <span
+          class="mk-metric mk-mono"
+          :class="{
+            'mk-danger': k.danger && k.value > 0,
+            'mk-ok': k.ok && k.value > 0,
+          }"
+        >
+          {{ fmt(k.value) }}<small v-if="k.value != null && k.unit"> {{ k.unit }}</small>
+        </span>
       </div>
-    </el-card>
+    </div>
 
-    <el-row :gutter="16" class="mt">
-      <el-col :xs="24" :md="12">
-        <el-card shadow="never">
-          <template #header>
-            <div class="card-header">
-              <span>环境自检</span>
-              <el-tag v-if="meResult" type="success" size="small" effect="dark">后端连通</el-tag>
-              <el-tag v-else-if="backendDown" type="danger" size="small" effect="dark">后端未启动</el-tag>
-              <el-tag v-else type="warning" size="small" effect="dark">校验异常</el-tag>
-            </div>
+    <div class="cols">
+      <div class="mk-panel col">
+        <div class="mk-panel-title">
+          测点
+          <span class="mk-muted title-sub">{{ projectName }}</span>
+          <span class="mk-spacer" />
+          <el-button size="small" link type="primary" @click="router.push('/points')">
+            看曲线
+          </el-button>
+        </div>
+        <div class="chips">
+          <el-tag v-for="p in points" :key="p.id" size="small" effect="plain">
+            <span class="mk-mono">{{ p.code }}</span>
+            <span class="chip-name mk-muted">{{ p.name }}</span>
+          </el-tag>
+          <el-empty v-if="!points.length" description="没有测点" :image-size="50" />
+        </div>
+      </div>
+
+      <div class="mk-panel col">
+        <div class="mk-panel-title">
+          最近警情
+          <span class="mk-spacer" />
+          <el-button size="small" link type="primary" @click="router.push('/alarms')">
+            全部
+          </el-button>
+        </div>
+        <el-table :data="recentAlarms" size="small" :show-header="false">
+          <el-table-column width="70">
+            <template #default="{ row }">
+              <el-tag :type="LEVEL_TAG[row.level]" size="small" effect="dark">
+                {{ label(LEVEL_LABELS, row.level) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column width="60">
+            <template #default="{ row }">
+              <span class="mk-muted">{{ label(ALARM_TYPE_LABELS, row.alarmType) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column min-width="120">
+            <template #default="{ row }">
+              <span class="mk-mono">{{ row.alarmType === 'DEVICE' ? row.deviceCode : row.pointCode }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column width="90">
+            <template #default="{ row }">
+              <el-tag :type="STATUS_TAG[row.status]" size="small">
+                {{ label(STATUS_LABELS, row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column min-width="170">
+            <template #default="{ row }">
+              <span class="mk-mono mk-muted time">{{ row.triggeredAt }}</span>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty description="暂无警情" :image-size="50" />
           </template>
+        </el-table>
+      </div>
+    </div>
 
-          <el-alert
-            v-if="backendDown"
-            type="error"
-            :closable="false"
-            show-icon
-            title="检测不到后端"
-            :description="`请另开一个终端执行：cd backend → .\\mvnw.cmd spring-boot:run（${backendOrigin}）`"
-          />
-          <el-alert
-            v-else-if="meError"
-            class="mb"
-            type="warning"
-            :closable="false"
-            show-icon
-            :title="meError"
-          />
-
-          <el-descriptions :column="1" border size="small">
-            <el-descriptions-item label="API 前缀">{{ apiBase }}</el-descriptions-item>
-            <el-descriptions-item label="后端地址">{{ backendOrigin }}</el-descriptions-item>
-            <el-descriptions-item label="JWT（localStorage）">
-              <span class="mono">{{ maskedToken }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="GET /auth/me">
-              <template v-if="meResult">
-                <span class="mono">
-                  id={{ meResult.id }} · {{ meResult.username }} · {{ meResult.role }}
-                </span>
-              </template>
-              <span v-else class="dim">未取到</span>
-            </el-descriptions-item>
-          </el-descriptions>
-        </el-card>
-      </el-col>
-
-      <el-col :xs="24" :md="12">
-        <el-card shadow="never">
-          <template #header><span>阶段路线</span></template>
-          <ul class="roadmap">
-            <li v-for="item in roadmap" :key="item.title" :class="{ done: item.done }">
-              <el-icon v-if="item.done" class="ok"><CircleCheckFilled /></el-icon>
-              <el-icon v-else class="todo"><Clock /></el-icon>
-              <span class="roadmap-title">{{ item.title }}</span>
-              <el-tag v-if="item.stage" size="small" type="info" effect="plain">{{ item.stage }}</el-tag>
-            </li>
-          </ul>
-        </el-card>
-      </el-col>
-    </el-row>
+    <div class="mk-panel">
+      <div class="mk-footnote">
+        KPI 全部取自 <span class="mk-mono">GET /projects/{id}/summary</span>，
+        「在线设备」按后端
+        <span class="mk-mono">DeviceStatusPolicy</span>（5 分钟未上报即离线）判定。
+        三维态势在 <span class="mk-mono">/screen</span>（阶段 3），尚未实现。
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.welcome-main {
+.home {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.welcome-title {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin: 0;
-  font-size: 20px;
-}
-
-.welcome-sub {
-  max-width: 720px;
-  margin: 10px 0 0;
-  line-height: 1.7;
-  color: var(--mk-text-sub);
-}
-
-.mt {
-  margin-top: 16px;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .mb {
-  margin-bottom: 12px;
+  margin-bottom: 0;
 }
 
-.card-header {
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.kpi {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
 }
 
-.mono {
-  font-family: Consolas, Monaco, monospace;
+.kpi-label {
+  display: flex;
+  gap: 4px;
+  align-items: center;
   font-size: 12px;
 }
 
-.dim {
-  color: var(--mk-text-sub);
-}
-
-.roadmap {
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.roadmap li {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 7px 0;
+.kpi-tip {
   font-size: 13px;
-  color: var(--mk-text-sub);
+  cursor: help;
 }
 
-.roadmap li.done {
-  color: var(--mk-text);
+.kpi small {
+  font-size: 13px;
+  font-weight: 400;
 }
 
-.roadmap-title {
-  flex: 1;
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 16px;
 }
 
-.ok {
-  color: #35b37e;
+@media (max-width: 1100px) {
+  .cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
-.todo {
-  color: #c0c4cc;
+.col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title-sub {
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.chip-name {
+  margin-left: 6px;
+}
+
+.time {
+  font-size: 12px;
 }
 </style>
