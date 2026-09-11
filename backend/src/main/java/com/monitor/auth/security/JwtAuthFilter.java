@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
@@ -27,13 +28,20 @@ import java.io.IOException;
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     public static final String BEARER_PREFIX = "Bearer ";
-    /** 仅该路径允许 query token（避免 token 出现在普通 GET 的日志/来源里） */
+    /**
+     * 仅这些路径允许 query token（避免 token 出现在普通 GET 的日志/来源里）：
+     * SSE（EventSource）与影像内容（{@code <img>}）都无法携带请求头。
+     */
     private static final String SSE_PATH_PREFIX = "/api/v1/stream";
+    private static final String MEDIA_PATH_PREFIX = "/api/v1/media/";
+    private static final String MEDIA_CONTENT_SUFFIX = "/content";
 
     private final JwtUtil jwtUtil;
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+    protected void doFilterInternal(@NonNull HttpServletRequest request,
+                                    @NonNull HttpServletResponse response,
+                                    @NonNull FilterChain chain)
             throws ServletException, IOException {
         String token = resolveToken(request);
         if (token != null) {
@@ -67,7 +75,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             return header.substring(BEARER_PREFIX.length());
         }
         String uri = request.getRequestURI();
-        if (uri.startsWith(SSE_PATH_PREFIX)) {
+        if (uri.startsWith(SSE_PATH_PREFIX)
+                || (uri.startsWith(MEDIA_PATH_PREFIX) && uri.endsWith(MEDIA_CONTENT_SUFFIX))) {
             return request.getParameter("token");
         }
         return null;

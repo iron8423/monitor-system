@@ -2,6 +2,7 @@ package com.monitor.asset.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.monitor.asset.DeviceStatusPolicy;
 import com.monitor.asset.dto.DeviceStatusVO;
 import com.monitor.asset.entity.Device;
 import com.monitor.asset.entity.DevicePoint;
@@ -11,6 +12,7 @@ import com.monitor.audit.annotation.AuditAction;
 import com.monitor.common.Result;
 import com.monitor.common.base.BaseCrudController;
 import com.monitor.common.exception.BizException;
+import com.monitor.common.util.Times;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,8 +22,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -33,10 +33,6 @@ import java.util.List;
 @SuppressWarnings("null")
 public class DeviceController extends BaseCrudController<Device> {
 
-    /** 超过该时长（分钟）未上报视为离线 */
-    private static final int OFFLINE_MINUTES = 5;
-    private static final BigDecimal LOW_BATTERY_THRESHOLD = new BigDecimal("20");
-
     private final DeviceMapper deviceMapper;
     private final DevicePointMapper devicePointMapper;
 
@@ -45,18 +41,16 @@ public class DeviceController extends BaseCrudController<Device> {
         return deviceMapper;
     }
 
-    /** 设备状态：在线/离线由最近上报时间推导，低电量按阈值判断。 */
+    /** 设备状态：在线/离线由最近上报时间推导，低电量按阈值判断（口径见 {@link DeviceStatusPolicy}）。 */
     @GetMapping("/{id}/status")
     public Result<DeviceStatusVO> status(@PathVariable Long id) {
         Device d = deviceMapper.selectById(id);
         if (d == null) {
             throw new BizException(404, "设备不存在: " + id);
         }
-        boolean online = d.getLastReportTime() != null
-                && d.getLastReportTime().isAfter(LocalDateTime.now().minusMinutes(OFFLINE_MINUTES));
-        boolean lowBattery = d.getBattery() != null
-                && d.getBattery().compareTo(LOW_BATTERY_THRESHOLD) < 0;
-        String status = "FAULT".equals(d.getStatus()) ? "FAULT" : (online ? "ONLINE" : "OFFLINE");
+        boolean online = DeviceStatusPolicy.isOnline(d.getLastReportTime());
+        boolean lowBattery = DeviceStatusPolicy.isLowBattery(d.getBattery());
+        String status = DeviceStatusPolicy.statusOf(d);
 
         DeviceStatusVO vo = new DeviceStatusVO();
         vo.setDeviceId(d.getId());
@@ -65,7 +59,7 @@ public class DeviceController extends BaseCrudController<Device> {
         vo.setOnline(online);
         vo.setBattery(d.getBattery());
         vo.setLowBattery(lowBattery);
-        vo.setLastReportTime(d.getLastReportTime());
+        vo.setLastReportTime(Times.iso(d.getLastReportTime()));
         return Result.ok(vo);
     }
 

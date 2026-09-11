@@ -6,6 +6,14 @@ spring:
     driver-class-name: org.postgresql.Driver
     username: ${PG_USER:monitor}
     password: ${PG_PASSWORD:monitor}
+  # H2 控制台在基础 application.yml 里是开着的，这里必须显式关掉（B-7）。
+  # 它的自动配置条件只有「servlet 应用 + classpath 有 JakartaWebServlet + 该开关为 true」，
+  # **没有一条与数据源类型有关**；而 H2 是 runtime scope，各 profile 的 classpath 上都有。
+  # 实测后果（postgres profile，Docker Compose 部署形态）：GET /h2-console/ → 200，
+  # 无需任何凭证即进入登录页，而那里能自行填任意 JDBC URL——包括这个 PG 库。
+  h2:
+    console:
+      enabled: false
   flyway:
     enabled: true
     locations: classpath:db/migration

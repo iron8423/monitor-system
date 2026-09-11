@@ -1,0 +1,9 @@
+# 构建上下文只该有 pom.xml 与 src/。target/ 里是本机编译产物（含几十 MB 的 jar），
+# 传进上下文纯属浪费——Dockerfile 也从不 COPY 它。
+target/
+data/
+*.log
+.mvn/
+mvnw
+mvnw.cmd
+README_B1.md
