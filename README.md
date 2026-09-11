@@ -66,9 +66,9 @@ tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18
 tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上（8080）
 ```
 
-8 个套件 / 175 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
+8 个套件 / 188 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
 退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
-H2 空库（`--fresh`）与 compose 的 PostgreSQL **两个形态都实测 175/175**——两者执行计划不同，
+H2 空库（`--fresh`）**实测 188/188**；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（46/46）。两者执行计划不同，
 有些缺陷只会在其中一个上现形（见下方「取最新一行」那条）。
 
 套件只认 `BASE` 一个地址，所以 **`docker compose up` 之后直接 `run-all.sh` 就是「一键过验收脚本」**
@@ -95,17 +95,17 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向、`X-Ingest-Key` / `?token=` 鉴权。
 - A 底座 A0–A4 + schema/种子已入库并验证；B1 telemetry ingest 骨架 + CSV 回放已并入。
 - **后端闭环已跑通**（A-3 已落地）：ingest 校验/去重 → 落库 → 规则触发（含等级升级）→ 警情生成 → 处置留痕 → 自动恢复，外加设备离线告警。
-  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **8 套件 / 175 条断言全绿**。
+  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **8 套件 / 188 条断言全绿**。
 - **验收链第一环（模拟器）已落地**：`tools/radar_simulator/` 按契约连续造数，不依赖真雷达 CSV；
   `radar_csv_replay/` 是回放器不是生成器（要真实数据），两者分工互补，都发同一条契约消息。
 - **PostgreSQL 已验证**（B-4）：`postgres:16` 上 V1–V4 迁移全部成功，验收在 PG 上全绿
-  （2026-09-11 复跑 **175/175**），重启后端数据不丢。切库只需 profile：
+  （2026-09-11 复跑全绿），重启后端数据不丢。切库只需 profile：
   `./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`
   （`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`，默认 `localhost:5432/monitor`、`monitor/monitor`）。
 - **Docker Compose 一键启动已落地**（B-3 / 验收第 8 条）：`docker compose up -d` 起
   **db + backend + frontend** 三个服务，前端构建进镜像、由 nginx 托管并反代 `/api`。
   已实测 —— 容器重建后数据仍在（`measurement/alarm/monitor_point` 计数与 schema 版本前后一致、
-  Flyway 不重跑）、影像落卷、对容器跑验收 **175/175 全绿**（2026-09-11 复跑）。
+  Flyway 不重跑）、影像落卷、对容器跑验收全绿。
 - **前端已可访问**（Vue3 + Vite + Element Plus + ECharts，阶段 3a 起含 Cesium）：
   开发态 `cd frontend && npm install && npm run dev` → <http://localhost:5173>；
   部署态就是上面的 `docker compose up -d` → <http://localhost>（`FRONTEND_PORT` 可改）。

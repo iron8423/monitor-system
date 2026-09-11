@@ -78,6 +78,36 @@ public final class AlarmConstants {
         return s;
     }
 
+    /**
+     * 角色 -> 允许的处置动作。**这是权威表**。
+     * <p>前端 {@code frontend/src/utils/labels.js} 的 {@code ACTIONS_BY_ROLE} 是同一张表的
+     * 展示副本（只决定按钮显不显示）；改这里必须同步改那里，否则会出现「按钮在但请求被拒」
+     * 或「按钮没了但接口仍放行」。</p>
+     */
+    private static final Map<String, Set<String>> ROLE_ACTIONS = Map.of(
+            "ADMIN", Set.of("confirm", "research", "dispatch", "handle", "resolve", "misreport"),
+            "OPERATOR", Set.of("confirm", "dispatch", "handle", "resolve", "misreport"),
+            "ANALYST", Set.of("research", "resolve", "misreport"),
+            "MAINTAINER", Set.of("handle", "resolve", "misreport"));
+
+    /**
+     * 该角色能否执行该动作。
+     * <p>角色为 null / 空 / 未登记一律返回 false —— 这是**失败即拒绝**：认不出来的角色
+     * 只能得到空权限，绝不能落到「按管理员放行」那种回退上。</p>
+     */
+    public static boolean canAct(String role, String action) {
+        if (role == null || action == null) {
+            return false;
+        }
+        Set<String> allowed = ROLE_ACTIONS.get(role.trim().toUpperCase());
+        return allowed != null && allowed.contains(action.trim().toLowerCase());
+    }
+
+    /** 该角色允许的动作集合（用于拒绝时的提示文案）；未知角色返回空集。 */
+    public static Set<String> actionsOf(String role) {
+        return role == null ? Set.of() : ROLE_ACTIONS.getOrDefault(role.trim().toUpperCase(), Set.of());
+    }
+
     public static boolean isClosed(String status) {
         return status != null && CLOSED.contains(status);
     }

@@ -75,12 +75,18 @@ except Exception:
 "
 }
 
+# login_as <用户名> [口令] -> 打印该账号的 JWT（登录失败打印空串，不退出）。
+# 角色相关的用例要用非管理员账号（operator / analyst / maintainer），见 V2 种子数据。
+login_as() {
+  curl -s -X POST "$BASE/auth/login" -H "$JSON" \
+    -d "{\"username\":\"${1:-$ADMIN_USER}\",\"password\":\"${2:-$ADMIN_PASS}\"}" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])" 2>/dev/null
+}
+
 # login -> 打印 JWT；后端不可达或账号不对时直接退出（退出码 2，区别于断言失败）
 login() {
   local tok
-  tok=$(curl -s -X POST "$BASE/auth/login" -H "$JSON" \
-        -d "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASS\"}" \
-        | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['token'])" 2>/dev/null)
+  tok=$(login_as "$ADMIN_USER" "$ADMIN_PASS")
   if [ -z "$tok" ]; then
     printf '%s后端不可达或登录失败：%s（账号 %s）%s\n' "$C_RED" "$BASE" "$ADMIN_USER" "$C_OFF" >&2
     printf '先确认后端已启动：cd backend && ./mvnw spring-boot:run\n' >&2

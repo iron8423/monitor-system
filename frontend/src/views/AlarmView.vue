@@ -36,7 +36,10 @@ const isTerminal = (status) => TERMINAL_STATUSES.includes(status)
 
 const availableActions = computed(() => {
   if (!detail.value || isTerminal(detail.value.status)) return []
-  return ACTIONS_BY_ROLE[userStore.role] || ACTIONS_BY_ROLE.ADMIN
+  // 认不出来的角色给空集：这里曾写成 `|| ACTIONS_BY_ROLE.ADMIN`，那是**开放回退**——
+  // 角色字段一旦丢了或对不上，界面上反而把管理员的整套动作亮出来。既然后端按角色强制
+  // 放行，前端就该同向失败（藏起来），而不是反向放宽。
+  return ACTIONS_BY_ROLE[userStore.role] || []
 })
 
 async function load() {

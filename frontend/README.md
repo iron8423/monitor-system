@@ -193,3 +193,21 @@ VITE_TERRAIN_MODE=ion     # ion = Cesium 官方真实地形；none = 不用地�
   Pinia store，让大屏改由推送驱动（点位实时跳动 + 告警脉冲）。
 - **`utils/labels.js`（A）与 `constants/status.js`（B）有部分重叠**：前者负责枚举 → 中文文案，
   后者是 3D 取色口径 + 质量/状态枚举。建议后续合并到一处，避免同一个枚举两套映射。
+
+## 角色差异化的现状（2026-09-11 核过）
+
+四个演示角色（`admin` / `operator` / `analyst` / `maintainer`）**共用同一套工作台**，
+差异只有三处：侧边菜单「管理端」仅 `ADMIN` 可见（`AppLayout.vue` 的 `menus[].roles`）、
+路由守卫拦 `/admin`（`router/index.js`）、以及**告警抽屉里能点的动作**（`AlarmView.vue` × `labels.js`）。
+四个主页面（总览 / 测点与曲线 / 设备状态 / 3D 大屏）四角色完全相同。
+
+> ⚠️ **`utils/labels.js` 的 `ACTIONS_BY_ROLE` 只管按钮显不显示，不是权限边界。**
+> 强制在**后端** `AlarmConstants.ROLE_ACTIONS`（`AlarmService.act` 里校验，越权 403）。
+> 两边是同一张表的副本，**改一处必须同步改另一处**，否则会出现「按钮在但点了报 403」
+> 或「按钮没了但接口仍放行」。判定未知角色时**两边都是拒绝**（前端空集、后端 false）——
+> 这里原先前端写的是 `|| ACTIONS_BY_ROLE.ADMIN`，那是开放回退：角色字段一丢反而亮出管理员全套动作。
+
+已知未做（不是缺陷，是没排期）：
+- `AppLayout.vue` 顶栏那个角色 `<el-tag>` 条件是 `roleLabel !== displayName`，而四个种子账号
+  这两个字段完全相同，**条件恒假、从未渲染过**（死代码）。要显示得改条件或改种子数据。
+- 四个角色没有各自的落地页 / 首页卡片，登录后都进 `/home`。

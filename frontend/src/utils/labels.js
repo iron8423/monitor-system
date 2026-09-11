@@ -59,9 +59,12 @@ export const ALARM_TYPE_LABELS = {
 
 /**
  * 可执行的处置动作，按角色显隐。
- * 这是演示口径：需求 §5 里四类角色各司其职（值班员确认 / 研判员研判 /
- * 运维员处置），但后端 `@PreAuthorize` 目前**不限制动作与角色的对应**，
- * 所以这只是界面上的引导，不是权限边界——真正的边界要做需在后端补。
+ * 需求 §5 里四类角色各司其职（值班员确认 / 研判员研判 / 运维员处置）。
+ *
+ * ⚠️ **这张表只决定按钮显不显示，不是权限边界。** 真正的强制在
+ * 后端 `AlarmConstants.ROLE_ACTIONS`（`AlarmService.act` 里校验，越权 403）。
+ * 两处是同一张表的副本，改一处必须同步改另一处，否则会出现
+ * 「按钮在但点了报 403」或「按钮没了但接口仍放行」。
  */
 export const ACTIONS_BY_ROLE = {
   ADMIN: ['confirm', 'research', 'dispatch', 'handle', 'resolve', 'misreport'],

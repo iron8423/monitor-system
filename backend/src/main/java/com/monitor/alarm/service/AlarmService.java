@@ -135,18 +135,29 @@ public class AlarmService {
     /**
      * 处置警情：按动作映射状态并留痕（映射见 {@link AlarmConstants}）。
      * 已处于终态（RESOLVED / FALSE_ALARM）的警情不再接受处置。
+     * <p><b>角色校验在这里做，不在控制器上</b>：允许哪个动作要等解析出请求体里的
+     * {@code action} 才知道，写成 {@code @PreAuthorize} 的 SpEL 反而更绕且不好测。</p>
      */
     @Transactional
-    public AlarmDetailVO act(Long id, AlarmActionRequest req, String currentUser) {
+    public AlarmDetailVO act(Long id, AlarmActionRequest req, String currentUser, String role) {
         if (req == null || !notBlank(req.getAction())) {
             throw new BizException("处置动作不能为空");
+        }
+        String action = req.getAction().trim().toLowerCase();
+        // 顺序要紧：**先认动作名，再认角色**。
+        // 不存在的动作走 statusOf 的 400（这是契约既有语义，04-alarm.sh 有断言）；
+        // 只有「动作合法、但这个角色不该做」才是 403。反过来写的话，
+        // 一个打错的动作名会被报成「无权执行」，把 400 变成 403。
+        String target = AlarmConstants.statusOf(action);
+        if (!AlarmConstants.canAct(role, action)) {
+            throw new BizException(403, "角色 " + (notBlank(role) ? role : "(未识别)")
+                    + " 无权执行处置动作「" + action + "」（该角色可用 " + AlarmConstants.actionsOf(role) + "）");
         }
         Alarm a = require(id);
         if (AlarmConstants.isClosed(a.getStatus())) {
             throw new BizException("警情已处于终态 " + a.getStatus() + "，不能再处置");
         }
 
-        String target = AlarmConstants.statusOf(req.getAction());
         a.setStatus(target);
         if (AlarmConstants.RESOLVED.equals(target)) {
             a.setResolvedAt(LocalDateTime.now());
@@ -155,7 +166,7 @@ public class AlarmService {
 
         AlarmAction act = new AlarmAction();
         act.setAlarmId(a.getId());
-        act.setActionType(req.getAction().trim().toLowerCase());
+        act.setActionType(action);
         act.setOperator(notBlank(req.getOperator()) ? req.getOperator()
                 : (notBlank(currentUser) ? currentUser : AlarmConstants.SYSTEM));
         act.setNote(req.getComment());

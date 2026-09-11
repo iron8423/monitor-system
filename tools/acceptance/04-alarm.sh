@@ -140,6 +140,49 @@ section "⑩ 鉴权"
 check "警情列表无 JWT -> 401" "401" "$(http_code "$BASE/alarms")"
 check "规则列表无 JWT -> 401" "401" "$(http_code "$BASE/alarm-rules")"
 
+section "⑪ 角色 → 处置动作：后端强制（越权 403），权威表在 AlarmConstants.ROLE_ACTIONS"
+# 这条曾经只活在前端：四个角色的动作差异写死在 utils/labels.js，后端 act() 不看角色，
+# 于是「隐藏按钮」成了唯一屏障——改一行 localStorage 或直接发请求就能越权。
+# 现在后端按角色强制放行，前端那张表只决定按钮显不显。
+#
+# 点号必须 <= 32 字符：points.code 是 VARCHAR(64)，但 measurement.point_code 只有
+# VARCHAR(32)，超了上报直接 500（详见 §⑫）。
+RP="P-ROLE-$RUN_ID"
+RPID=$(curl -s -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
+       -d "{\"objectId\":1,\"code\":\"$RP\",\"name\":\"角色验收临时测点\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
+       | data_of "['id']")
+ingest_id "role-$RUN_ID" "$RP" "2026-08-29T09:00:00+08:00" '"defo_mm":9.0' >/dev/null
+RAID=$(curl -s "$BASE/alarms?pointId=$RPID&status=PENDING" -H "$AUTH" | python3 -c "
+import sys,json;print(max(r['id'] for r in json.load(sys.stdin)['data']['records']))")
+
+# 越权断言放在放行断言**之前**：403 不改状态，同一条警情可以复用于全部越权探测；
+# 若顺序反了，前面万一有人被放行成功，警情提前进终态会把后面全带成 400，报错就跑偏了。
+for pair in "operator:research" "analyst:confirm" "analyst:dispatch" "analyst:handle" \
+            "maintainer:confirm" "maintainer:research" "maintainer:dispatch"; do
+  u="${pair%%:*}"; a="${pair##*:}"
+  check "$u 越权 $a -> 403" "403" \
+    "$(http_code -X POST "$BASE/alarms/$RAID/actions" -H "Authorization: Bearer $(login_as "$u")" -H "$JSON" -d "{\"action\":\"$a\"}")"
+done
+check "越权响应带可读文案（说的是角色无权，不是别的错）" "True" \
+  "$(curl -s -X POST "$BASE/alarms/$RAID/actions" -H "Authorization: Bearer $(login_as maintainer)" -H "$JSON" \
+     -d '{"action":"confirm"}' | python3 -c "
+import sys,json
+print('无权执行' in json.load(sys.stdin)['message'])")"
+# 必须在下面「放行」循环**之前**查：admin:confirm 本身就会写一条 confirm，放后面必然自相矛盾
+check "越权被拒后没有留痕（时间线里没有 confirm）" "False" \
+  "$(curl -s "$BASE/alarms/$RAID" -H "$AUTH" | python3 -c "
+import sys,json
+print(any(t['action']=='confirm' for t in json.load(sys.stdin)['data']['timeline']))")"
+
+# 放行：四个角色各做一个**非终态**动作，这样同一条警情够用
+for pair in "admin:confirm" "operator:confirm" "analyst:research" "maintainer:handle"; do
+  u="${pair%%:*}"; a="${pair##*:}"
+  check "$u 合法 $a -> 200" "200" \
+    "$(http_code -X POST "$BASE/alarms/$RAID/actions" -H "Authorization: Bearer $(login_as "$u")" -H "$JSON" -d "{\"action\":\"$a\"}")"
+done
+DELR=$(http_code -X DELETE "$BASE/points/$RPID" -H "$AUTH")
+[ "$DELR" = "200" ] && info "已回收临时测点 $RP" || info "临时测点 $RP 未回收（HTTP $DELR），可忽略"
+
 DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
 [ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
 

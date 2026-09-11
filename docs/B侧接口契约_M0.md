@@ -152,6 +152,23 @@
   "timeline": [ { "time": "...", "action": "confirm", "operator": "值班员-张", "comment": "值班确认" } ] }
 ```
 
+**角色 → 动作：后端强制（2026-09-11 起）。** 权威表在 `AlarmConstants.ROLE_ACTIONS`，
+`AlarmService.act` 里校验，越权返回 **403**（`Result.code=403`，message 形如
+`角色 ANALYST 无权执行处置动作「confirm」（该角色可用 [resolve, misreport, research]）`）。
+
+| 角色 | 允许的动作 |
+|---|---|
+| `ADMIN` | confirm / research / dispatch / handle / resolve / misreport |
+| `OPERATOR` | confirm / dispatch / handle / resolve / misreport |
+| `ANALYST` | research / resolve / misreport |
+| `MAINTAINER` | handle / resolve / misreport |
+
+> 角色为 null / 空 / 未登记时**一律拒绝**（失败即拒绝，没有「按管理员放行」的回退）。
+> 前端 `frontend/src/utils/labels.js` 的 `ACTIONS_BY_ROLE` 是同一张表的**展示副本**，
+> 只决定按钮显不显示——**改这张表必须同步改那边**，否则会出现「按钮在但点了报 403」。
+> 错误码优先级：**动作名非法 → 400**（先认动作名）、**角色无权 → 403**、**警情不存在 → 404**、
+> **已终态 → 400**。所以打错动作名得到的是 400 而不是 403。
+
 ### 告警规则 CRUD（D6 字段集；A 列名下划线）
 ```json
 { "id": 1, "pointId": 1000, "pointCode": "P-HK01", "metricCode": "defo_mm",

@@ -19,7 +19,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 警情查询与处置（《B侧接口契约_M0》§4）。
- * 处置动作对全部已登录角色开放，界面上按角色显隐由前端控制。
+ * 处置动作按角色放行：**后端强制**（{@link com.monitor.alarm.AlarmConstants#canAct}），
+ * 前端 {@code utils/labels.js} 那张表只管按钮显隐。前端隐藏从来不算权限。
  */
 @RestController
 @RequestMapping("/api/v1/alarms")
@@ -51,6 +52,8 @@ public class AlarmController {
     public Result<AlarmDetailVO> act(@PathVariable Long id,
                                      @RequestBody AlarmActionRequest req,
                                      @AuthenticationPrincipal SecurityUser currentUser) {
-        return Result.ok(alarmService.act(id, req, currentUser == null ? null : currentUser.getUsername()));
+        return Result.ok(alarmService.act(id, req,
+                currentUser == null ? null : currentUser.getUsername(),
+                currentUser == null ? null : currentUser.getRole()));
     }
 }
