@@ -33,8 +33,8 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 ## 启动方式一：Docker Compose（含 PostgreSQL，推荐）
 
 ```bash
-docker compose up -d          # 起 db + backend（首次要构建镜像，见下方注意）
-docker compose ps             # 两个服务都该是 healthy
+docker compose up -d          # 起 db + backend + frontend（首次要构建镜像，见下方注意）
+docker compose ps             # 三个服务都该是 healthy
 docker compose down           # 停；数据留在具名卷里，下次 up 还在
 docker compose down -v        # 连数据一起删（只有清干净重来才用）
 ```
@@ -102,23 +102,38 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   （2026-09-11 复跑 **175/175**），重启后端数据不丢。切库只需 profile：
   `./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`
   （`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`，默认 `localhost:5432/monitor`、`monitor/monitor`）。
-- **Docker Compose 一键启动已落地**（B-3）：`docker compose up -d` 起 db + backend，
+- **Docker Compose 一键启动已落地**（B-3 / 验收第 8 条）：`docker compose up -d` 起
+  **db + backend + frontend** 三个服务，前端构建进镜像、由 nginx 托管并反代 `/api`。
   已实测 —— 容器重建后数据仍在（`measurement/alarm/monitor_point` 计数与 schema 版本前后一致、
   Flyway 不重跑）、影像落卷、对容器跑验收 **175/175 全绿**（2026-09-11 复跑）。
 - **前端已可访问**（Vue3 + Vite + Element Plus + ECharts，阶段 3a 起含 Cesium）：
-  `cd frontend && npm install && npm run dev` → <http://localhost:5173>，`admin / 123456` 登录。
-  已落地工作台五个页面（总览 / 测点与曲线 / 设备状态 / 告警中心含处置时间线 / 管理端只读）
+  开发态 `cd frontend && npm install && npm run dev` → <http://localhost:5173>；
+  部署态就是上面的 `docker compose up -d` → <http://localhost>（`FRONTEND_PORT` 可改）。
+  已落地工作台五个页面（总览 / 测点与曲线 / 设备状态 / 告警中心含处置时间线 / **管理端读写**）
   与独立整屏的 **3D 大屏 `/screen`**（真实地形 + 卫星影像 + 测点按状态着色 + 三级降级）；
   **影像挂点仍是待做**（`frontend/README.md` 有阶段表与已知限制）。
-  浏览器端到端已实测（守卫 / 登录回跳 / 曲线渲染 / 无控制台报错）。
-  ⚠️ 两处未完成：① 顶栏的 SSE 实时连接**尚无页面消费事件**（只有连接状态标签，
-  页面级消费由 B 的 3b 接手）；② 验收第 8 条的**「一键」尚未覆盖前端**——构建产物还没进 compose，
-  `docker-compose.yml` 末尾留了前端服务该长什么样的注释块。
+  浏览器端到端已在 **compose 形态**实测（下条）。
+  ⚠️ 仍未完成：顶栏的 SSE 实时连接**尚无页面消费事件**（只有连接状态标签，
+  页面级消费由 B 的 3b 接手）。
+- **浏览器端到端已在 compose 形态实测**（2026-09-11）：未登录访问 `/home` 被守卫拦下并
+  回跳 `/login?redirect=/home`、登录后回到原目标；五个工作台页与 `/screen` 均有真实数据；
+  跨页口径一致（设备页「在线」行数 == 总览「在线设备」）；管理端**新建 → 接口核对 → 删除**
+  全通（即验收第 7 条「平台管理端新建测点 → 业务端无需改代码立即可见」）；
+  全程零 4xx/5xx、零控制台报错。
 - **「取最新一行」的口径已收成单一实现**：`measurement` 同测点同 `collect_time` 可合法落多行
   （幂等键是 `device+message`，不含 collect_time），此时排序必须带 `id` 兜底，否则取到哪行由
   执行计划决定。此前 `MeasurementQueryService#latest` 有兜底、`ProjectSummaryService#maxDeformation`
   没有，两个端点会给同一测点两个值；现统一走 `MeasurementMapper#latestRowOf`，
   `03-query.sh` ⑨ 有回归断言。
+- **SSE 长连接必须在整页卸载时显式 `close()`**（2026-09-11 实测定位）：`AppLayout` 里那条全局
+  SSE 原先只在 `onBeforeUnmount` 里关，而**整页卸载（F5 / 直接输地址）不会触发它**——文档是被
+  丢弃的。此时浏览器发的 FIN 仍要等对端收尾，可 nginx 的非缓冲反代只能靠「向客户端写失败」
+  察觉，而**第一次写进半关闭的 socket 会成功**，于是要等第二次心跳（后端 `HEARTBEAT_MS` 30s × 2）
+  才收口。这段时间那条半关闭 socket 占着浏览器「单源 6 连接」的名额，**连刷 6 次之后所有请求
+  全部排队，界面像死了几十秒**。对照实验：拦掉 `/api/v1/stream` → 9 次导航全 4–8ms；不拦 →
+  第 6 次冻 47 秒。修法是在 `pagehide` 里显式 `close()`（浏览器当场回收名额，不必等对端），
+  并在 `pageshow`（`persisted`）里补重连——否则从 bfcache 后退回来 SSE 会**静默失效**。
+  后端侧无此问题：直连 8080 时断开能被立即回收，只有过 nginx 才滞后。
 - **调试面已按 profile 收窄**（B-7）：H2 控制台只在基础 profile 开着，`postgres` profile 显式关闭，
   且 `SecurityConfig` 的放行跟着这个开关走；`frameOptions` 由 `disable()` 收成 `sameOrigin()`。
   swagger 保留放行（联调期前端要读 OpenAPI）。
@@ -126,5 +141,5 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   现行事实源 = `docs/message-contract.md`（消息契约）+ `docs/B侧接口契约_M0.md`（接口/字段/枚举）；
   `M0_接口冻结_致B_v1.md` 已就地作废（D1–D10 编号仍由它定义，数值以现行文档/代码为准）。
 - 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量/数据中断告警未做——**用户定案暂不做**；
-  ② 影像挂点 `/media`（阶段 5）未做；③ 管理端写操作未做（当前只读）；
-  ④ SSE 的页面级消费未做（连接已在，事件没人订阅，归 B 的 3b）。
+  ② 影像挂点 `/media`（阶段 5）未做；
+  ③ SSE 的页面级消费未做（连接已在，事件没人订阅，归 B 的 3b）。
