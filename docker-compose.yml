@@ -91,8 +91,13 @@ services:
     ports:
       - "${FRONTEND_PORT:-80}:80"
     healthcheck:
-      # nginx:alpine 是 busybox，有 wget 没 curl
-      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null || exit 1"]
+      # nginx:alpine 是 busybox，有 wget 没 curl。
+      # ⚠️ 必须写 127.0.0.1，不能写 localhost：容器的 /etc/hosts 里 localhost 同时映射
+      # 127.0.0.1 和 ::1，busybox 先试 ::1，而 nginx 只 listen 了 IPv4 的 80 ——
+      # 于是健康检查永远是 "Connection refused"，容器长期显示 (unhealthy)，
+      # 一旦有服务 depends_on: service_healthy 就会卡死在启动阶段。
+      # （后端那侧写 localhost 没事，是因为 Tomcat 默认双栈绑定。）
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 5
