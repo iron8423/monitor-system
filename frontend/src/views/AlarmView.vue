@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import * as api from '@/api/monitor'
@@ -17,6 +18,7 @@ import {
 
 defineOptions({ name: 'AlarmView' })
 
+const route = useRoute()
 const userStore = useUserStore()
 
 const rows = ref([])
@@ -90,7 +92,24 @@ async function doAction(action) {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  // 从角色工作台的待办队列点进来时带两个查询参数，这里认一下，
+  // 否则工作台上那一列「待确认警情」点进来只是丢到未筛选的列表，链接等于摆设：
+  //   ?status=PENDING  预置状态筛选（值班员队列 → 只看待确认）
+  //   ?id=123          直接打开那一条的详情抽屉
+  if (typeof route.query.status === 'string' && route.query.status) {
+    filters.value.status = route.query.status
+  }
+  await load()
+
+  const id = Number(route.query.id)
+  if (Number.isFinite(id) && id > 0) {
+    // 该警情可能不在当前这一页（队列里点的那条未必落在第 1 页 20 条内），
+    // 所以找不到就只拿 id 去查详情——openDetail 也只用得到 row.id。
+    await openDetail(rows.value.find((r) => r.id === id) || { id })
+  }
+})
+
 watch([pageNum, pageSize], load)
 
 function onFilterChange() {

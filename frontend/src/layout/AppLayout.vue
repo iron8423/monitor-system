@@ -16,7 +16,8 @@ const collapsed = ref(false)
 
 // 菜单 = 阶段 2~5 的交付清单。已实现的能点，未实现的 disabled，避免点了白页。
 const menus = [
-  { path: '/home', title: '总览', icon: 'Odometer', ready: true },
+  // 四个角色共用这一个入口，由 `/home` 按角色派发到各自的工作台
+  { path: '/home', title: '工作台', icon: 'Odometer', ready: true },
   { path: '/points', title: '测点与曲线', icon: 'DataLine', ready: true },
   { path: '/devices', title: '设备状态', icon: 'Cpu', ready: true },
   { path: '/screen', title: '3D 大屏', icon: 'Location', ready: true },
@@ -141,7 +142,14 @@ async function handleCommand(command) {
 
     <el-container class="body">
       <el-aside :width="collapsed ? '64px' : '210px'" class="aside">
-        <el-menu :default-active="route.path" :collapse="collapsed" class="menu" router>
+        <!--
+          active 认 `meta.menuPath` 而不是 `route.path`：四个角色的工作台是
+          /home/operator 这类**子路径**，而菜单 index 只有一个 `/home`，
+          直接绑 route.path 的话进了工作台菜单就不高亮了。
+          （menuPath 写错不会报错，只是静默不高亮——Element Plus 内部对
+          不存在的 activeIndex 是置空处理。改动路由 meta 时留意。）
+        -->
+        <el-menu :default-active="route.meta?.menuPath || route.path" :collapse="collapsed" class="menu" router>
           <el-menu-item
             v-for="menu in visibleMenus"
             :key="menu.path"

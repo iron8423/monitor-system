@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import * as api from '@/api/monitor'
+import { DEVICE_STATUS_LABELS, DEVICE_STATUS_TAG, label } from '@/utils/labels'
 
 /**
  * 设备状态（验收第 5 条的操作面：断开模拟器 → 设备标为离线并生成设备告警）。
@@ -17,9 +18,6 @@ defineOptions({ name: 'DeviceView' })
 const rows = ref([])
 const loading = ref(false)
 let timer = null
-
-const STATUS_LABELS = { ONLINE: '在线', OFFLINE: '离线', UNKNOWN: '未知' }
-const STATUS_TAG = { ONLINE: 'success', OFFLINE: 'info', UNKNOWN: 'warning' }
 
 async function load() {
   loading.value = true
@@ -68,8 +66,8 @@ function batteryClass(v) {
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
-            <el-tag :type="STATUS_TAG[row.status] || 'info'" size="small">
-              {{ STATUS_LABELS[row.status] || row.status || '未知' }}
+            <el-tag :type="DEVICE_STATUS_TAG[row.status] || 'info'" size="small">
+              {{ label(DEVICE_STATUS_LABELS, row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -92,6 +90,8 @@ function batteryClass(v) {
       <div class="mk-footnote">
         离线判据由后端 <span class="mk-mono">DeviceStatusPolicy</span> 判定（5 分钟未上报），
         前端不重复计算——两边各算一遍迟早会不一致。
+        <b>故障</b>（<span class="mk-mono">FAULT</span>）是人工在档案里显式标注的状态，
+        优先于推出来的离线，且这类设备<strong>不发离线告警</strong>——它只在设备页与运维台露面。
         低电量目前仅在此处展示，<strong>不产生告警</strong>（已定案暂不做）。
       </div>
     </div>

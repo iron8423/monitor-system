@@ -92,16 +92,23 @@ npm run preview    # 本地预览 dist
 src/
   api/          # 接口层：http.js（axios 实例 + 信封拆解 + 401 处理）、auth.js、monitor.js（监测数据 + SSE）
   cesium/       # createViewer.js（viewer + 地形/影像 + 相机）、pointLayer.js（测点实体与状态着色）
-  components/   # EChart.vue（通用 ECharts 封装）、SeriesChart.vue（测点时序 → option）
+  components/   # EChart.vue（通用 ECharts 封装）、SeriesChart.vue（测点时序 → option）、
+                # StatTiles.vue（KPI 磁贴行）、AlarmQueue.vue（紧凑警情队列）
+  composables/  # usePolling.js：挂载即取一次 + 定时轮询 + 卸载清理
   constants/    # status.js：质量/状态/告警级别枚举 + resolvePointVisual（全局统一取色口径）
   layout/       # AppLayout.vue（顶栏 + 侧边菜单 + 内容区 + 全局 SSE 连接）
-  router/       # 路由 + 登录守卫 + 角色门禁
+  router/       # 路由 + 登录守卫 + 角色门禁（ROLE_HOMES 是落地页的唯一数据源）
   scripts/      # copy-cesium.mjs：把 Cesium 运行时资源复制到 public/cesium/（postinstall 自动跑）
   stores/       # Pinia：user（登录态）、monitor（3D 大屏用的监测数据单一数据源）
   styles/       # 全局样式与 CSS 变量（含 .mk-panel / .mk-mono 等页面通用件）
   utils/        # token.js（localStorage 读写）、labels.js（枚举 → 中文展示文案）、format.js（时间/数字）
-  views/        # 页面：Login / Home（总览）/ Points（测点与曲线）/ Device / Alarm / Admin / Screen（3D 大屏）/ NotFound
+  views/        # 页面：Login / Points（测点与曲线）/ Device / Alarm / Admin / Screen（3D 大屏）/ NotFound
+  views/home/   # 四个角色各自的落地页（HomeAdmin / HomeOperator / HomeAnalyst / HomeMaintainer）
+                # + HomeNone（角色认不出来时的兜底页）
 ```
+
+`views/home/` 单开一层：那是路由 `/home` 的派发目标，与 `/points` `/devices` 这些
+「按内容分」的页面不同，它们是**按角色分**的，放在一起才好一起改。
 
 `utils/labels.js` 单独存在是有原因的：契约 §4 规定后端返回的 `status`/`level`/`lastAction`
 是**原始枚举串**、中文文案由前端映射。映射表集中放一处，否则同一个 `OBSERVING`
@@ -194,12 +201,43 @@ VITE_TERRAIN_MODE=ion     # ion = Cesium 官方真实地形；none = 不用地�
 - **`utils/labels.js`（A）与 `constants/status.js`（B）有部分重叠**：前者负责枚举 → 中文文案，
   后者是 3D 取色口径 + 质量/状态枚举。建议后续合并到一处，避免同一个枚举两套映射。
 
-## 角色差异化的现状（2026-09-11 核过）
+## 角色差异化（2026-09-11 落地）
 
-四个演示角色（`admin` / `operator` / `analyst` / `maintainer`）**共用同一套工作台**，
-差异只有三处：侧边菜单「管理端」仅 `ADMIN` 可见（`AppLayout.vue` 的 `menus[].roles`）、
-路由守卫拦 `/admin`（`router/index.js`）、以及**告警抽屉里能点的动作**（`AlarmView.vue` × `labels.js`）。
-四个主页面（总览 / 测点与曲线 / 设备状态 / 3D 大屏）四角色完全相同。
+四个演示角色各有一个**自己的工作台**，登录后按角色自动进入：
+
+| 账号 | 角色 | 落地页 | 主区块 | 队列口径 |
+|---|---|---|---|---|
+| `admin` | 管理员 | `/home/admin` 管理工作台 | 测点 chips + 最近警情 + 管理入口 | 全量（不筛状态） |
+| `operator` | 值班员 | `/home/operator` 值班工作台 | 待确认警情队列 | `status=PENDING` |
+| `analyst` | 研判员 | `/home/analyst` 研判工作台 | 待研判队列 + **该测点形变曲线** | `status=CONFIRMED` |
+| `maintainer` | 运维员 | `/home/maintainer` 运维工作台 | 设备异常表 + 待处置队列 | `status=PROCESSING` |
+
+外加 `/home/none` 兜底页（角色认不出来时用，见下）。
+
+### 三个队列为什么是按状态而不是「分给我的」
+
+后端 `Alarm` **没有负责人字段**，也没有任何「按当前用户过滤」的读端点，做不出「我的警情」。
+可动作→目标状态的映射是确定的（`AlarmConstants`：`confirm`→`CONFIRMED`、
+`research`→`OBSERVING`、`dispatch`/`handle`→`PROCESSING`），所以**岗位的待办正好是状态的一段**。
+这是四个页面能各不相同、且站得住的唯一依据。各页脚注都把这点写给用户看了。
+
+### 路由：`ROLE_HOMES` 是唯一数据源
+
+`router/index.js` 顶部的 `ROLE_HOMES` 数组派生四个落地页路由的 `name` 与 `meta.roles`。
+**不要手写第二条**：守卫在角色不匹配时会把人送到 `homeOf(role)`，一旦这张表与某条路由的
+`meta.roles` 失配，就会形成**守卫级无限重定向**——而 vue-router 的「30 次导航」保护整段包在
+`process.env.NODE_ENV !== 'production'` 里，**生产构建下被摇掉**，症状是微任务无限递归、标签页卡死。
+守卫里另有一条逃生舱（`if (to.name === target) → home-none`）兜住万一。
+
+`/home` 这条路由用 **`beforeEnter` 而不是 `redirect`** 派发：route-level redirect 在全局
+`beforeEach` **之前**求值，写成 redirect 的话未登录访问 `/` 会被先按空角色弹到兜底页，
+再拼出 `login?redirect=/home/none`，**登录后就永远落在兜底页**。
+
+### `/home/none` 为什么不能换成 `/screen`
+
+`/screen` 是顶层路由、**不套 `AppLayout`**，进去布局整个卸载（没有菜单），而大屏上的
+「退出大屏」又 `push('/home')` 跳回来——用户困在大屏里出不来。所以兜底页必须是
+`AppLayout` 内的一个子路由，且**不带 `meta.roles`**（带了就被守卫当成受限页又弹回去）。
 
 > ⚠️ **`utils/labels.js` 的 `ACTIONS_BY_ROLE` 只管按钮显不显示，不是权限边界。**
 > 强制在**后端** `AlarmConstants.ROLE_ACTIONS`（`AlarmService.act` 里校验，越权 403）。
@@ -207,7 +245,18 @@ VITE_TERRAIN_MODE=ion     # ion = Cesium 官方真实地形；none = 不用地�
 > 或「按钮没了但接口仍放行」。判定未知角色时**两边都是拒绝**（前端空集、后端 false）——
 > 这里原先前端写的是 `|| ACTIONS_BY_ROLE.ADMIN`，那是开放回退：角色字段一丢反而亮出管理员全套动作。
 
+### 顶栏角色标签（此前是死代码）
+
+`AppLayout.vue` 那个 `<el-tag>` 的条件是 `roleLabel !== displayName`，而四个种子账号的
+显示名恰好就是角色名（`admin` → "管理员"…），**条件恒假、从未渲染过**。改法是
+`DataInitializer` 把显示名换成真人名（陈立 / 李敏 / 王越 / 赵安），**标签代码一字未动**，
+死代码自然变活。顶栏现在是「真人名 + 角色」两段。
+
+> 种子账号显示名是**启动时校正**的（存在但不同则更新），不是只在创建时写——
+> 否则已经跑起来的库（compose 的 PG 卷）根本不会变。副作用是每次启动拉回这四个账号的显示名，
+> 可接受：它们密码固定、界面上无法编辑，本来就不是可改数据。
+
 已知未做（不是缺陷，是没排期）：
-- `AppLayout.vue` 顶栏那个角色 `<el-tag>` 条件是 `roleLabel !== displayName`，而四个种子账号
-  这两个字段完全相同，**条件恒假、从未渲染过**（死代码）。要显示得改条件或改种子数据。
-- 四个角色没有各自的落地页 / 首页卡片，登录后都进 `/home`。
+- 影像挂点 `/media` 详情页看图（阶段 5）；运维台的「设备维护记录」后端已有接口
+  （`/api/v1/maintenance-records`）但前端没页面。
+- 审计日志后端有接口（仅 ADMIN 可调），前端 `api/monitor.js` 未封装、无页面。

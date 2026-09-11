@@ -109,17 +109,22 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - **前端已可访问**（Vue3 + Vite + Element Plus + ECharts，阶段 3a 起含 Cesium）：
   开发态 `cd frontend && npm install && npm run dev` → <http://localhost:5173>；
   部署态就是上面的 `docker compose up -d` → <http://localhost>（`FRONTEND_PORT` 可改）。
-  已落地工作台五个页面（总览 / 测点与曲线 / 设备状态 / 告警中心含处置时间线 / **管理端读写**）
-  与独立整屏的 **3D 大屏 `/screen`**（真实地形 + 卫星影像 + 测点按状态着色 + 三级降级）；
+  已落地工作台页面：**四个角色各有自己的落地页**（管理工作台 / 值班工作台 / 研判工作台 /
+  运维工作台，登录后按角色自动进入；另有一个「未分配角色」兜底页）、测点与曲线、设备状态、
+  告警中心含处置时间线、**管理端读写**，以及独立整屏的
+  **3D 大屏 `/screen`**（真实地形 + 卫星影像 + 测点按状态着色 + 三级降级）；
   **影像挂点仍是待做**（`frontend/README.md` 有阶段表与已知限制）。
   浏览器端到端已在 **compose 形态**实测（下条）。
   ⚠️ 仍未完成：顶栏的 SSE 实时连接**尚无页面消费事件**（只有连接状态标签，
   页面级消费由 B 的 3b 接手）。
 - **浏览器端到端已在 compose 形态实测**（2026-09-11）：未登录访问 `/home` 被守卫拦下并
-  回跳 `/login?redirect=/home`、登录后回到原目标；五个工作台页与 `/screen` 均有真实数据；
-  跨页口径一致（设备页「在线」行数 == 总览「在线设备」）；管理端**新建 → 接口核对 → 删除**
-  全通（即验收第 7 条「平台管理端新建测点 → 业务端无需改代码立即可见」）；
-  全程零 4xx/5xx、零控制台报错。
+  回跳 `/login?redirect=/home`、登录后回到原目标；**四个角色各自落到自己的工作台**
+  （`/home/admin` `/home/operator` `/home/analyst` `/home/maintainer`，四条 URL 与四个页面
+  主区块互不相同，顶栏显示「真人名 + 角色」）；越权直达被弹回且**不形成重定向环**
+  （生产构建下 vue-router 的导航次数保护会被摇掉，环会卡死标签页，故刻意在生产产物上验）；
+  各页与 `/screen` 均有真实数据；跨页口径一致（设备页「在线」行数 == 总览「在线设备」）；
+  管理端**新建 → 接口核对 → 删除**全通（即验收第 7 条「平台管理端新建测点 → 业务端无需改代码
+  立即可见」）；全程零 4xx/5xx、零控制台报错。**四角色矩阵 45 断言 / 0 失败**。
 - **「取最新一行」的口径已收成单一实现**：`measurement` 同测点同 `collect_time` 可合法落多行
   （幂等键是 `device+message`，不含 collect_time），此时排序必须带 `id` 兜底，否则取到哪行由
   执行计划决定。此前 `MeasurementQueryService#latest` 有兜底、`ProjectSummaryService#maxDeformation`

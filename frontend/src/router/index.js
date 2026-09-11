@@ -2,6 +2,42 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { useUserStore } from '@/stores/user'
 
+/**
+ * 角色 → 落地页。**这是唯一数据源**：下面每个路由的 `name` 与 `meta.roles` 都从它派生。
+ *
+ * 为什么强调「唯一」：守卫在角色门禁不通过时会把人送到 `homeOf(role)`。若这张表的
+ * `name` 与该路由 `meta.roles` 写得不一致（比如表里 OPERATOR 指向一个 roles: ['ADMIN']
+ * 的路由），守卫就会把用户弹到他正待着的那个页面——**守卫级无限重定向**。而 vue-router
+ * 的「30 次导航」保护整段包在 `process.env.NODE_ENV !== 'production'` 里，**生产构建下被
+ * 摇掉**，结果是微任务无限递归、标签页卡死而不是报错。派生而非手写，就不存在失配。
+ */
+const ROLE_HOMES = [
+  { role: 'ADMIN', name: 'home-admin', title: '管理工作台', path: 'home/admin', component: () => import('@/views/home/HomeAdmin.vue') },
+  { role: 'OPERATOR', name: 'home-operator', title: '值班工作台', path: 'home/operator', component: () => import('@/views/home/HomeOperator.vue') },
+  { role: 'ANALYST', name: 'home-analyst', title: '研判工作台', path: 'home/analyst', component: () => import('@/views/home/HomeAnalyst.vue') },
+  { role: 'MAINTAINER', name: 'home-maintainer', title: '运维工作台', path: 'home/maintainer', component: () => import('@/views/home/HomeMaintainer.vue') },
+]
+
+const HOME_BY_ROLE = Object.fromEntries(ROLE_HOMES.map((h) => [h.role, h.name]))
+
+/**
+ * 认不出的角色（token 在、user 丢了，或后端将来加了新角色）落到这里。
+ *
+ * 兜底页**必须在 AppLayout 内且不带 `meta.roles`**，不能用 `/screen`：大屏是顶层路由、
+ * 不套布局，用户点侧栏「工作台」会被送到那儿，布局整个卸载、没有菜单，而大屏上的
+ * 「退出大屏」又 `push('/home')` 跳回来——用户在页面里出不来，只能改地址栏。
+ */
+const FALLBACK_HOME = 'home-none'
+
+const homeOf = (role) => HOME_BY_ROLE[role] || FALLBACK_HOME
+
+const roleHomeRoutes = ROLE_HOMES.map((h) => ({
+  path: h.path,
+  name: h.name,
+  component: h.component,
+  meta: { title: h.title, icon: 'Odometer', roles: [h.role], menuPath: '/home' },
+}))
+
 const routes = [
   {
     path: '/login',
@@ -24,8 +60,24 @@ const routes = [
       {
         path: 'home',
         name: 'home',
-        component: () => import('@/views/HomeView.vue'),
-        meta: { title: '总览', icon: 'Odometer' },
+        meta: { title: '工作台', icon: 'Odometer', menuPath: '/home' },
+        // 这里**必须用 beforeEnter，不能写成 redirect**。
+        //
+        // route-level redirect 在全局 beforeEach **之前**求值
+        // （vue-router: pushWithRedirect 里先 handleRedirectRecord、之后才 navigate 跑守卫）。
+        // 若用 redirect：未登录用户访问 / 或 /home 时，会先被按 role='' 弹到兜底页，
+        // 守卫拿到的 to 已经是兜底页，于是拼出 `login?redirect=/home/none`——
+        // 登录后就永远落在兜底页而不是自己的工作台。beforeEnter 在 beforeEach **之后**
+        // 执行，此时 to.fullPath 还是用户真正输入的 /home，`login?redirect` 天然正确。
+        beforeEnter: () => ({ name: homeOf(useUserStore().role) }),
+      },
+      ...roleHomeRoutes,
+      {
+        path: 'home/none',
+        name: FALLBACK_HOME,
+        component: () => import('@/views/home/HomeNone.vue'),
+        // 注意**不带 roles**：它就是给「角色认不出来」的人看的，带了就又弹回去了
+        meta: { title: '未分配角色', menuPath: '/home' },
       },
       {
         path: 'points',
@@ -66,15 +118,24 @@ const router = createRouter({
   routes,
 })
 
+// 路由名写错不是「静默 404」而是**抛异常**（matcher 取不到 name 直接 throw），
+// 且它在同步路径上抛出——而 `app.use(router)` 的首次导航是 `push().catch()`，
+// 同步 throw 穿不进 .catch，会直接打断安装、整站白屏。这里提前拦一道。
+if (import.meta.env.DEV) {
+  for (const name of [...Object.values(HOME_BY_ROLE), FALLBACK_HOME]) {
+    console.assert(router.hasRoute(name), `[router] 落地页路由名不存在: ${name}`)
+  }
+}
+
 router.beforeEach((to) => {
   const userStore = useUserStore()
   const title = to.meta?.title
   document.title = title ? `${title} · 通用监测管理系统` : '通用监测管理系统'
 
   if (to.meta?.public) {
-    // 已登录还去登录页 → 直接进工作台
+    // 已登录还去登录页 → 直接进自己的工作台（不是 /home，省一次跳转）
     if (to.name === 'login' && userStore.isLoggedIn) {
-      return { path: '/' }
+      return { name: homeOf(userStore.role) }
     }
     return true
   }
@@ -87,7 +148,14 @@ router.beforeEach((to) => {
   // 前端藏掉入口是为了不让用户点进去看一屏 403，不是安全措施。
   const roles = to.meta?.roles
   if (roles?.length && !roles.includes(userStore.role)) {
-    return { path: '/home' }
+    const target = homeOf(userStore.role)
+    // 逃生舱：绝不把用户弹回他正待着的页面。真出现 `homeOf` 与 meta.roles 失配
+    // （比如以后有人手工加了条路由却没从 ROLE_HOMES 派生），那就是守卫级死循环，
+    // 而 vue-router 的 30 次保护只在 dev 生效，生产会卡死标签页。
+    if (to.name === target) {
+      return { name: FALLBACK_HOME }
+    }
+    return { name: target }
   }
 
   return true

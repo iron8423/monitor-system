@@ -58,6 +58,31 @@ export const ALARM_TYPE_LABELS = {
 }
 
 /**
+ * 设备状态。**与上面的告警状态是两套枚举，别混**。
+ *
+ * 四个值都不来自 `device.status` 那一列的存量值——列表与详情端点会用
+ * `DeviceStatusPolicy.statusOf` 现算后覆盖（`DeviceController` 里有详尽注释）。
+ * 其中 `FAULT` 是**人工在档案里显式标注**的，优先于按上报时间推出来的离线，
+ * 而且被标故障的设备**不发离线告警**（`DeviceAlarmMonitor.isOffline` 里 FAULT 直接
+ * 返回 false），所以它在告警流里是哑的——只有设备页和运维台会把它露出来。
+ * 三者互斥且守恒：`ONLINE + OFFLINE + FAULT = 设备总数`。
+ */
+export const DEVICE_STATUS_LABELS = {
+  ONLINE: '在线',
+  OFFLINE: '离线',
+  FAULT: '故障',
+  UNKNOWN: '未知',
+}
+
+export const DEVICE_STATUS_TAG = {
+  ONLINE: 'success',
+  // 离线用灰不用红：它是常见的「暂时没数据」，真正的硬件故障由 FAULT 标红
+  OFFLINE: 'info',
+  FAULT: 'danger',
+  UNKNOWN: 'warning',
+}
+
+/**
  * 可执行的处置动作，按角色显隐。
  * 需求 §5 里四类角色各司其职（值班员确认 / 研判员研判 / 运维员处置）。
  *

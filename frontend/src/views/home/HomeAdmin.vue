@@ -1,23 +1,23 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import * as api from '@/api/monitor'
-import {
-  ALARM_TYPE_LABELS, LEVEL_LABELS, LEVEL_TAG, STATUS_LABELS, STATUS_TAG, label,
-} from '@/utils/labels'
+import AlarmQueue from '@/components/AlarmQueue.vue'
+import StatTiles from '@/components/StatTiles.vue'
+import { usePolling } from '@/composables/usePolling'
 
 /**
- * 总览（阶段 2）。
+ * 管理工作台（管理员）。四个角色工作台里唯一保留「全局总览」的一个——
+ * 需求 §3 给管理员的定位是建档配阈值、管账号权限与审计，所以要的是全貌而不是待办队列
+ * （待办队列在值班/研判/运维三页，见同目录另外三个文件）。
  *
  * 本页只做「当前态」的汇总：KPI 全部来自后端 `GET /projects/{id}/summary`，
  * 前端一个数都不自己算。设备在线数尤其不能自己数——离线判据在后端
  * `DeviceStatusPolicy`（5 分钟未上报），前端再算一遍就会和告警对不上。
- *
- * 3D 大屏是独立的 `/screen`（阶段 3），不在这里放半张地图充数。
  */
 
-defineOptions({ name: 'HomeView' })
+defineOptions({ name: 'HomeAdmin' })
 
 const router = useRouter()
 
@@ -53,16 +53,9 @@ async function load() {
   }
 }
 
-let timer = null
-
-onMounted(() => {
-  load()
-  // 汇总没有推送通道（SSE 只推 measurement/alarm 事件，不推 summary），
-  // 所以靠轮询兜底。30s 与后端统计口径同量级，不追求实时。
-  timer = setInterval(load, 30000)
-})
-
-onBeforeUnmount(() => clearInterval(timer))
+// 汇总没有推送通道（SSE 只推 measurement/alarm 事件，不推 summary），
+// 所以靠轮询兜底。30s 与后端统计口径同量级，不追求实时。
+usePolling(load, 30000)
 
 /**
  * 「最大形变」是**带符号**的：后端取各测点最新值中绝对值最大的那个，负向形变不取绝对值
@@ -82,7 +75,12 @@ const kpis = computed(() => [
   },
 ])
 
-const fmt = (v) => (v === null || v === undefined ? '—' : v)
+/** 管理员专属入口。审计日志后端有接口（仅 ADMIN 可调）但前端还没有页面，故不在此列。 */
+const shortcuts = [
+  { path: '/admin', title: '管理端', desc: '项目 / 场景 / 对象 / 测点 / 测项 / 设备 / 告警规则的增删改' },
+  { path: '/alarms', title: '告警中心', desc: '全部警情、处置时间线；管理员可执行全部六种处置动作' },
+  { path: '/screen', title: '3D 大屏', desc: '真实地形 + 卫星影像 + 测点标点的三维态势' },
+]
 </script>
 
 <template>
@@ -96,25 +94,7 @@ const fmt = (v) => (v === null || v === undefined ? '—' : v)
       class="mb"
     />
 
-    <div class="kpi-row">
-      <div v-for="k in kpis" :key="k.key" class="mk-panel kpi">
-        <span class="mk-muted kpi-label">
-          {{ k.label }}
-          <el-tooltip v-if="k.tip" :content="k.tip" placement="top">
-            <el-icon class="kpi-tip"><QuestionFilled /></el-icon>
-          </el-tooltip>
-        </span>
-        <span
-          class="mk-metric mk-mono"
-          :class="{
-            'mk-danger': k.danger && k.value > 0,
-            'mk-ok': k.ok && k.value > 0,
-          }"
-        >
-          {{ fmt(k.value) }}<small v-if="k.value != null && k.unit"> {{ k.unit }}</small>
-        </span>
-      </div>
-    </div>
+    <StatTiles :items="kpis" />
 
     <div class="cols">
       <div class="mk-panel col">
@@ -143,40 +123,27 @@ const fmt = (v) => (v === null || v === undefined ? '—' : v)
             全部
           </el-button>
         </div>
-        <el-table :data="recentAlarms" size="small" :show-header="false">
-          <el-table-column width="70">
-            <template #default="{ row }">
-              <el-tag :type="LEVEL_TAG[row.level]" size="small" effect="dark">
-                {{ label(LEVEL_LABELS, row.level) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column width="60">
-            <template #default="{ row }">
-              <span class="mk-muted">{{ label(ALARM_TYPE_LABELS, row.alarmType) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column min-width="120">
-            <template #default="{ row }">
-              <span class="mk-mono">{{ row.alarmType === 'DEVICE' ? row.deviceCode : row.pointCode }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column width="90">
-            <template #default="{ row }">
-              <el-tag :type="STATUS_TAG[row.status]" size="small">
-                {{ label(STATUS_LABELS, row.status) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column min-width="170">
-            <template #default="{ row }">
-              <span class="mk-mono mk-muted time">{{ row.triggeredAt }}</span>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty description="暂无警情" :image-size="50" />
-          </template>
-        </el-table>
+        <AlarmQueue
+          :alarms="recentAlarms"
+          show-status
+          empty-text="暂无警情"
+          @row-click="router.push('/alarms')"
+        />
+      </div>
+    </div>
+
+    <div class="mk-panel">
+      <div class="mk-panel-title">管理入口</div>
+      <div class="shortcuts">
+        <div
+          v-for="s in shortcuts"
+          :key="s.path"
+          class="shortcut"
+          @click="router.push(s.path)"
+        >
+          <div class="shortcut-title">{{ s.title }}</div>
+          <div class="mk-muted shortcut-desc">{{ s.desc }}</div>
+        </div>
       </div>
     </div>
 
@@ -186,6 +153,7 @@ const fmt = (v) => (v === null || v === undefined ? '—' : v)
         「在线设备」按后端
         <span class="mk-mono">DeviceStatusPolicy</span>（5 分钟未上报即离线）判定。
         三维态势见 <span class="mk-mono">/screen</span>（3D 大屏：真实地形 + 卫星影像 + 测点标点）。
+        值班 / 研判 / 运维三个岗位各有自己的工作台，登录后按角色自动进入。
       </div>
     </div>
   </div>
@@ -200,42 +168,6 @@ const fmt = (v) => (v === null || v === undefined ? '—' : v)
 
 .mb {
   margin-bottom: 0;
-}
-
-.kpi-row {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-}
-
-@media (max-width: 900px) {
-  .kpi-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-.kpi {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px 18px;
-}
-
-.kpi-label {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  font-size: 12px;
-}
-
-.kpi-tip {
-  font-size: 13px;
-  cursor: help;
-}
-
-.kpi small {
-  font-size: 13px;
-  font-weight: 400;
 }
 
 .cols {
@@ -273,7 +205,40 @@ const fmt = (v) => (v === null || v === undefined ? '—' : v)
   margin-left: 6px;
 }
 
-.time {
+.shortcuts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  padding: 14px 16px;
+}
+
+@media (max-width: 1100px) {
+  .shortcuts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.shortcut {
+  padding: 12px 14px;
+  border: 1px solid var(--mk-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.shortcut:hover {
+  border-color: var(--mk-primary);
+}
+
+.shortcut-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--mk-primary);
+}
+
+.shortcut-desc {
+  margin-top: 6px;
   font-size: 12px;
+  line-height: 1.6;
 }
 </style>

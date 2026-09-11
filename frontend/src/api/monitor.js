@@ -77,8 +77,13 @@ export function listDevices() {
 /**
  * GET /api/v1/devices/{id}/status → { status, online, lowBattery, lastReportTime }
  *
- * 与 `listDevices()` 的区别很重要：列表端点返回的是**档案表里存的** status，
- * 而这里是按 DeviceStatusPolicy **现算**的。两者会不一致（见 DeviceView 注释）。
+ * 这里曾经写着「列表端点返回的是档案表里存的 status，与这个是两回事」——**那句已经不是真的了**。
+ * `DeviceController` 覆盖了列表与详情，两个端点都会用 `DeviceStatusPolicy.statusOf` 现算后
+ * 覆盖 status，口径已经统一。所以取一台设备的状态**不必**调这个端点，`listDevices()` 里就有。
+ *
+ * 它比列表多给 `online` / `lowBattery` 两个布尔（列表只有推导后的 status 串）。
+ * **当前全前端没有调用点**——留着是因为后端端点确实存在（契约里有），
+ * 需要单台设备的布尔量时可直接用；不需要的话下次清理时删掉。
  */
 export function deviceStatus(id) {
   return http.get(`/v1/devices/${id}/status`)
