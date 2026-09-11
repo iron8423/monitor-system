@@ -52,11 +52,36 @@ function connectStream() {
   // 顺便把连接建立起来，页面挂载时订阅就不会漏掉开头的事件。
 }
 
-onMounted(connectStream)
+/*
+ * 整页卸载（F5、直接输地址、跳外链）时 onBeforeUnmount **不会执行**——文档是被丢弃的，
+ * Vue 没有机会做清理。而这是一条长连接：nginx 非缓冲反代只能靠「向客户端写失败」察觉
+ * 对方已走，而第一次写进半关闭的 socket 会成功，所以要等**第二次**心跳（30s×2）才收尾。
+ * 这段时间里那条半关闭的 socket 仍占着浏览器「单源 6 连接」的名额——连刷 6 次，
+ * 此后所有请求全部排队，界面看起来就是死了几十秒。
+ * 显式 close 让浏览器当场回收这个名额，不必等对端。
+ */
+function onPageShow(event) {
+  // 从 bfcache 回来时 pagehide 已经关过连接了，这里必须补上，
+  // 否则用户按一次「后退」SSE 就**静默地**再也不来——页面看起来一切正常，
+  // 只是数据永远停在那一刻，这是最难查的一类故障
+  if (event.persisted) connectStream()
+}
 
-onBeforeUnmount(() => {
+onMounted(() => {
+  connectStream()
+  window.addEventListener('pagehide', disconnectStream)
+  window.addEventListener('pageshow', onPageShow)
+})
+
+function disconnectStream() {
   stream?.close()
   stream = null
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', disconnectStream)
+  window.removeEventListener('pageshow', onPageShow)
+  disconnectStream()
 })
 
 async function handleCommand(command) {
