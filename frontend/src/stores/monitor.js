@@ -13,6 +13,8 @@ export const useMonitorStore = defineStore('monitor', {
   state: () => ({
     loading: false,
     loadedAt: '',
+    /** 首屏加载失败的原因；非空时视图要显示「失败」，不能一直显示「加载中」 */
+    error: null,
 
     projects: [],
     projectId: null,
@@ -62,6 +64,7 @@ export const useMonitorStore = defineStore('monitor', {
     /** 首屏快照：档案 + 概览 + 每个测点的最新值（并发取，个别失败不影响整体） */
     async loadSnapshot() {
       this.loading = true
+      this.error = null
       try {
         if (!this.projects.length) {
           this.projects = await listProjects()
@@ -83,6 +86,11 @@ export const useMonitorStore = defineStore('monitor', {
 
         await this.refreshLatest()
         this.loadedAt = new Date().toISOString()
+      } catch (e) {
+        // 必须把失败**记下来**，不能只置 loading=false 就走。
+        // loadedAt 仍然是空串，而视图那条 `!loadedAt → '加载中…'` 会**永远**成立——
+        // 于是「请求失败」被显示成「还在加载」，一个不会自己结束的假象。
+        this.error = e?.message || '数据加载失败'
       } finally {
         this.loading = false
       }

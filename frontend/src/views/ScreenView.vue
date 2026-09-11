@@ -49,7 +49,10 @@ const IMAGERY_TEXT = {
 const points = computed(() => store.enrichedPoints)
 const selected = computed(() => points.value.find((p) => p.id === popup.pointId) || null)
 // 首屏还没加载完时要显示「加载中」，不能先亮"暂无数据"（会让人以为系统坏了）
+// 失败必须单独判——否则 !loadedAt 会永远成立，加载失败被显示成「加载中」，
+// 一个不会自己结束的状态（见 stores/monitor.js 的 loadSnapshot）
 const dataStatus = computed(() => {
+  if (store.error) return '加载失败'
   if (store.loading || !store.loadedAt) return '加载中…'
   return store.dataPointCount ? '正在报数' : '暂无数据'
 })
@@ -189,12 +192,14 @@ onBeforeUnmount(() => {
         <span class="project">{{ store.currentProject?.name || '—' }}</span>
       </div>
       <div class="topbar-right">
-        <span class="chip" :class="store.dataPointCount ? 'ok' : 'warn'">{{ dataStatus }}</span>
+        <span class="chip" :class="store.error ? 'err' : store.dataPointCount ? 'ok' : 'warn'">{{ dataStatus }}</span>
         <span class="chip" :class="terrainState === 'ok' ? 'ok' : 'dim'">{{ TERRAIN_TEXT[terrainState] }}</span>
         <span class="chip" :class="imageryState === 'ion' ? 'ok' : 'dim'">{{ IMAGERY_TEXT[imageryState] }}</span>
         <span class="chip dim">更新于 {{ fromNow(store.loadedAt) }}</span>
         <button class="btn" @click="loadData">刷新</button>
-        <button class="btn" @click="router.push('/overview')">退出大屏</button>
+        <!-- 目标是 /home（总览），不是 /overview——后者没有注册路由，
+             点下去会落进 catch-all 的 NotFoundView -->
+        <button class="btn" @click="router.push('/home')">退出大屏</button>
       </div>
     </header>
 
@@ -353,6 +358,13 @@ onBeforeUnmount(() => {
 
 .chip.dim {
   color: #8fa9c6;
+}
+
+/* 加载失败要用告警红：琥珀色「warn」在这块深色大屏上不够刺眼，
+   而这一格恰恰是演示时「系统到底有没有在跑」的第一眼 */
+.chip.err {
+  color: #ff8a8a;
+  border-color: rgba(255, 138, 138, 0.5);
 }
 
 .btn {
