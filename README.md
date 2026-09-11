@@ -20,7 +20,7 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 │   └── com.monitor/
 │       ├── common·auth·organization·project·asset·audit   A 底座（A0–A4，已验收）
 │       └── telemetry            B1 ingest 接入骨架
-├── frontend/                   Vue3 + Cesium 前端（阶段 2，B 主导）
+├── frontend/                   Vue3 + Vite + Element Plus + ECharts（3D 大屏待做，见其 README）
 └── tools/
     ├── radar_csv_replay/       真雷达 CSV 回放适配器（Python，B 侧）
     ├── radar_simulator/        雷达数据模拟器（Python，无外部依赖，验收链第一环）
@@ -99,8 +99,13 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - **Docker Compose 一键启动已落地**（B-3）：`docker compose up -d` 起 db + backend，
   已实测 —— 容器重建后数据仍在（`measurement/alarm/monitor_point` 计数与 schema 版本前后一致、
   Flyway 不重跑）、影像落卷、对容器跑验收 **173/173 全绿**。
-  验收第 8 条的**前端部分仍未达**：`frontend/` 还是空的，浏览器可访问面目前只有后端自己的
-  swagger-ui；`docker-compose.yml` 末尾留了前端服务该长什么样的注释块。
+- **前端已可访问**（Vue3 + Vite + Element Plus + ECharts）：`cd frontend && npm install && npm run dev`
+  → <http://localhost:5173>，`admin / 123456` 登录。已落地总览 / 测点与曲线 / 设备状态 /
+  告警中心（含处置时间线）/ 管理端（只读）五个页面，SSE 实时连接在顶栏可见；
+  **3D 大屏与影像挂点仍是待做**（`frontend/README.md` 有阶段表与已知限制）。
+  浏览器端到端已实测（守卫 / 登录回跳 / 曲线渲染 / 无控制台报错）。
+  ⚠️ 验收第 8 条的**「一键」尚未覆盖前端**：构建产物还没进 compose，
+  `docker-compose.yml` 末尾留了前端服务该长什么样的注释块。
 - **调试面已按 profile 收窄**（B-7）：H2 控制台只在基础 profile 开着，`postgres` profile 显式关闭，
   且 `SecurityConfig` 的放行跟着这个开关走；`frameOptions` 由 `disable()` 收成 `sameOrigin()`。
   swagger 保留放行（联调期前端要读 OpenAPI）。
@@ -108,4 +113,4 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   现行事实源 = `docs/message-contract.md`（消息契约）+ `docs/B侧接口契约_M0.md`（接口/字段/枚举）；
   `M0_接口冻结_致B_v1.md` 已就地作废（D1–D10 编号仍由它定义，数值以现行文档/代码为准）。
 - 阶段 1 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量/数据中断告警未做——**用户定案暂不做**；
-  ② 第 8 条的 `docker compose up` 编排（B-3）未做——本机 Docker 已装，PG 侧已手工 `docker run` 验过。
+  ② 3D 大屏 `/screen`（阶段 3）与影像挂点 `/media`（阶段 5）未做；③ 管理端写操作未做（当前只读）。
