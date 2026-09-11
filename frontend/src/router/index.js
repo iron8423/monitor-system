@@ -10,6 +10,13 @@ const routes = [
     meta: { public: true, title: '登录' },
   },
   {
+    // 3D 大屏（阶段 3）：独立于工作台布局，占满整屏、自带 HUD，不套侧边菜单
+    path: '/screen',
+    name: 'screen',
+    component: () => import('@/views/ScreenView.vue'),
+    meta: { title: '三维大屏', icon: 'Location' },
+  },
+  {
     path: '/',
     component: () => import('@/layout/AppLayout.vue'),
     redirect: '/home',

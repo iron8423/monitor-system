@@ -1,0 +1,3 @@
+# Cesium 运行时资源：由 npm run cesium:assets（postinstall 自动执行）从 node_modules 复制，
+# 属于构建产物，不入库。
+public/cesium/

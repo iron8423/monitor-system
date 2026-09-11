@@ -91,18 +91,59 @@ npm run preview    # 本地预览 dist
 ```
 src/
   api/          # 接口层：http.js（axios 实例 + 信封拆解 + 401 处理）、auth.js、monitor.js（监测数据 + SSE）
+  cesium/       # createViewer.js（viewer + 地形/影像 + 相机）、pointLayer.js（测点实体与状态着色）
   components/   # EChart.vue（通用 ECharts 封装）、SeriesChart.vue（测点时序 → option）
+  constants/    # status.js：质量/状态/告警级别枚举 + resolvePointVisual（全局统一取色口径）
   layout/       # AppLayout.vue（顶栏 + 侧边菜单 + 内容区 + 全局 SSE 连接）
   router/       # 路由 + 登录守卫 + 角色门禁
-  stores/       # Pinia：user（token / 用户信息 / 登录登出）
+  scripts/      # copy-cesium.mjs：把 Cesium 运行时资源复制到 public/cesium/（postinstall 自动跑）
+  stores/       # Pinia：user（登录态）、monitor（3D 大屏用的监测数据单一数据源）
   styles/       # 全局样式与 CSS 变量（含 .mk-panel / .mk-mono 等页面通用件）
-  utils/        # token.js（localStorage 读写）、labels.js（枚举 → 中文展示文案）
-  views/        # 页面：Login / Home（总览）/ Points（测点与曲线）/ Device / Alarm / Admin / NotFound
+  utils/        # token.js（localStorage 读写）、labels.js（枚举 → 中文展示文案）、format.js（时间/数字）
+  views/        # 页面：Login / Home（总览）/ Points（测点与曲线）/ Device / Alarm / Admin / Screen（3D 大屏）/ NotFound
 ```
 
 `utils/labels.js` 单独存在是有原因的：契约 §4 规定后端返回的 `status`/`level`/`lastAction`
 是**原始枚举串**、中文文案由前端映射。映射表集中放一处，否则同一个 `OBSERVING`
 在两个组件里会译成两个词。
+
+## 3D 大屏（Cesium，阶段 3a）
+
+路由 `/screen` 是**独立于工作台布局**的整屏页面（自带 HUD，不套侧边菜单），入口在侧边栏「3D 大屏」。
+
+### 依赖与静态资源
+
+- `cesium`（当前 1.145.0）是普通依赖。
+- Cesium 运行时要去 `/cesium/` 找 Workers / Assets / Widgets / ThirdParty —— 这些**不是 JS 模块**，
+  打包器不会带上。项目用 `scripts/copy-cesium.mjs` 从 node_modules 复制到 `public/cesium/`，
+  由 `npm install` 的 `postinstall` **自动执行**（也可手动 `npm run cesium:assets`）。
+  `public/cesium/` 是构建产物，已由 `frontend/.gitignore` 忽略。
+- `vite.config.js` 里 `define: { CESIUM_BASE_URL: '"/cesium/"' }` 告诉 Cesium 去哪儿取这些文件。
+
+### 访问令牌与地形模式
+
+配置放 `frontend/.env.local`（**不进 git**，模板见 `.env.example`）：
+
+```
+VITE_CESIUM_ION_TOKEN=<ion 控制台的 Access Token>
+VITE_TERRAIN_MODE=ion     # ion = Cesium 官方真实地形；none = 不用地形（断网兜底）
+```
+
+令牌在 <https://ion.cesium.com/tokens> 生成。**前端里的 token 会随构建产物公开**，
+正式环境请在 ion 后台限制来源域名与用量。
+
+### 降级策略
+
+大屏是「先保证出画面，再逐步升级」：同步建好 viewer（无地形、深色球体）→ 页面立刻有画面；
+再异步加载影像（ion 卫星影像失败则退 Carto 深色底图）与地形（失败则标记「地形降级」，
+立柱改用档案高程）。顶栏三个状态灯（数据 / 地形 / 影像）实时反映当前用的是哪一层，
+**断网也不会白屏**。
+
+### 坐标口径（重要）
+
+档案里的 `altitude`（如 P-HK01 = 30m）与该点**真实地形高度**（实测约 7m）相差二十多米。
+大屏在真实地形就绪后用 `sampleTerrainMostDetailed` 采样地形高度，把立柱「种」在地面上；
+档案高程仍显示在测点页。立柱高度是视觉示意，图例里已标注「立柱高度为示意，非实测量值」。
 
 ## 关于跨域（重要）
 
@@ -124,7 +165,7 @@ src/
 |---|---|---|
 | 1 | 工程骨架 + 登录（JWT 存储 / 请求头注入 / 路由守卫） | ✅ |
 | 2 | 总览 / 测点页（points、latest、series、summary） | ✅ 总览 + 测点与曲线已落地；设备状态页另加 |
-| 3 | Cesium 3D 大屏（地形 / 标点着色 / 弹窗 / 时间轴 / 热力图） | 待做 |
+| 3 | Cesium 3D 大屏（地形 / 标点着色 / 弹窗 / 时间轴 / 热力图） | **3a ✅**（真实地形 + 卫星影像 + 标点着色 + 点击弹窗 + 三级降级）；3b 时间轴 / 热力图 / SSE 直连待做 |
 | 4 | 告警中心 + 管理端（alarms / actions / 规则 CRUD） | 告警中心 ✅（含处置时间线）；管理端**只读**，写操作待做 |
 | 5 | 无人机影像挂点（media） | 待做 |
 
@@ -141,3 +182,8 @@ src/
 - **曲线阈值线是写死的 ±3mm**：应当来自 `/alarm-rules`，等规则页做出来再改成拉接口。
 - **图表库警告**：`echarts` 单独成 chunk 后 `PointsView` 产物约 1.1MB，
   构建时会有「chunk 大于 500kB」的提示；当前不做 `manualChunks` 拆分，等真在意首屏再处理。
+- **3D 大屏目前靠 10s 轮询刷新**：`AppLayout` 里那条全局 SSE 连接只用于顶栏「实时已连接」
+  状态灯，页面拿不到它（`stream` 是布局内的局部变量，页面无法订阅）。3b 会把 SSE 收口到
+  Pinia store，让大屏改由推送驱动（点位实时跳动 + 告警脉冲）。
+- **`utils/labels.js`（A）与 `constants/status.js`（B）有部分重叠**：前者负责枚举 → 中文文案，
+  后者是 3D 取色口径 + 质量/状态枚举。建议后续合并到一处，避免同一个枚举两套映射。

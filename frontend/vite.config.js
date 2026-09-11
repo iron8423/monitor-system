@@ -6,6 +6,11 @@ import vue from '@vitejs/plugin-vue'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  // Cesium 运行时按全局标识符 CESIUM_BASE_URL 决定 Workers/Assets 的加载路径
+  // （这些不是 JS 模块，打包器不会带上，由 scripts/copy-cesium.mjs 复制到 public/cesium/）
+  define: {
+    CESIUM_BASE_URL: JSON.stringify('/cesium/'),
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

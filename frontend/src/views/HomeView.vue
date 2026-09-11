@@ -185,7 +185,7 @@ const fmt = (v) => (v === null || v === undefined ? '—' : v)
         KPI 全部取自 <span class="mk-mono">GET /projects/{id}/summary</span>，
         「在线设备」按后端
         <span class="mk-mono">DeviceStatusPolicy</span>（5 分钟未上报即离线）判定。
-        三维态势在 <span class="mk-mono">/screen</span>（阶段 3），尚未实现。
+        三维态势见 <span class="mk-mono">/screen</span>（3D 大屏：真实地形 + 卫星影像 + 测点标点）。
       </div>
     </div>
   </div>

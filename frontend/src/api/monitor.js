@@ -41,6 +41,16 @@ export function listProjects() {
   return http.get('/v1/projects')
 }
 
+/** GET /api/v1/scenes → Scene[]（裸数组）。3D 大屏按场景给测点分组用 */
+export function listScenes() {
+  return http.get('/v1/scenes')
+}
+
+/** GET /api/v1/objects → MonitorObject[]（裸数组）。测点 → 对象 → 场景 的归属链 */
+export function listObjects() {
+  return http.get('/v1/objects')
+}
+
 /** GET /api/v1/alarms → PageResult<Alarm> */
 export function listAlarms(params = {}) {
   return http.get('/v1/alarms', { params })

@@ -19,7 +19,7 @@ const menus = [
   { path: '/home', title: '总览', icon: 'Odometer', ready: true },
   { path: '/points', title: '测点与曲线', icon: 'DataLine', ready: true },
   { path: '/devices', title: '设备状态', icon: 'Cpu', ready: true },
-  { path: '/screen', title: '3D 大屏', icon: 'Location', ready: false, stage: '阶段 3' },
+  { path: '/screen', title: '3D 大屏', icon: 'Location', ready: true },
   { path: '/alarms', title: '告警中心', icon: 'Bell', ready: true },
   { path: '/admin', title: '管理端', icon: 'Setting', ready: true, roles: ['ADMIN'] },
   { path: '/media', title: '影像挂点', icon: 'Picture', ready: false, stage: '阶段 5' },
