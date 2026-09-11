@@ -39,7 +39,7 @@ git 已含首个提交 `221d96b`（A 交付基线，B 可拉分支协同）。
 | A-4 | schema/seed **A 唯一维护**：B 加表/加列需求走 A 统一出 V3 | 无 | 防两人同仓改迁移脚本冲突（§10 风险 1）；M0 冻结后 schema 视为冻结，只进 V3 不回头改 V1/V2（**已在执行**：V3 加设备告警列、V4 补升级档规则，均未回头改 V1/V2） |
 | A-5 | **契约接口人**：配合 B 的 ingest 落库拆行、latest/series 返回、alarm_rule 字段答疑 | 随 B 开发节奏 | 只答疑/出 V3，不改已冻结 schema |
 | A-6 | （可选）CesiumJS 可行性 spike | 无 | §10 风险 4：B 的 3D 大屏攻坚前置，A 有空档先验「真实地形 + 标点变色 + 点击弹窗」可行性，非必须 |
-| A-7 | **验收套件落仓** | ✅ 已完成 | `tools/acceptance/`：**8 套件 / 173 条断言** + `run-all.sh --fresh`（另起空库后端）+ README（脚本↔§9 验收条映射）。覆盖 §9 里后端可独立验证的部分。空库连跑两次 173/173。对应 M5 判据「一键过验收脚本」的后端部分。 |
+| A-7 | **验收套件落仓** | ✅ 已完成 | `tools/acceptance/`：**8 套件 / 175 条断言**（2026-09-11 由 173 增至 175，新增 `03-query.sh` ⑨）+ `run-all.sh --fresh`（另起空库后端）+ README（脚本↔§9 验收条映射）。覆盖 §9 里后端可独立验证的部分。H2 与 PG 两个形态各 175/175。对应 M5 判据「一键过验收脚本」的后端部分。 |
 | A-8 | **雷达数据模拟器**（验收链第一环） | ✅ 已完成（2026-09-10） | `tools/radar_simulator/radar_simulator.py`（Python 3 标准库，无第三方依赖）+ README。按 `message-contract.md` **连续造数**，不依赖任何外部数据——`tools/radar_csv_replay/` 是**回放器不是生成器**（要真雷达 CSV，默认还指向 B 的 Windows 桌面），拿不到数据就一步也跑不了，于是链子最上游一直没人跑过、套件全用 curl 合成报文。模拟器补上起点：`--step-minutes` 模拟时钟（形变按速率积分，避免墙钟反推出几千 mm/d 的速率）、`--inject-overlimit/duplicate/suspect/outage` 四种注入。新增 `tools/acceptance/08-simulator.sh`（17 条断言）把它纳入一键验收。 |
 
 > B 侧阶段 1 任务：B0–B5（telemetry/模拟器/quality/alarm/realtime/media）→ 在 M1/M2 联调点与 A 汇合。
@@ -74,7 +74,7 @@ git 已含首个提交 `221d96b`（A 交付基线，B 可拉分支协同）。
 | M2 后端闭环 | 阶段 1 · 第 5 天 | A：asset/audit（✅ 已完成）+schema 稳定；B：alarm 状态机/realtime/media（✅ 由 A 就地补齐） | 支持 schema/契约 | **超限 → 告警 → 处置 → 解除全链** ✅ 已达成（04/08 套件断言） |
 | M3 前端门面 | 阶段 2 · 第 8 天 | 登录+位移分析页 | 供曲线接口联调 | ✅ **前端曲线拉到真实数据**（2026-09-11：浏览器实测 canvas 1100×320、`P-HK01` 47 点）。3D 大屏已于 2026-09-11 由 B 并入（`ddd3103`，阶段 3a） |
 | M4 前端闭环 | 阶段 2 · 第 11 天 | 告警中心+管理端；A：设备闭环+部署 | 开始 A5 | 告警处置 ✅（含时间线）；**新建测点/规则生效** ⏳ 管理端当前只读，写操作待做 |
-| M5 演示就绪 | 阶段 2 · 第 14 天 | 影像挂点+实时；A：Docker Compose | ✅ A5 已完成（B-3，2026-09-10） | ✅ `docker compose up` + `run-all.sh` 一键过验收脚本（173/173）；前端已可浏览器访问（⚠️ **产物尚未进 compose**，`docker-compose.yml` 末尾仍是注释块） |
+| M5 演示就绪 | 阶段 2 · 第 14 天 | 影像挂点+实时；A：Docker Compose | ✅ A5 已完成（B-3，2026-09-10） | ✅ `docker compose up` + `run-all.sh` 一键过验收脚本（2026-09-11 复跑 **175/175**）；前端已可浏览器访问（⚠️ **产物尚未进 compose**，`docker-compose.yml` 末尾仍是注释块） |
 
 ## 4. 验收脚本 8 条 · A 的参与面
 

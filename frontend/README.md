@@ -1,6 +1,6 @@
 # 前端（阶段 2）· 通用监测管理系统
 
-Vue 3 + Vite + Element Plus + ECharts（阶段 3 再引入 CesiumJS）。
+Vue 3 + Vite + Element Plus + ECharts + CesiumJS（阶段 3a 已引入，3D 大屏在 `/screen`）。
 
 后端接口契约见仓内 `docs/message-contract.md`、`docs/B侧接口契约_M0.md`；后端代码在 `../backend`。
 
