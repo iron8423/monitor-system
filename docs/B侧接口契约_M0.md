@@ -69,6 +69,10 @@
 > `results` 则**每条消息一项**。
 
 > 边界：`deviceId/pointCode` 不存在 → REJECTED；幂等命中 → DUPLICATE；质量规则见消息契约 §3。
+> **`pointCode` 长度上限 64 字符**（`monitor_point.code` 与 `measurement.point_code` 现同为
+> `VARCHAR(64)`，V5 对齐）。超过 64 的点号在**建档接口**就会被 `@Size(max=64)` 挡成 400，
+> 不会走到上报；设备侧若上报了档案里不存在的点号（含超长），按上面第一条 REJECTED。
+> 此前两处宽度不一致（64 / 32）导致 33–64 字符的点号「建得出来、一上报就 500」，已修（B-13）。
 > **`collectTime` 是必填且必须可解析**：缺失或格式非法 → 整条 REJECTED（计入 `rejected`），
 > 不会替你取当前时间兜底。理由：兜底取 `now()` 会让设备的坏时间戳被盖上「刚刚收到」的章，
 > 而设备在线判定（`DeviceStatusPolicy`，5 分钟窗口）只认最后上报时间——**设备一直在报垃圾却永远显示在线**，

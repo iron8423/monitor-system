@@ -124,6 +124,43 @@ ingest_id "ing2-$RUN_ID-lat2" "$POINT" "$CT" '"defo_mm":2.22' >/dev/null
 check "同 collect_time 取后写的一条" "2.22" \
   "$(curl -s "$BASE/points/$PID/latest" -H "$AUTH" | data_of "['latest']['defo_mm']")"
 
+section "⑫ 长点号（33–64 字符）：建得出来就必须收得到数（B-13）"
+# 这一组是**回归锚**，对应真实缺陷：`monitor_point.code` 是 VARCHAR(64)，而冗余业务键
+# `measurement.point_code` 只有 VARCHAR(32)。33–64 字符的点号于是「建档 200、一上报就 500」
+# `value too long for type character varying(32)`——数据静默丢失，且没有任何前置提示。
+# V5 把两处对齐到 64，并在建档侧加 `@Size(max=64)` 把超限的挡在入口。
+#
+# 改回 V5 之前的状态，本条会红（HTTP 500）。长度用 python 精确构造，避免 RUN_ID 长度变化
+# 让「40 字符」这个前提悄悄失真——那样断言会变成一条永远为真的空测试。
+LONG_POINT=$(python3 -c "print(('P-LONG-$RUN_ID-' + 'X'*60)[:40])")
+check "构造的长点号确为 40 字符（断言前提）" "40" "$(printf '%s' "$LONG_POINT" | wc -c | tr -d ' ')"
+LPID=$(curl -s -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
+       -d "{\"objectId\":1,\"code\":\"$LONG_POINT\",\"name\":\"长点号验收临时测点\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
+       | data_of "['id']")
+check "40 字符点号建档成功" "True" "$([ -n "$LPID" ] && [ "$LPID" != "None" ] && echo True || echo False)"
+LR=$(curl -s -w '\n%{http_code}' -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
+     -d "{\"items\":[{\"messageId\":\"long-$RUN_ID\",\"deviceId\":\"radar-001\",\"pointCode\":\"$LONG_POINT\",\"collectTime\":\"2026-08-27T18:00:00+08:00\",\"quality\":\"VALID\",\"metrics\":{\"defo_mm\":7.5}}]}")
+check "长点号上报不被拒（改前此处 500）" "200" "$(printf '%s' "$LR" | tail -1)"
+check "长点号上报 accepted=1" "1" "$(printf '%s' "$LR" | head -1 | data_of "['accepted']")"
+check "长点号能查回最新值" "7.5" \
+  "$(curl -s "$BASE/points/$LPID/latest" -H "$AUTH" | data_of "['latest']['defo_mm']")"
+
+# 另一半：超过 64 的必须在**建档时就**被挡住。缺了它，超长点号仍会建出来，
+# 只是把 500 从建档挪到上报——正是这个缺陷原本的样子。
+OVER_POINT=$(python3 -c "print('P-OVER-' + 'Y'*70)")
+check "77 字符点号建档 -> 400（挡在入口）" "400" \
+  "$(http_code -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
+     -d "{\"objectId\":1,\"code\":\"$OVER_POINT\",\"name\":\"超长点号\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}")"
+check "超长点号的报错说得清原因" "True" \
+  "$(curl -s -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
+     -d "{\"objectId\":1,\"code\":\"$OVER_POINT\",\"name\":\"超长点号\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
+     | python3 -c "
+import sys,json
+print('64' in json.load(sys.stdin)['message'])")"
+
+DEL2=$(http_code -X DELETE "$BASE/points/$LPID" -H "$AUTH")
+[ "$DEL2" = "200" ] && info "已回收长点号临时测点" || info "长点号临时测点未回收（HTTP $DEL2），可忽略"
+
 DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
 [ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
 

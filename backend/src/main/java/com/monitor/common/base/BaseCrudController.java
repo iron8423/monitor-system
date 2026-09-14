@@ -6,6 +6,7 @@ import com.monitor.audit.annotation.AuditAction;
 import com.monitor.common.PageResult;
 import com.monitor.common.Result;
 import com.monitor.common.exception.BizException;
+import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -46,10 +47,16 @@ public abstract class BaseCrudController<T extends BaseEntity> {
         return Result.ok(entity);
     }
 
+    /**
+     * {@code @Valid} 在这里对**所有**子类生效，但只有声明了约束注解的实体才真的会被校验——
+     * 目前只有 {@link com.monitor.project.entity.MonitorPoint#getCode()} 一个（B-13）。
+     * 其余实体没有任何约束注解，`@Valid` 对它们是空操作，所以加在这里是安全的；
+     * 校验失败由 {@code GlobalExceptionHandler} 统一转成 400 + 字段文案。
+     */
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     @AuditAction(action = "创建")
-    public Result<T> create(@RequestBody T entity) {
+    public Result<T> create(@Valid @RequestBody T entity) {
         mapper().insert(entity);
         return Result.ok(entity);
     }
@@ -57,7 +64,7 @@ public abstract class BaseCrudController<T extends BaseEntity> {
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     @AuditAction(action = "更新")
-    public Result<T> update(@PathVariable Long id, @RequestBody T entity) {
+    public Result<T> update(@PathVariable Long id, @Valid @RequestBody T entity) {
         entity.setId(id);
         mapper().updateById(entity);
         return Result.ok(mapper().selectById(id));
