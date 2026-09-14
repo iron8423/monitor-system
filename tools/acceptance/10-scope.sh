@@ -28,8 +28,10 @@ source "$HERE/lib.sh"
 # 这个套件第一次跑就是这么红的：50 条失败里混着几条假绿，根因是一个字符串拼接。
 TOKEN=$(login)                                           # admin（全量视角）
 AUTH="Authorization: Bearer $TOKEN"
-OP_AUTH="Authorization: Bearer $(login_as operator)"     # 李敏：在项目 1
-OUT_AUTH="Authorization: Bearer $(login_as outsider)"    # 无项目（对照组）
+OP_TOKEN=$(login_as operator)                            # 李敏：在项目 1（⑪ 订阅 SSE 要裸 token）
+OP_AUTH="Authorization: Bearer $OP_TOKEN"
+OUT_TOKEN=$(login_as outsider)                           # 无项目（对照组）
+OUT_AUTH="Authorization: Bearer $OUT_TOKEN"
 
 # 前提自检：三个身份都必须真的能用，否则后面是「红成一片」而不是「隔离坏了」——
 # 两者在输出上长得一样，必须在这里分开。退出码 2 = 环境问题（同 lib.sh 的约定）。
@@ -333,7 +335,102 @@ check "李敏读它 -> 403" "403" "$(http_code "$BASE/maintenance-records/$REC" 
 check "李敏按设备过滤维护记录 -> 403" "403" \
   "$(http_code "$BASE/maintenance-records?deviceId=$DEV_ID" -H "$OP_AUTH")"
 
-section "⑪ 回收：套件自己不留垃圾"
+section "⑪ 推送侧：查询挡住了不够，SSE 也得按订阅者挡（日志 §120 的根治）"
+# 这一节为什么必须存在：⑨ 的「按编码直达」防的是**枚举**，而 SSE 是**推送**——
+# 服务端不筛的话，「界面上根本看不到这个测点，告警横幅却把它弹了出来」，
+# 而且别的项目的 pointCode / deviceCode 会真的到达不该看到的浏览器。
+#
+# 判据只认「警情事件」块（event: alarm 的下一条 data 行）里带业务码：
+# **不能只 grep 业务码**——measurement 事件的载荷里也有 pointCode，
+# 那样就分不清被滤掉的是哪一类事件，一个「只滤了警情、没滤测值」的实现照样能绿。
+#
+# 六条订阅（§⑧ 之后的**全新**流，所以里面出现的码只可能来自本节）：
+#   admin / 李敏 / outsider 各一条，正反两侧都要。
+# 负向断言靠「先等管理员收到、再宽限一段」来保证非空洞：
+# 管理员收到了 = 事件确实发出去了，此时李敏仍没有才是「被滤掉」而不是「根本没发生」。
+SSE_AD=$(mktemp); SSE_OP=$(mktemp); SSE_OUT=$(mktemp)
+SSE_PIDS=""
+sse_cleanup() {
+  for p in $SSE_PIDS; do kill "$p" 2>/dev/null; done
+  rm -f "$SSE_AD" "$SSE_OP" "$SSE_OUT"
+}
+trap sse_cleanup EXIT
+
+curl -sN "$BASE/stream?token=$TOKEN"     > "$SSE_AD"  2>&1 & SSE_PIDS="$SSE_PIDS $!"
+curl -sN "$BASE/stream?token=$OP_TOKEN"  > "$SSE_OP"  2>&1 & SSE_PIDS="$SSE_PIDS $!"
+curl -sN "$BASE/stream?token=$OUT_TOKEN" > "$SSE_OUT" 2>&1 & SSE_PIDS="$SSE_PIDS $!"
+sleep 1
+check "三条订阅都建立了（admin / 李敏 / outsider）" "3" \
+  "$(cat "$SSE_AD" "$SSE_OP" "$SSE_OUT" | grep -c 'event: *connected')"
+# 订阅建立必须先于下面的事件，否则「没收到」只是「没在听」
+
+# 在警情事件块里找某个字段值（-A1 把 event 行与它下面的 data 行一起取出来）
+wait_alarm() {   # wait_alarm <文件> <JSON 键> <值> [秒]
+  local f="$1" k="$2" v="$3" secs="${4:-15}" n=0
+  while [ "$n" -lt $((secs * 4)) ]; do
+    grep -A1 -- 'event: *alarm' "$f" 2>/dev/null | grep -q -- "\"$k\":\"$v\"" && return 0
+    sleep 0.25; n=$((n + 1))
+  done
+  return 1
+}
+has_alarm() { grep -A1 -- 'event: *alarm' "$1" 2>/dev/null | grep -q -- "\"$2\":\"$3\""; }
+
+# --- 正向对照先跑：李敏必须收得到**自己项目**的警情事件 ---
+# 没有这一条，下面所有「没收到」都可以由一个 401 的订阅解释。
+ingest_id "scp-push1-$RUN_ID" "$CODE1" "$T" '"defo_mm":5.5' >/dev/null
+if wait_alarm "$SSE_OP" pointCode "$CODE1"; then
+  pass "李敏收到了自己项目（项目 1）的警情事件——订阅是活的"
+else
+  fail "李敏没收到自己项目的警情事件（订阅坏了，下面的负向断言全部无意义）" \
+       "$(tail -c 200 "$SSE_OP")"
+fi
+check "管理员也收到了项目 1 那条" "true" "$(has_alarm "$SSE_AD" pointCode "$CODE1" && echo true || echo false)"
+
+# --- 反向：项目 2 的同一种事件，李敏与 outsider 都不该收到 ---
+ingest_id "scp-push2-$RUN_ID" "$CODE2" "$T" '"defo_mm":5.5' >/dev/null
+if wait_alarm "$SSE_AD" pointCode "$CODE2"; then
+  pass "管理员收到了项目 2 的警情事件（说明事件确实发出去了）"
+else
+  fail "管理员没收到项目 2 的警情事件" "$(tail -c 200 "$SSE_AD")"
+fi
+sleep 2   # 宽限：给「本该被滤掉的那条」足够时间到达（若服务端没滤的话）
+check "李敏的流里没有项目 2 的警情事件" "false" "$(has_alarm "$SSE_OP" pointCode "$CODE2" && echo true || echo false)"
+check "outsider 的流里没有项目 2 的警情事件" "false" \
+  "$(has_alarm "$SSE_OUT" pointCode "$CODE2" && echo true || echo false)"
+check "outsider 的流里也没有项目 1 的（无项目 = 什么都收不到）" "false" \
+  "$(has_alarm "$SSE_OUT" pointCode "$CODE1" && echo true || echo false)"
+# 整个流里连**测值事件**也不该带出来——它同样带 pointCode
+check "李敏的流里根本不出现项目 2 的点号（含测值事件）" "0" \
+  "$(grep -c -- "$CODE2" "$SSE_OP")"
+
+# --- 设备侧：无归属设备的告警只发 ADMIN（projectIdsOfDevice 的空集语义） ---
+DEV_P="DEV-SCPP-$RUN_ID"
+DEV_PID=$(curl -s -X POST "$BASE/devices" -H "$AUTH" -H "$JSON" \
+  -d "{\"code\":\"$DEV_P\",\"name\":\"隔离推送验收临时设备\",\"type\":\"MILLIMETER_WAVE_RADAR\",\"lastReportTime\":\"2020-01-01T00:00:00\"}" \
+  | data_of "['id']")
+check "推送用临时设备已建（未绑任何测点）" "true" "$(is_id "$DEV_PID")"
+# 离线扫描开出告警后，事件带的是 deviceCode——这条走的是与测点不同的归属链
+if wait_alarm "$SSE_AD" deviceCode "$DEV_P" 40; then
+  pass "管理员收到了这台无归属设备的告警事件"
+else
+  fail "管理员没收到无归属设备的告警事件" "$(tail -c 200 "$SSE_AD")"
+fi
+sleep 2
+check "李敏的流里没有这台无归属设备的事件" "false" \
+  "$(has_alarm "$SSE_OP" deviceCode "$DEV_P" && echo true || echo false)"
+check "李敏的流里根本不出现这台设备的编码" "0" "$(grep -c -- "$DEV_P" "$SSE_OP")"
+
+# 设备也过一遍 HTTP 侧：与推送**同一份判据**（两处若各写一套，就会出现一边挡一边漏）
+check "同一台设备：李敏读它的状态 -> 403（与推送同判据）" "403" \
+  "$(http_code "$BASE/devices/$DEV_PID/status" -H "$OP_AUTH")"
+check "同一台设备：管理员读它的状态 -> 200" "200" \
+  "$(http_code "$BASE/devices/$DEV_PID/status" -H "$AUTH")"
+
+sse_cleanup
+SSE_PIDS=""
+recycle_device "$DEV_PID" "隔离推送验收临时设备"
+
+section "⑫ 回收：套件自己不留垃圾"
 # 顺序有讲究：**先删影像、再解绑、再结警情删设备/测点**。
 # 影像行挂在测点上，测点一软删它就成孤儿（同 lib.sh 里 recycle_point 那段说的问题）；
 # device_point 是硬删除、没有级联，不先解绑就会留下指向已删测点的悬空绑定行。

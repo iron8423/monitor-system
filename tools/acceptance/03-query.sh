@@ -108,6 +108,38 @@ for r in "objects/$T_OBJ" "scenes/$T_SCN" "projects/$T_PRJ"; do
 done
 info "已回收临时项目链"
 
+section "⑩ 概览的最大形变只认 defo_mm，不是「所有测项里最大的那个」"
+# 这一条钉的是**刻意写死**的口径（契约 §3），不是待办。测项中立化那轮很容易顺手把
+# maxDeformation 也改成「扫全部测项」——那是错的，而且错得安静：KPI 被速率顶掉，
+# 数值仍然是个合理的数，没人会看出来。
+#
+# 判据取「同一个点、同一条消息里的两个测项」，量级刻意拉开（2 mm 累计 vs 999 mm/d 速率）：
+#   - 若实现只认 defo_mm  -> 2        （期望）
+#   - 若实现扫全部测项     -> 999      （转红）
+#   - 若实现按 unit 猜     -> 也是 999 （metric 档案只有 unit 一列，而 rate_mm_d 的 unit 是 "mm/d"，
+#                                      任何 contains("mm") 都会把它算进来——这正是不能靠单位猜的理由）
+# 夹具项目自带四级链，该临时项目下只有这一个测点，所以断言不依赖库里其它测点当时是什么值。
+M_PRJ=$(curl -s -X POST "$BASE/projects" -H "$AUTH" -H "$JSON" \
+        -d "{\"organizationId\":1,\"name\":\"最大形变口径验收\",\"code\":\"PRJ-MAXD-$RUN_ID\"}" | data_of "['id']")
+M_SCN=$(curl -s -X POST "$BASE/scenes" -H "$AUTH" -H "$JSON" \
+        -d "{\"projectId\":$M_PRJ,\"name\":\"临时场景\",\"type\":\"SLOPE\"}" | data_of "['id']")
+M_OBJ=$(curl -s -X POST "$BASE/objects" -H "$AUTH" -H "$JSON" \
+        -d "{\"sceneId\":$M_SCN,\"name\":\"临时对象\",\"type\":\"SLOPE_BODY\"}" | data_of "['id']")
+M_PID=$(curl -s -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
+        -d "{\"objectId\":$M_OBJ,\"code\":\"P-MAXD-$RUN_ID\",\"name\":\"最大形变口径临时测点\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
+        | data_of "['id']")
+# defo_mm 取 2.0：低于 warning 档 +3.0，不生成警情，不给后面套件留垃圾
+ingest2 "maxd-$RUN_ID" "P-MAXD-$RUN_ID" "2026-09-11T10:00:00+08:00" 2.0 999.0 >/dev/null
+M_DEFO=$(curl -s "$BASE/projects/$M_PRJ/summary" -H "$AUTH" | data_of "['maxDeformationMm']")
+check "最大形变取的是 defo_mm 那一行" "2.0" "$M_DEFO"
+check "同一条消息里的大速率没有顶掉它" "false" "$([ "$M_DEFO" = "999.0" ] && echo true || echo false)"
+
+recycle_point "$M_PID"
+for r in "objects/$M_OBJ" "scenes/$M_SCN" "projects/$M_PRJ"; do
+  C=$(http_code -X DELETE "$BASE/$r" -H "$AUTH")
+  [ "$C" = "200" ] || info "临时 $r 未回收（HTTP $C），可忽略"
+done
+
 recycle_point "$PID"
 
 summary

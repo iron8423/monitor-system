@@ -67,9 +67,9 @@ tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18
 tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上（8080）
 ```
 
-10 个套件 / 359 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
+10 个套件 / 375 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
 退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
-H2 空库（`--fresh`）**实测 359/359，失败 0**（连跑两轮均绿）；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（47/47）、
+H2 空库（`--fresh`）**实测 375/375，失败 0**（连跑两轮均绿）；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（47/47）、
 `07-device-alarm.sh`（26/26）与 `02-ingest-idempotency.sh`（34/34）。两者执行计划不同，
 有些缺陷只会在其中一个上现形（见下方「取最新一行」那条）。
 
@@ -97,7 +97,7 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向、`X-Ingest-Key` / `?token=` 鉴权。
 - A 底座 A0–A4 + schema/种子已入库并验证；B1 telemetry ingest 骨架 + CSV 回放已并入。
 - **后端闭环已跑通**（A-3 已落地）：ingest 校验/去重 → 落库 → 规则触发（含等级升级）→ 警情生成 → 处置留痕 → 自动恢复，外加设备离线告警。
-  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **10 套件 / 359 条断言全绿**。
+  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **10 套件 / 375 条断言全绿**。
 - **验收链第一环（模拟器）已落地**：`tools/radar_simulator/` 按契约连续造数，不依赖真雷达 CSV；
   `radar_csv_replay/` 是回放器不是生成器（要真实数据），两者分工互补，都发同一条契约消息。
 - **PostgreSQL 已验证**（B-4）：`postgres:16` 上 V1–V4 迁移全部成功，验收在 PG 上全绿
@@ -207,11 +207,21 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   - **空集合要短路**：MyBatis-Plus 的 `in(空集合)` 会**丢掉整条条件**，于是「一个项目都没有」退化成
     「不过滤 = 看到全部」——**一个在做过滤、实际在放大权限的默认值**。收口在 `DataScopeService.inIds()`
     （空集产出 `1 = 0`），`10-scope.sh` 里 `outsider` 那 15 条 fail-closed 断言就是钉这个的。
-  警情按 **point 与 device 两侧**都滤（B-14 的镜像），处置动作同样过范围。套件 `10-scope.sh` **93 条**，
-  `--fresh` 全量 **359/359**；**证伪过**：把 `unrestricted()` 注入 `return true;` → 46 条转红，
+  警情按 **point 与 device 两侧**都滤（B-14 的镜像），处置动作同样过范围。套件 `10-scope.sh` **107 条**，
+  `--fresh` 全量 **375/375**；**证伪过**：把 `unrestricted()` 注入 `return true;` → 46 条转红，
   且红的正是**差值型**断言，控制型（admin 直达 200）仍绿——说明承重的是差值那一半。
-  ⚠️ **已知未修**：`SseBroadcaster` 广播时不看订阅者是谁，非管理员订阅 `/stream` 仍收得到项目 2 的
-  事件。这是**推送**不是查询，属契约的推送语义变更，见契约 §11 与工作清单 B-20。
+  - **推送侧同样按订阅者过滤**（2026-09-14，B 侧同步单提出后当天修掉）。只挡查询是不够的：
+    服务端照样会把别的项目的警情（含 `pointCode` / `deviceCode`）推进不该看到它的浏览器——
+    **界面上根本看不到这个测点，告警横幅却把它弹了出来**。现在广播**没有「发给所有人」这个入口**
+    （无过滤的 `broadcast` 已删除，8 处调用点全部改为 `broadcastScoped` 并给出事件的项目归属），
+    可见性判据**复用 `DataScopeService` 同一份实现**（接口 `SubscriberScope` 落在 `common.sse`，
+    不让 `common` 反向依赖 `scope`）；事件归属是**集合**（一台设备可绑多个项目的测点）、
+    **空集 = 无归属 → 只发 ADMIN**（fail-closed）。`10-scope.sh` ⑪ 开三条真实订阅正反两侧断言，
+    **证伪过**：判定改成恒真时 6 条负向断言全红、正向对照全绿。
+  - **概览的 `maxDeformationMm` 刻意不跟随「测项中立化」**：它只统计 `defo_mm`，不随主测项切换。
+    `metric` 档案只有 `code/name/unit`，判不出量纲类别；按 unit 猜会踩现成的反例——
+    `rate_mm_d` 的 unit 是 `mm/d`，把**速率**算成形变（999 mm/d 顶掉 2 mm，而结果看着仍然合理）。
+    口径写进契约 §3，回归断言在 `03-query.sh` ⑩。
 - 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量告警未做（用户定案：暂不做）；
   ② 验收第 7 条里的**只读角色、报表、视频接入、标定/巡查模型**未做（属 P1，未定案前不动）。
 - **设备侧三类告警已成体系**（2026-09-14，验收第 5 条）：离线的同时补上了
