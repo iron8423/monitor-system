@@ -17,6 +17,7 @@ import com.monitor.project.mapper.MonitorObjectMapper;
 import com.monitor.project.mapper.MonitorPointMapper;
 import com.monitor.project.mapper.ProjectMapper;
 import com.monitor.project.mapper.SceneMapper;
+import com.monitor.scope.service.DataScopeService;
 import com.monitor.telemetry.dto.ProjectSummaryVO;
 import com.monitor.telemetry.entity.Measurement;
 import com.monitor.telemetry.mapper.MeasurementMapper;
@@ -49,12 +50,14 @@ public class ProjectSummaryService {
     private final DeviceMapper deviceMapper;
     private final DevicePointMapper devicePointMapper;
     private final MeasurementMapper measurementMapper;
+    private final DataScopeService dataScope;
 
     public ProjectSummaryVO summary(Long projectId) {
         Project p = projectId == null ? null : projectMapper.selectById(projectId);
         if (p == null) {
             throw new BizException(404, "项目不存在: " + projectId);
         }
+        dataScope.assertProjectVisible(projectId);
         List<Long> pointIds = pointIdsOf(projectId);
 
         ProjectSummaryVO vo = new ProjectSummaryVO();
