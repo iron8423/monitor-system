@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import * as api from '@/api/monitor'
 import AlarmQueue from '@/components/AlarmQueue.vue'
+import DeviceDrawer from '@/components/DeviceDrawer.vue'
 import StatTiles from '@/components/StatTiles.vue'
 import { usePolling } from '@/composables/usePolling'
 import { DEVICE_STATUS_LABELS, DEVICE_STATUS_TAG, label } from '@/utils/labels'
@@ -32,6 +33,9 @@ const router = useRouter()
 const LOW_BATTERY_PERCENT = 20
 
 const devices = ref([])
+
+/** 抽屉里当前展示的设备；null = 抽屉关着 */
+const current = ref(null)
 const queue = ref([])
 const processingTotal = ref(null)
 const loading = ref(true)
@@ -160,7 +164,7 @@ function batteryClass(v) {
           :data="anomalies"
           size="small"
           class="clickable"
-          @row-click="router.push('/devices')"
+          @row-click="current = $event"
         >
           <el-table-column label="编号" min-width="130">
             <template #default="{ row }">
@@ -234,6 +238,10 @@ function batteryClass(v) {
         （<span class="mk-mono">/api/v1/maintenance-records</span>），前端尚未做页面。
       </div>
     </div>
+
+    <!-- 点行就地开抽屉处理，不跳走：运维的动线是「看到异常 → 当场记一笔」，
+         跳到设备页再找一遍这台设备是白走的路。抽屉与设备页共用同一个组件。 -->
+    <DeviceDrawer v-model:device="current" />
   </div>
 </template>
 

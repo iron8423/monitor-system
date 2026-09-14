@@ -98,6 +98,25 @@ export const ACTIONS_BY_ROLE = {
   MAINTAINER: ['handle', 'resolve', 'misreport'],
 }
 
+/**
+ * 审计动作 → 标签配色（审计日志页用）。
+ *
+ * 键是**后端 `@AuditAction(action = "…")` 里写的中文串**，不是英文枚举——
+ * `AuditAspect` 原样落库。所以这里漏一个键不会报错，只会退回默认灰色 `info`
+ * （`AuditView` 里是 `TAG[row.action] || 'info'`）。加新 `@AuditAction` 时回来补一行。
+ *
+ * 配色按语义分：写/改=主色，删=危险，绑定类=中性。
+ */
+export const AUDIT_ACTION_TAG = {
+  创建: 'success',
+  更新: 'primary',
+  删除: 'danger',
+  删除影像: 'danger',
+  绑定测点: 'info',
+  解绑测点: 'info',
+  创建维护记录: 'warning',
+}
+
 export function label(map, key) {
   if (!key) return '—'
   return map[key] || key

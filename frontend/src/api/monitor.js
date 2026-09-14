@@ -102,6 +102,62 @@ export function deviceStatus(id) {
 }
 
 /**
+ * GET /api/v1/devices/{id}/points → DevicePoint[]（裸数组，每项 `{ id, deviceId, pointId }`）
+ *
+ * ⚠️ 返回的是**绑定关系行**，不是测点对象——只有 `pointId`，没有点号/点名的。
+ * 界面上要显示「P-HK01 边坡位移」得自己拿 `listPoints()` 的结果去 join。
+ * 后端没做联表返回（`DevicePoint` 是纯关系表），所以这一步在前端。
+ */
+export function listDevicePoints(deviceId) {
+  return http.get(`/v1/devices/${deviceId}/points`)
+}
+
+/** POST /api/v1/devices/{id}/points/{pointId} → 空。已绑定则 400（后端显式判重）。角色 ADMIN/MAINTAINER */
+export function bindDevicePoint(deviceId, pointId) {
+  return http.post(`/v1/devices/${deviceId}/points/${pointId}`)
+}
+
+/** DELETE /api/v1/devices/{id}/points/{pointId} → 空。**幂等**：没绑过也返回 200，不是 404。角色 ADMIN/MAINTAINER */
+export function unbindDevicePoint(deviceId, pointId) {
+  return http.delete(`/v1/devices/${deviceId}/points/${pointId}`)
+}
+
+/**
+ * GET /api/v1/maintenance-records?deviceId= → MaintenanceRecord[]（裸数组）
+ * 每项 `{ id, deviceId, type, description, operator, createdAt }`。
+ * 不传 `deviceId` 就是全量（按 `createdAt` 倒序）。
+ */
+export function listMaintenanceRecords(deviceId) {
+  return http.get('/v1/maintenance-records', { params: deviceId ? { deviceId } : {} })
+}
+
+/**
+ * POST /api/v1/maintenance-records → 创建后的记录。角色 ADMIN/MAINTAINER。
+ *
+ * **不要传 `operator`**：后端一律用当前登录用户覆盖（`MaintenanceRecordController.create`），
+ * 传了也会被丢掉。这是有意的——「谁写的维护记录」不该由客户端说了算。
+ */
+export function createMaintenanceRecord(payload) {
+  return http.post('/v1/maintenance-records', payload)
+}
+
+/**
+ * GET /api/v1/audit-logs → PageResult<AuditLog>（**分页**，同 `/alarms`）
+ * @param {object} p
+ * @param {number} [p.pageNum] 从 1 起
+ * @param {number} [p.pageSize]
+ * @param {string} [p.username] 精确匹配，不是模糊
+ * @param {string} [p.targetType] 精确匹配
+ *
+ * 整个控制器挂了 `@PreAuthorize("hasRole('ADMIN')")`（类级），所以非管理员一律 403——
+ * 界面上菜单只对 ADMIN 显示，但**真正的边界在后端**。
+ * 两个筛选参数都是 `eq` 不是 `like`：输错一个字就是空列表，不会「差不多匹配」。
+ */
+export function listAuditLogs(params = {}) {
+  return http.get('/v1/audit-logs', { params })
+}
+
+/**
  * 订阅实时推送（SSE）。EventSource 带不了请求头，所以 token 走 query——
  * 这是契约 D8 专门为它开的唯一例外。
  * @returns {EventSource} 调用方负责 close()，否则连接会一直挂着

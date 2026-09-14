@@ -109,6 +109,16 @@ const routes = [
         component: () => import('@/views/AdminView.vue'),
         meta: { title: '管理端', icon: 'Setting', roles: ['ADMIN'] },
       },
+      {
+        // 审计日志：`roles: ['ADMIN']` 与后端 `AuditLogController` 的**类级**
+        // `@PreAuthorize("hasRole('ADMIN')")` 同口径。这里只是不让人点进来，
+        // 真正的边界在后端——非管理员直达这条路由会被守卫弹回，就算绕过守卫，
+        // 接口仍然是 403（两层都拦，但只有后者是安全边界）。
+        path: 'audit',
+        name: 'audit',
+        component: () => import('@/views/AuditView.vue'),
+        meta: { title: '审计日志', icon: 'Document', roles: ['ADMIN'] },
+      },
     ],
   },
   {

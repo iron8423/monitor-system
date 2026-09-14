@@ -66,9 +66,9 @@ tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18
 tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上（8080）
 ```
 
-8 个套件 / 193 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
+8 个套件 / 212 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
 退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
-H2 空库（`--fresh`）**实测 193/193**；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（46/46）与
+H2 空库（`--fresh`）**实测 212/212**（连跑两轮均绿）；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（47/47）与
 `07-device-alarm.sh`（26/26）。两者执行计划不同，
 有些缺陷只会在其中一个上现形（见下方「取最新一行」那条）。
 
@@ -96,7 +96,7 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向、`X-Ingest-Key` / `?token=` 鉴权。
 - A 底座 A0–A4 + schema/种子已入库并验证；B1 telemetry ingest 骨架 + CSV 回放已并入。
 - **后端闭环已跑通**（A-3 已落地）：ingest 校验/去重 → 落库 → 规则触发（含等级升级）→ 警情生成 → 处置留痕 → 自动恢复，外加设备离线告警。
-  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **8 套件 / 193 条断言全绿**。
+  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **8 套件 / 212 条断言全绿**。
 - **验收链第一环（模拟器）已落地**：`tools/radar_simulator/` 按契约连续造数，不依赖真雷达 CSV；
   `radar_csv_replay/` 是回放器不是生成器（要真实数据），两者分工互补，都发同一条契约消息。
 - **PostgreSQL 已验证**（B-4）：`postgres:16` 上 V1–V4 迁移全部成功，验收在 PG 上全绿
@@ -127,6 +127,13 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   各页与 `/screen` 均有真实数据；跨页口径一致（设备页「在线」行数 == 总览「在线设备」）；
   管理端**新建 → 接口核对 → 删除**全通（即验收第 7 条「平台管理端新建测点 → 业务端无需改代码
   立即可见」）；全程零 4xx/5xx、零控制台报错。**四角色矩阵 45 断言 / 0 失败**。
+- **审计日志页与设备详情抽屉**（2026-09-14，验收第 7 条后半）：新增 `/audit`（仅 ADMIN，
+  后端控制器是**类级** `@PreAuthorize`，非管理员接口层就 403）与 `DeviceDrawer`
+  （基本信息 / 绑定测点 / 维护记录，设备页与运维台**共用同一个组件**）。浏览器实测 26/26，
+  含一次真解绑→真重绑的往返与一次真写维护记录。**维护记录的 `operator` 由后端从当前登录用户
+  覆盖**，前端传什么都不作数——「谁写的」不该由客户端说了算。
+  顺带把这批接口补进契约：`/devices/{id}/points`、`/maintenance-records`、`/audit-logs`
+  此前**被引用却从无出处**（与 `/media/{id}/content` 同一类问题）。
 - **「取最新一行」的口径已收成单一实现**：`measurement` 同测点同 `collect_time` 可合法落多行
   （幂等键是 `device+message`，不含 collect_time），此时排序必须带 `id` 兜底，否则取到哪行由
   执行计划决定。此前 `MeasurementQueryService#latest` 有兜底、`ProjectSummaryService#maxDeformation`

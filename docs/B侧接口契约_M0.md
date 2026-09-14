@@ -204,6 +204,28 @@
 
 > 展示口径待 B 定：设备告警是否进「警情中心」默认视图（后端可按 `alarmType` 筛，见 §4）。
 
+### 设备-测点绑定（A，2026-09-14 补文档）
+
+`GET /api/v1/devices/{id}/points` 读接口开放；`POST` / `DELETE .../points/{pointId}`
+限 **ADMIN / MAINTAINER**，且走 `@AuditAction`（动作名「绑定测点」/「解绑测点」）。
+
+- 返回的是**绑定关系行** `{ id, deviceId, pointId }`，**不是测点对象**——没有点号/点名，
+  要显示得自己拿 `GET /points` 去 join。A 没有做联表返回（`device_point` 是纯关系表）。
+- `POST` 重复绑定同一对 → **400**（显式判重，不是静默成功）；`DELETE` **幂等**，
+  没绑过也返回 200，不是 404。
+- `device_point` 是**硬删除**（无 `deleted` 列），解绑即删行。
+
+### 维护记录（A，2026-09-14 补文档）
+
+`GET /api/v1/maintenance-records`（可选 `deviceId`，按 `createdAt` 倒序；不传即全量）
+与 `POST /api/v1/maintenance-records`（限 **ADMIN / MAINTAINER**，`@AuditAction`）。
+
+- 字段：`{ id, deviceId, type, description, operator, createdAt }`。
+- **`operator` 由后端从当前登录用户覆盖**，客户端传什么都不作数——
+  「谁写的维护记录」不该由客户端说了算。
+- `type` 是 `VARCHAR(32)` 的**自由文本，不是枚举**，后端不校验。前端给了几个候选值
+  （日常巡检/清洁保养/…）只是省打字，不构成契约。
+
 ## 6. 实时推送：GET /api/v1/stream（SSE）
 
 > `EventSource` 带不了 Header → 用 **query token**：`GET /api/v1/stream?token=<JWT>`。仅该路径走 query，其余仍走 `Authorization` 头。
@@ -268,3 +290,26 @@ data: {"id":1,"pointCode":"P-HK01","level":"alarm","status":"PENDING","triggered
 3. A 的 `SecurityConfig` 放行 `/api/v1/ingest/**`（校验 `X-Ingest-Key`）；`JwtAuthFilter` 对 `/api/v1/stream` 支持 `?token=`。
 4. 幂等：A 按 `device_id+message_id` 去重。
 5. 错误码：业务错误走 A 统一，401/403 由 A 的鉴权返回。
+
+## 10. 审计日志（A，2026-09-14 补文档）
+
+`GET /api/v1/audit-logs` → `PageResult<AuditLog>`，参数 `pageNum` / `pageSize` /
+`username` / `targetType`。**整个控制器是类级 `@PreAuthorize("hasRole('ADMIN')")`**，
+非管理员一律 403。
+
+- 字段：`{ id, userId, username, action, targetType, targetId, detail, ip, createdAt }`。
+- `username` 与 `targetType` 都是 **`eq` 精确匹配，不是 `like`**——输错一个字就是空列表。
+- `action` 是**中文串，取自 `@AuditAction(action = "…")` 的字面量**，不是英文枚举；
+  当前有：`创建` / `更新` / `删除` / `删除影像` / `绑定测点` / `解绑测点` / `创建维护记录`。
+- `targetType` 由 `AuditAspect.resolveTargetType` 推出：① 第一个 `Identifiable` 参数的类名，
+  或 ② 控制器名去掉 `Controller`。所以取值集合 = `BaseCrudController` 的 7 个子类
+  （MonitorPoint/Device/Project/Scene/MonitorObject/Metric/Organization）
+  + `MaintenanceRecord` + `Media`。**同样是自由文本**，新增 `@AuditAction` 会多出新值。
+- `targetId` **可能为空**：路径变量是不透明编码而非数字主键的端点需要显式声明
+  `@AuditAction(targetIdFromStringArg = true)`（目前只有 `DELETE /media/{mediaId}`）。
+  空着比填一个猜的值好——这里**没有做「扫到 String 就当 id」的兜底**，
+  否则 `?keyword=xxx` 这类查询参数会悄悄变成 `target_id`。
+- `detail` 存的是请求参数的 JSON 串，可能很长或为空。
+
+> **告警处置不在审计日志里**：`AlarmController.act` 没挂 `@AuditAction`，
+> 处置留痕走的是 `alarm_action` 表（即警情详情里的时间线），两者不重复。

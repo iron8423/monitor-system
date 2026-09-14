@@ -24,6 +24,7 @@ const menus = [
   { path: '/alarms', title: '告警中心', icon: 'Bell', ready: true },
   { path: '/media', title: '影像挂点', icon: 'Picture', ready: true },
   { path: '/admin', title: '管理端', icon: 'Setting', ready: true, roles: ['ADMIN'] },
+  { path: '/audit', title: '审计日志', icon: 'Document', ready: true, roles: ['ADMIN'] },
 ]
 
 // 菜单里的角色收口只是界面引导，真正的边界在后端 @PreAuthorize

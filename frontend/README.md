@@ -94,7 +94,10 @@ src/
   cesium/       # createViewer.js（viewer + 地形/影像 + 相机）、pointLayer.js（测点实体与状态着色）
   components/   # EChart.vue（通用 ECharts 封装）、SeriesChart.vue（测点时序 → option）、
                 # StatTiles.vue（KPI 磁贴行）、AlarmQueue.vue（紧凑警情队列）
+                # MediaGallery.vue / MediaUploader.vue（影像，三处共用）
+                # DeviceDrawer.vue（设备详情三页签，设备页与运维台共用）
   composables/  # usePolling.js：挂载即取一次 + 定时轮询 + 卸载清理
+                # useThresholds.js：告警规则 → 阈值线（两处画曲线的页面共用一份口径）
   constants/    # status.js：质量/状态/告警级别枚举 + resolvePointVisual（全局统一取色口径）
   layout/       # AppLayout.vue（顶栏 + 侧边菜单 + 内容区 + 全局 SSE 连接）
   router/       # 路由 + 登录守卫 + 角色门禁（ROLE_HOMES 是落地页的唯一数据源）
@@ -102,7 +105,8 @@ src/
   stores/       # Pinia：user（登录态）、monitor（3D 大屏用的监测数据单一数据源）
   styles/       # 全局样式与 CSS 变量（含 .mk-panel / .mk-mono 等页面通用件）
   utils/        # token.js（localStorage 读写）、labels.js（枚举 → 中文展示文案）、format.js（时间/数字）
-  views/        # 页面：Login / Points（测点与曲线）/ Device / Alarm / Admin / Screen（3D 大屏）/ NotFound
+  views/        # 页面：Login / Points（测点与曲线）/ Device / Alarm / Admin / Audit / Media /
+                # Screen（3D 大屏）/ NotFound
   views/home/   # 四个角色各自的落地页（HomeAdmin / HomeOperator / HomeAnalyst / HomeMaintainer）
                 # + HomeNone（角色认不出来时的兜底页）
 ```
@@ -179,6 +183,7 @@ VITE_TERRAIN_MODE=ion     # ion = Cesium 官方真实地形；none = 不用地�
 | 3 | Cesium 3D 大屏（地形 / 标点着色 / 弹窗 / 时间轴 / 热力图） | **3a ✅**（真实地形 + 卫星影像 + 标点着色 + 点击弹窗 + 三级降级）；3b 时间轴 / 热力图 / SSE 直连待做 |
 | 4 | 告警中心 + 管理端（alarms / actions / 规则 CRUD） | 告警中心 ✅（含处置时间线）；管理端 ✅ **读写**（项目/场景/对象/测点/测项/设备/告警规则的增删改） |
 | 5 | 无人机影像挂点（media） | ✅ 2026-09-14：`MediaGallery` / `MediaUploader` 两个共用组件，落在测点详情「影像」页签、`/media` 总览页、3D 大屏点击浮窗三处（浏览器实测 18/18） |
+| 6 | 审计日志 + 设备详情（验收第 7 条） | ✅ 2026-09-14：`/audit` 审计日志页（仅 ADMIN）、`DeviceDrawer` 三页签（基本信息 / 绑定测点 / 维护记录），被设备页与运维台共用（浏览器实测 26/26） |
 
 > **2026-09-11 合并说明**：阶段 1 骨架由 B 落地；A 在其基础上并入总览 / 测点与曲线 /
 > 设备状态 / 告警中心 / 管理端五个页面（路由沿用本表阶段划分）。合并时 B 的骨架文件
@@ -192,7 +197,9 @@ VITE_TERRAIN_MODE=ion     # ion = Cesium 官方真实地形；none = 不用地�
 - **管理端的表列是运行时从响应数据推导的**，所以列名就是后端字段名（`objectId` 而非「所属对象」）。
   要中文列名就得为每个资源写一份列映射——当前优先级不高，没做。
 - **设备状态靠轮询**（10s）：SSE 只推 `measurement` / `alarm` 两类事件，不推设备状态。
-- **曲线阈值线是写死的 ±3mm**：应当来自 `/alarm-rules`，等规则页做出来再改成拉接口。
+- ~~曲线阈值线是写死的 ±3mm~~ **已于 2026-09-14 修正**：改由 `composables/useThresholds.js`
+  拉 `/alarm-rules`（两处调用点共用一份，此前是「同一口径抄两份」）。当时发现的问题比
+  「写死」更重——**两张图都标错了档位**（把 +3 的 warning 标成「告警」，而真正的 alarm 档 +5 一条没画）。
 - **图表库警告**：`echarts` 单独成 chunk 后 `PointsView` 产物约 1.1MB，
   构建时会有「chunk 大于 500kB」的提示；当前不做 `manualChunks` 拆分，等真在意首屏再处理。
 - **3D 大屏目前靠 10s 轮询刷新**：`AppLayout` 里那条全局 SSE 连接只用于顶栏「实时已连接」
@@ -257,9 +264,16 @@ VITE_TERRAIN_MODE=ion     # ion = Cesium 官方真实地形；none = 不用地�
 > 可接受：它们密码固定、界面上无法编辑，本来就不是可改数据。
 
 已知未做（不是缺陷，是没排期）：
-- 运维台的「设备维护记录」与「设备-测点绑定」后端已有接口
-  （`/api/v1/maintenance-records`、`/devices/{id}/points`）但前端没页面（排期周三 9/16）。
-- 审计日志后端有接口（仅 ADMIN 可调），前端 `api/monitor.js` 未封装、无页面（排期周三 9/16）。
+- ~~运维台的「设备维护记录」与「设备-测点绑定」前端没页面~~、~~审计日志无页面~~
+  **均已于 2026-09-14 补上**（见下）。**大屏 3b**（时间轴动态实体、风险/形变热力图）
+  仍未做，是验收第 1 条剩下的部分，排期下周。
+- **设备详情抽屉**（`components/DeviceDrawer.vue`，三页签：基本信息 / 绑定测点 / 维护记录）
+  被设备页与运维台共用。绑定与维护的写入口按角色显隐（ADMIN/MAINTAINER），
+  值班/研判只读——**同样只是不显示按钮，后端 `@PreAuthorize` 才是边界**。
+  维护记录的 `operator` 由后端从当前登录用户填，前端传什么都不作数。
+- **审计日志页**（`views/AuditView.vue`，路由 `/audit`，仅 ADMIN）。
+  动作名是中文、`targetType` 是自由文本，两者都随 `@AuditAction` 走，不是枚举——
+  所以页面上给的是「当前代码能产生的值」的候选下拉 + `allow-create`，**筛不到不等于没记录**。
 - ~~影像没有删除入口~~ **已于 2026-09-14 补上**：`DELETE /api/v1/media/{mediaId}`（逻辑删除，
   盘上文件保留）。入口由 `MediaGallery` 的 `deletable` 控制，只在**测点详情**与 **`/media` 总览页**
   打开；3D 大屏浮窗**刻意不给**（那是「看」的场合，演示现场挂个删除按钮只会误触）。
