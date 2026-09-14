@@ -57,7 +57,8 @@ cd backend
 - 默认 H2 内存库，重启即清空——要持久化就用上面的 Compose。
 - 健康检查：`GET http://localhost:8080/api/v1/health`
 - 接口文档：`http://localhost:8080/swagger-ui.html`
-- 演示账号：admin / operator / analyst / maintainer（密码 123456）
+- 演示账号：admin / operator / analyst / maintainer（密码 123456），外加一个**不进登录页**的
+  `outsider`（访客，不属于任何项目）——它是「可见范围为空」这条边界的样本，见验收第 7 条那节。
 
 ## 验收（后端）
 
@@ -66,10 +67,10 @@ tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18
 tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上（8080）
 ```
 
-8 个套件 / 193 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
+10 个套件 / 359 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
 退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
-H2 空库（`--fresh`）**实测 193/193**；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（46/46）与
-`07-device-alarm.sh`（26/26）。两者执行计划不同，
+H2 空库（`--fresh`）**实测 359/359，失败 0**（连跑两轮均绿）；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（47/47）、
+`07-device-alarm.sh`（26/26）与 `02-ingest-idempotency.sh`（34/34）。两者执行计划不同，
 有些缺陷只会在其中一个上现形（见下方「取最新一行」那条）。
 
 套件只认 `BASE` 一个地址，所以 **`docker compose up` 之后直接 `run-all.sh` 就是「一键过验收脚本」**
@@ -96,7 +97,7 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向、`X-Ingest-Key` / `?token=` 鉴权。
 - A 底座 A0–A4 + schema/种子已入库并验证；B1 telemetry ingest 骨架 + CSV 回放已并入。
 - **后端闭环已跑通**（A-3 已落地）：ingest 校验/去重 → 落库 → 规则触发（含等级升级）→ 警情生成 → 处置留痕 → 自动恢复，外加设备离线告警。
-  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **8 套件 / 193 条断言全绿**。
+  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **10 套件 / 359 条断言全绿**。
 - **验收链第一环（模拟器）已落地**：`tools/radar_simulator/` 按契约连续造数，不依赖真雷达 CSV；
   `radar_csv_replay/` 是回放器不是生成器（要真实数据），两者分工互补，都发同一条契约消息。
 - **PostgreSQL 已验证**（B-4）：`postgres:16` 上 V1–V4 迁移全部成功，验收在 PG 上全绿
@@ -107,26 +108,39 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   **db + backend + frontend** 三个服务，前端构建进镜像、由 nginx 托管并反代 `/api`。
   已实测 —— 容器重建后数据仍在（`measurement/alarm/monitor_point` 计数与 schema 版本前后一致、
   Flyway 不重跑）、影像落卷、对容器跑验收全绿。
+- **备份恢复已落地**（2026-09-14，验收第 8 条后半）：
+  ```bash
+  tools/backup/pg-backup.sh --with-media        # -> backups/monitor-<时间>.sql + media-<时间>.tgz
+  tools/backup/pg-restore.sh --latest --with-media backups/media-<时间>.tgz
+  tools/backup/selftest.sh                      # 实测一遍整条链（需要 compose 起着）
+  ```
+  库名/用户/项目名一律从 `.env` 读，读不到才退回 compose 默认值——写死的话，
+  `.env` 一改就会去备份/清空**另一个库**（备份时是拿到错的东西，恢复时是删错东西）。
+  恢复是**破坏性**的（先 `DROP SCHEMA public CASCADE` 再灌），所以默认要交互敲 `yes`，
+  只有 `--yes` 才跳过；它还会先停后端（`DROP SCHEMA` 要拿排他锁，和后端的长连接撞上就是卡死）、
+  恢复后等后端**真的健康**再收工（后端起来时 Flyway 会核对迁移版本，备份与代码不一致在这里就会失败）。
+  `--with-media` 那半份不是可有可无：附件是**卷里的文件**，不在库里，只备库的话
+  恢复后 `media` 行回来了、点开图却是碎的。自测脚本按验收第 8 条的原话走完整条链——
+  挂真附件 → 备份 → **破坏**（灌假项目 + 删真告警 + 清空附件卷）→ 恢复 →
+  逐样查回（假项目没了 / 告警回来了 / 历史条数回到基线 / 附件读出真 PNG），**实测 17/17**。
 - **前端已可访问**（Vue3 + Vite + Element Plus + ECharts，阶段 3a 起含 Cesium）：
   开发态 `cd frontend && npm install && npm run dev` → <http://localhost:5173>；
   部署态就是上面的 `docker compose up -d` → <http://localhost>（`FRONTEND_PORT` 可改）。
   已落地工作台页面：**四个角色各有自己的落地页**（管理工作台 / 值班工作台 / 研判工作台 /
   运维工作台，登录后按角色自动进入；另有一个「未分配角色」兜底页）、测点与曲线、设备状态、
-  告警中心含处置时间线、**管理端读写**，以及独立整屏的
-  **3D 大屏 `/screen`**（真实地形 + 卫星影像 + 测点按状态着色 + 三级降级）；
-  另有 **影像挂点 `/media`**（上传/列表/看图，大屏测点弹窗里也能看现场照片）——
-  验收第 6 条「无人机照片挂测点 → 详情页看得到图」在这条链上闭合。
-  大屏还带**时间轴回放**（历史帧逐点回放，实时链路不受影响）与**地面热力图**
-  （每个测点一圈径向渐变，半径随 |形变| 放大；不做插值，见 frontend/README）。
-  **前端已做「测项中立化」**：「有哪些测项」只认 `GET /metrics` 档案（名称/单位也来自它），
-  3D 着色、热力图、时间轴回放、测点列表统一按「主测项」表现，大屏顶栏可切换；
-  超限判据取自 `/alarm-rules`（不再自带写死的 3mm）。**加一种测项 = 管理端加一行数据**，
-  前端零改动（详见 frontend/README「测项中立化」一节）。
+  告警中心含处置时间线、**管理端读写**、**影像挂点 `/media`**，以及独立整屏的
+  **3D 大屏 `/screen`**（真实地形 + 卫星影像 + 测点按状态着色 + 三级降级）。
+  测点详情共五个页签（资料 / 曲线 / 数据表 / 影像 / 告警），影像在详情页、`/media` 总览页、
+  大屏点击浮窗三处共用同一对组件（`MediaGallery` / `MediaUploader`）。
   浏览器端到端已在 **compose 形态**实测（下条）。
-  **SSE 已由 B 在阶段 3b 收口**：连接归 `frontend/src/stores/realtime.js`（应用级，
-  不再绑在布局上——否则直接进 `/screen` 这个大屏顶层路由时没人建连接），事件落进
-  `stores/monitor.js` 的单一数据源；大屏改为推送驱动（点位实时跳动 + 告警脉冲 +
-  顶部横幅），轮询降级为兜底（断流 15s / 正常 60s）。
+  **SSE 已由 B 在阶段 3b 收口**：连接归 `stores/realtime.js`（应用级，不再绑在布局上——
+  否则直接进 `/screen` 这个大屏顶层路由时没人建连接），事件落进 `stores/monitor.js` 的
+  单一数据源；大屏改为推送驱动（点位实时跳动 + 告警脉冲 + 顶部横幅），轮询降级为兜底
+  （断流 15s / 正常 60s）。大屏另有**时间轴回放**与**地面热力图**（每个测点一圈径向渐变，
+  不做插值——7 个离散点插出来的面是算出来的、不是量出来的）。
+  **前端已做「测项中立化」**：「有哪些测项」只认 `GET /metrics` 档案（名称/单位也来自它），
+  3D 着色、热力图、时间轴回放、测点列表统一按「主测项」表现，大屏顶栏可切换。
+  **加一种测项 = 管理端加一行数据**，前端零改动（详见 frontend/README 的三节）。
 - **浏览器端到端已在 compose 形态实测**（2026-09-11）：未登录访问 `/home` 被守卫拦下并
   回跳 `/login?redirect=/home`、登录后回到原目标；**四个角色各自落到自己的工作台**
   （`/home/admin` `/home/operator` `/home/analyst` `/home/maintainer`，四条 URL 与四个页面
@@ -135,6 +149,13 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   各页与 `/screen` 均有真实数据；跨页口径一致（设备页「在线」行数 == 总览「在线设备」）；
   管理端**新建 → 接口核对 → 删除**全通（即验收第 7 条「平台管理端新建测点 → 业务端无需改代码
   立即可见」）；全程零 4xx/5xx、零控制台报错。**四角色矩阵 45 断言 / 0 失败**。
+- **审计日志页与设备详情抽屉**（2026-09-14，验收第 7 条后半）：新增 `/audit`（仅 ADMIN，
+  后端控制器是**类级** `@PreAuthorize`，非管理员接口层就 403）与 `DeviceDrawer`
+  （基本信息 / 绑定测点 / 维护记录，设备页与运维台**共用同一个组件**）。浏览器实测 26/26，
+  含一次真解绑→真重绑的往返与一次真写维护记录。**维护记录的 `operator` 由后端从当前登录用户
+  覆盖**，前端传什么都不作数——「谁写的」不该由客户端说了算。
+  顺带把这批接口补进契约：`/devices/{id}/points`、`/maintenance-records`、`/audit-logs`
+  此前**被引用却从无出处**（与 `/media/{id}/content` 同一类问题）。
 - **「取最新一行」的口径已收成单一实现**：`measurement` 同测点同 `collect_time` 可合法落多行
   （幂等键是 `device+message`，不含 collect_time），此时排序必须带 `id` 兜底，否则取到哪行由
   执行计划决定。此前 `MeasurementQueryService#latest` 有兜底、`ProjectSummaryService#maxDeformation`
@@ -161,5 +182,45 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - **契约不再走「签字」**：项目用单仓库单一事实源，双方读同一份文档与代码，git 历史即记录。
   现行事实源 = `docs/message-contract.md`（消息契约）+ `docs/B侧接口契约_M0.md`（接口/字段/枚举）；
   `M0_接口冻结_致B_v1.md` 已就地作废（D1–D10 编号仍由它定义，数值以现行文档/代码为准）。
-- 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量/数据中断告警未做——**用户定案暂不做**；
-  ② 维护记录（`/maintenance-records`）前端页面未做（后端接口在，运维台里留了说明）。
+- **`<img>` 取影像是契约里第二处（也是最后一处）query 鉴权**（2026-09-14）：`<img>` 发不出
+  `Authorization` 头，与 `EventSource` 是同一个约束，所以 `/media/{id}/content` 走 `?token=`。
+  忘了它就是满屏碎图——而且**每张图各自一个 401**，图片加载失败又不走 axios 拦截器，
+  控制台里只有一串裸 401、界面上没有任何提示。前端统一走 `api/monitor.js` 的 `mediaContentUrl()`，
+  三处调用点都不自己拼地址。**证伪过**：把 token 去掉后 18 条浏览器断言红 8 条，
+  错误明细就是 `取图 HTTP 401`。
+- **影像删除是「逻辑删除」**（2026-09-14 新增 `DELETE /api/v1/media/{mediaId}`，契约 §7）：
+  只把库里的行标成 `deleted=1`，**盘上的文件保留**——这是用户定案的口径（与 `monitor_point`/`device`
+  一致，可审计可恢复），代价是卷只增不减，回收磁盘要另配离线策略。删除后该影像从列表与内容端点
+  一并消失，重复删除得 404（不是静默成功），角色限 ADMIN/MAINTAINER，且走 `@AuditAction` 留痕
+  （软删意味着「删了还在库里」，不留痕就无从查证）。前端入口由 `MediaGallery` 的 `deletable` 控制，
+  **3D 大屏浮窗刻意不给**（那是「看」的场合）；但真正的边界在后端 `@PreAuthorize`，藏按钮不是权限。
+  此前「没有删除端点」导致的两个后果都已消解：套件现在自己回收传的图（`06-media.sh` ⑧），
+  误传的照片运维在界面上就能撤。
+- **项目数据范围隔离已落地**（2026-09-14，验收第 7 条前半）。成员关系走显式的 `project_member`
+  表（硬删，`UNIQUE(user_id, project_id)`），**不用 `sys_user.organization_id`**——组织级隔离在
+  「1 组织 1 项目」的种子下演示不出来。可见范围沿 `point → object → scene → project` 归集，
+  设备经 `device_point` 反查；**ADMIN 不受限**，其余看 membership。
+  三处值得记住的地方：
+  - **过滤做在 `BaseCrudController` 的三个钩子上**（`list` / `page` / `get`），七个 CRUD 子类各自实现。
+    只给列表加过滤是不够的——`/points/page` 与按 id 直读是**两条独立的泄漏路径**。
+  - **不可见返回 403，不存在仍返回 404**，两者不合并：「你没权限」和「这东西没了」在验收时要说的话不同。
+  - **空集合要短路**：MyBatis-Plus 的 `in(空集合)` 会**丢掉整条条件**，于是「一个项目都没有」退化成
+    「不过滤 = 看到全部」——**一个在做过滤、实际在放大权限的默认值**。收口在 `DataScopeService.inIds()`
+    （空集产出 `1 = 0`），`10-scope.sh` 里 `outsider` 那 15 条 fail-closed 断言就是钉这个的。
+  警情按 **point 与 device 两侧**都滤（B-14 的镜像），处置动作同样过范围。套件 `10-scope.sh` **93 条**，
+  `--fresh` 全量 **359/359**；**证伪过**：把 `unrestricted()` 注入 `return true;` → 46 条转红，
+  且红的正是**差值型**断言，控制型（admin 直达 200）仍绿——说明承重的是差值那一半。
+  ⚠️ **已知未修**：`SseBroadcaster` 广播时不看订阅者是谁，非管理员订阅 `/stream` 仍收得到项目 2 的
+  事件。这是**推送**不是查询，属契约的推送语义变更，见契约 §11 与工作清单 B-20。
+- 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量告警未做（用户定案：暂不做）；
+  ② 验收第 7 条里的**只读角色、报表、视频接入、标定/巡查模型**未做（属 P1，未定案前不动）。
+- **设备侧三类告警已成体系**（2026-09-14，验收第 5 条）：离线的同时补上了
+  **数据质量异常**（窗口内坏质量占比超阈值）与**数据延迟**（`receiveTime − collectTime` 超阈值）。
+  三者共用一张 `alarm` 表、一套状态机与处置留痕，**不新增 `alarm_type`**——成因落在
+  `alarm_reason` 列（V7）+ `snapshot.reason` 上。两个判据的边界都刻意收过：
+  回补的历史数据**不算**延迟上报（那是导入不是迟到）；样本不足 4 条时两个判据都不成立，
+  也**不解除**已有警情（「数据变好了」在没有样本时是个没有依据的结论）；
+  设备处于 `FAULT`/离线时暂不判定，闸门放开后照常判定。
+  同一台设备上三种成因**各自独立成条、互不掩盖**——`openAlarmOf` 必须按成因过滤，
+  否则离线扫描会把数据质量警情当成自己的那条、在设备恢复在线时把它「解除」掉
+  （与 B-14 同一类缺陷，`09-data-quality.sh` ④ 是它的回归锚点）。

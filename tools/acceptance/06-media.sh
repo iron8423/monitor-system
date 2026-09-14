@@ -36,6 +36,7 @@ section "② 客户端文件名不落盘（防路径穿越）"
 EVIL=$(curl -s -X POST "$BASE/media" -H "$AUTH" \
        -F "file=@$WORK/px.png;type=image/png;filename=../../evil.png" -F "pointId=$PID")
 EOK=$(printf '%s' "$EVIL" | data_of "['objectKey']")
+EVID=$(printf '%s' "$EVIL" | data_of "['mediaId']")
 info "伪装文件名的 objectKey = $EOK"
 check "未采用客户端文件名" "0" "$(printf '%s' "$EOK" | grep -c 'evil' )"
 check_contains "仍落在测点目录下" "media/P-HK01/" "$EOK"
@@ -74,5 +75,66 @@ if [ -d "$MEDIA_DIR" ]; then
 else
   fail "上传目录不存在" "$MEDIA_DIR"
 fi
+
+section "⑦ 删除影像（2026-09-14 新增，走逻辑删除）"
+# 单独传一张来删，前两张留着给上面的列表断言用
+DELUP=$(curl -s -X POST "$BASE/media" -H "$AUTH" \
+        -F "file=@$WORK/px.png;type=image/png" -F "pointId=$PID" -F "note=验收-待删")
+DMID=$(printf '%s' "$DELUP" | data_of "['mediaId']")
+DKEY=$(printf '%s' "$DELUP" | data_of "['objectKey']")
+info "待删 mediaId = $DMID"
+check "删除前在列表里" "1" "$(curl -s "$BASE/points/$PID/media" -H "$AUTH" | python3 -c "
+import sys,json;print(1 if '$DMID' in [m['mediaId'] for m in json.load(sys.stdin)['data']] else 0)")"
+check "DELETE -> 200" "200" "$(http_code -X DELETE "$BASE/media/$DMID" -H "$AUTH")"
+check "删除后不在列表里" "0" "$(curl -s "$BASE/points/$PID/media" -H "$AUTH" | python3 -c "
+import sys,json;print(1 if '$DMID' in [m['mediaId'] for m in json.load(sys.stdin)['data']] else 0)")"
+check "删除后取图 -> 404" "404" "$(http_code "$BASE/media/$DMID/content" -H "$AUTH")"
+check "重复删除 -> 404（不静默成功）" "404" "$(http_code -X DELETE "$BASE/media/$DMID" -H "$AUTH")"
+check "无 JWT -> 401" "401" "$(http_code -X DELETE "$BASE/media/$DMID")"
+
+# 软删的**证据**：库里标 deleted=1，盘上文件仍在。
+# objectKey 带 media/ 前缀（对外逻辑键），盘上路径不带——这里必须剥掉再拼，
+# 否则会查一个不存在的路径，把「文件还在」误判成「文件没了」。
+DFILE="$MEDIA_DIR/${DKEY#media/}"
+if [ -f "$DFILE" ]; then
+  pass "软删：盘上文件保留（$DKEY）"
+else
+  info "盘上文件查不到（$DFILE）——容器形态下属预期，本机运行态才断言"
+fi
+
+# 角色边界：影像的使用场景是运维上传现场照片，值班/研判是**读**影像的角色。
+# 用 login_as 而不是 login——后者固定用 ADMIN 账号且失败即 exit 2，
+# 拿它当「别的角色的 token」用会静默拿到管理员身份，断言全变成假绿。
+check "operator（值班）删 -> 403" "403" \
+  "$(http_code -X DELETE "$BASE/media/$DMID" -H "Authorization: Bearer $(login_as operator)")"
+check "analyst（研判）删 -> 403" "403" \
+  "$(http_code -X DELETE "$BASE/media/$DMID" -H "Authorization: Bearer $(login_as analyst)")"
+check "maintainer（运维）过了角色闸（对已删的 id 得 404 而非 403）" "404" \
+  "$(http_code -X DELETE "$BASE/media/$DMID" -H "Authorization: Bearer $(login_as maintainer)")"
+
+section "⑧ 套件回收自己传的图"
+# 这一段是这轮新增 DELETE 端点的**首要动因**：此前 media 只能增不能减，
+# 每跑一轮就往库里留几张 1×1 测试图，且因为**没有删除端点**而回收不了。
+# 现在有了，套件就得自己收拾——与 04-alarm.sh 回收自建规则、lib.sh 的
+# recycle_point() 回收临时测点是同一条纪律。
+#
+# ⚠️ 只删**自己这次传的**（按 mediaId），不能按测点「清空 P-HK01 的影像」——
+# 套件也可能被对着演示库跑，那样会把真实巡检照片一起删掉。
+for m in "$MID" "$EVID"; do
+  [ -n "$m" ] || continue
+  code=$(http_code -X DELETE "$BASE/media/$m" -H "$AUTH")
+  if [ "$code" = "200" ]; then info "已回收 $m"; else info "$m 未回收（HTTP $code）"; fi
+done
+# 先把「三个 id 都拿到了」写进断言：三个变量若为空串，`in` 判等永远不成立、
+# 计数恒为 0，那条断言就会在「三张图一张都没传成功」时反而亮绿——
+# 这正是本套件 06 曾经踩过的 `[].every()` 恒真那一类假绿。
+check "本次三张测试图都不再出现在列表里（且三张都确实传成功过）" "0" "$(curl -s "$BASE/points/$PID/media" -H "$AUTH" | python3 -c "
+import sys,json
+ids = ['$MID', '$EVID', '$DMID']
+if not all(ids):
+    print('IDS-MISSING(传都没传成功，这条不算数)：' + repr(ids))
+else:
+    left = [m['mediaId'] for m in json.load(sys.stdin)['data']]
+    print(sum(1 for x in left if x in ids))")"
 
 summary

@@ -22,6 +22,8 @@ import com.monitor.common.sse.SseBroadcaster;
 import com.monitor.common.util.Times;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MonitorPointMapper;
+import com.monitor.scope.service.DataScopeService;
+import com.monitor.telemetry.DataQualityPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,6 +53,7 @@ public class AlarmService {
     private final MonitorPointMapper pointMapper;
     private final DeviceMapper deviceMapper;
     private final SseBroadcaster broadcaster;
+    private final DataScopeService dataScope;
 
     /**
      * 警情列表，支持 level / status / pointId / deviceId / alarmType / from / to 筛选。
@@ -67,17 +70,22 @@ public class AlarmService {
         // 写成 eq(notBlank(x), col, x.trim()) 会在 x 为 null 时 NPE——条件为 false 也拦不住。
         String type = notBlank(alarmType) ? alarmType.trim().toUpperCase() : null;
 
-        Page<Alarm> page = alarmMapper.selectPage(new Page<>(pageNum, pageSize),
-                new LambdaQueryWrapper<Alarm>()
-                        .eq(notBlank(level), Alarm::getAlarmLevel, level)
-                        .eq(notBlank(status), Alarm::getStatus, status)
-                        .eq(pointId != null, Alarm::getPointId, pointId)
-                        .eq(deviceId != null, Alarm::getDeviceId, deviceId)
-                        .eq(type != null, Alarm::getAlarmType, type)
-                        .ge(f != null, Alarm::getTriggeredAt, f)
-                        .le(t != null, Alarm::getTriggeredAt, t)
-                        .orderByDesc(Alarm::getTriggeredAt)
-                        .orderByDesc(Alarm::getId));
+        LambdaQueryWrapper<Alarm> wrapper = new LambdaQueryWrapper<Alarm>()
+                .eq(notBlank(level), Alarm::getAlarmLevel, level)
+                .eq(notBlank(status), Alarm::getStatus, status)
+                .eq(pointId != null, Alarm::getPointId, pointId)
+                .eq(deviceId != null, Alarm::getDeviceId, deviceId)
+                .eq(type != null, Alarm::getAlarmType, type)
+                .ge(f != null, Alarm::getTriggeredAt, f)
+                .le(t != null, Alarm::getTriggeredAt, t);
+        // 数据范围必须在 orderBy 之前挂：MyBatis-Plus 按调用顺序拼 SQL，
+        // 条件加在 orderByDesc 之后会被拼到 ORDER BY 后面，变成语法错误。
+        // 范围本身必须进 SQL 而不是查完再过滤——本端点分页，内存过滤会让
+        // total 与实际可见条数不一致（翻到第 2 页可能一条都没有）。
+        dataScope.applyAlarmScope(wrapper);
+        wrapper.orderByDesc(Alarm::getTriggeredAt).orderByDesc(Alarm::getId);
+
+        Page<Alarm> page = alarmMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
 
         List<Alarm> records = page.getRecords();
         Map<Long, String> codes = pointCodes(records.stream().map(Alarm::getPointId).collect(Collectors.toSet()));
@@ -94,6 +102,7 @@ public class AlarmService {
             vo.setPointCode(a.getPointId() == null ? null : codes.get(a.getPointId()));
             vo.setDeviceId(a.getDeviceId());
             vo.setDeviceCode(a.getDeviceId() == null ? null : devCodes.get(a.getDeviceId()));
+            vo.setAlarmReason(a.getAlarmReason());
             vo.setLevel(a.getAlarmLevel());
             vo.setStatus(a.getStatus());
             vo.setTriggeredAt(Times.iso(a.getTriggeredAt()));
@@ -123,6 +132,7 @@ public class AlarmService {
         vo.setPointCode(pointCodeOf(a.getPointId()));
         vo.setDeviceId(a.getDeviceId());
         vo.setDeviceCode(deviceCodeOf(a.getDeviceId()));
+        vo.setAlarmReason(a.getAlarmReason());
         vo.setLevel(a.getAlarmLevel());
         vo.setStatus(a.getStatus());
         vo.setTriggeredAt(Times.iso(a.getTriggeredAt()));
@@ -180,23 +190,55 @@ public class AlarmService {
 
     // ---------- 内部 ----------
 
+    /**
+     * 取警情，不存在 404、不在数据范围内 403。
+     *
+     * <p>加在 {@code require} 上而不是 {@code detail} 上：{@code detail} 与 {@code act}
+     * 都经由本方法，其中 {@code act} 才是真正要紧的那个——只滤列表的话，
+     * 一个非管理员仍然能<b>处置</b>项目 B 的警情（改状态、写处置留痕、推 SSE）。</p>
+     */
     private Alarm require(Long id) {
         Alarm a = id == null ? null : alarmMapper.selectById(id);
         if (a == null) {
             throw new BizException(404, "警情不存在: " + id);
         }
+        dataScope.assertAlarmVisible(a);
         return a;
     }
 
+    /**
+     * 触发快照（读时组装）。
+     *
+     * <p>只放**判据参数**（策略常量），不放实际观测值——观测值在时间线的 trigger 备注里，
+     * 那是一段不可变的历史。设备侧的「最后上报时间」是唯一的例外：它是当前状态，
+     * 用来让看的人对得上「现在这台设备怎么样了」。</p>
+     */
     private Map<String, Object> snapshot(Alarm a) {
         Map<String, Object> snap = new LinkedHashMap<>();
         if (AlarmConstants.TYPE_DEVICE.equals(a.getAlarmType())) {
-            // 设备告警没有测点、没有规则、也没有触发值：快照讲清「哪台设备、断多久了」
+            // 设备告警没有测点、没有规则、也没有触发值：快照讲清「哪台设备、因为什么」
             Device d = a.getDeviceId() == null ? null : deviceMapper.selectById(a.getDeviceId());
             snap.put("deviceCode", d == null ? null : d.getCode());
             snap.put("deviceName", d == null ? null : d.getName());
             snap.put("lastReportTime", d == null ? null : Times.iso(d.getLastReportTime()));
-            snap.put("offlineMinutes", DeviceStatusPolicy.OFFLINE_MINUTES);
+            // 成因取自落库的 alarm_reason，不按当前状态现推——设备掉线后，
+            // 一条早先因数据质量开的警情不该被解说成离线（见 V7 迁移的说明）。
+            String reason = a.getAlarmReason();
+            snap.put("reason", reason);
+            if (AlarmConstants.REASON_DATA_QUALITY.equals(reason)) {
+                snap.put("windowMinutes", DataQualityPolicy.WINDOW_MINUTES);
+                snap.put("minSamples", DataQualityPolicy.MIN_SAMPLES);
+                snap.put("badRatio", DataQualityPolicy.BAD_RATIO);
+                snap.put("badQuality", "SUSPECT/FAULT");
+            } else if (AlarmConstants.REASON_DATA_DELAY.equals(reason)) {
+                snap.put("windowMinutes", DataQualityPolicy.WINDOW_MINUTES);
+                snap.put("minSamples", DataQualityPolicy.MIN_SAMPLES);
+                snap.put("badRatio", DataQualityPolicy.BAD_RATIO);
+                snap.put("delayMinutes", DataQualityPolicy.DELAY_MINUTES);
+            } else {
+                // 离线（也是 V7 之前存量数据的成因）：保留原有字段名，07 套件依赖它
+                snap.put("offlineMinutes", DeviceStatusPolicy.OFFLINE_MINUTES);
+            }
             return snap;
         }
         AlarmRule rule = a.getRuleId() == null ? null : ruleMapper.selectById(a.getRuleId());

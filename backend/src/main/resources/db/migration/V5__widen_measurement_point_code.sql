@@ -1,0 +1,24 @@
+-- =====================================================================
+-- V5 对齐 measurement.point_code 与 monitor_point.code 的宽度（B-13）
+--
+-- 问题：`monitor_point.code` 是 VARCHAR(64)，而冗余业务键 `measurement.point_code`
+-- 只有 VARCHAR(32)。于是 33–64 字符的点号**建得出来、却永远收不到数**：
+--   建档    POST /points        → 200（64 够用）
+--   上报    POST /ingest/...    → 500 `value too long for type character varying(32)`
+-- 实测复现过（40 字符点号，PG 上确为 500）。这不是「先建后改宽」能补救的时序问题，
+-- 而是两个字段的约束从一开始就不一致——点号是外部设备上报时带的，宽度不该由
+-- 平台单方面收窄。
+--
+-- 为什么是 64：跟 `monitor_point.code` 对齐。改宽而不是给 `monitor_point.code`
+-- 也收成 32，是因为点号由现场设备/项目编码习惯决定，平台没有理由拒绝一个
+-- 自己允许建出来的点号。
+--
+-- 索引：`measurement` 上只有 `idx_measurement_point_time (point_id, collect_time)`，
+-- **没有** point_code 的索引，所以改宽不涉及索引重建，是纯 DDL。
+-- 加宽 VARCHAR 在 PG 上不重写表（长度上限变大即可），对现有 1000+ 行是瞬时的。
+--
+-- 配套的应用层改动见 BaseCrudController 的 `@Valid` + MonitorPoint.code 的 `@Size(max=64)`：
+-- 光改库只能让 33–64 的点号「能上报」，建档侧仍需把超过 64 的挡在门外（400 而不是 500）。
+-- =====================================================================
+
+ALTER TABLE measurement ALTER COLUMN point_code TYPE VARCHAR(64);

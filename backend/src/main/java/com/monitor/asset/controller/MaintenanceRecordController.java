@@ -7,6 +7,7 @@ import com.monitor.audit.annotation.AuditAction;
 import com.monitor.auth.security.SecurityUser;
 import com.monitor.common.Result;
 import com.monitor.common.exception.BizException;
+import com.monitor.scope.service.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -30,15 +31,24 @@ import java.util.List;
 public class MaintenanceRecordController {
 
     private final MaintenanceRecordMapper maintenanceRecordMapper;
+    private final DataScopeService dataScope;
 
+    /** 维护记录跟着设备走：指定设备时直接判该设备可见，不指定时按可见设备过滤。 */
     @GetMapping
     public Result<List<MaintenanceRecord>> list(@RequestParam(required = false) Long deviceId) {
-        LambdaQueryWrapper<MaintenanceRecord> qw = new LambdaQueryWrapper<>();
         if (deviceId != null) {
-            qw.eq(MaintenanceRecord::getDeviceId, deviceId);
+            dataScope.assertDeviceVisible(deviceId);
+            return Result.ok(maintenanceRecordMapper.selectList(
+                    new LambdaQueryWrapper<MaintenanceRecord>()
+                            .eq(MaintenanceRecord::getDeviceId, deviceId)
+                            .orderByDesc(MaintenanceRecord::getCreatedAt)));
         }
-        qw.orderByDesc(MaintenanceRecord::getCreatedAt);
-        return Result.ok(maintenanceRecordMapper.selectList(qw));
+        LambdaQueryWrapper<MaintenanceRecord> qw = dataScope.maintenanceRecordFilter();
+        if (qw == null) {
+            qw = new LambdaQueryWrapper<>();
+        }
+        return Result.ok(maintenanceRecordMapper.selectList(
+                qw.orderByDesc(MaintenanceRecord::getCreatedAt)));
     }
 
     @GetMapping("/{id}")
@@ -47,6 +57,7 @@ public class MaintenanceRecordController {
         if (r == null) {
             throw new BizException(404, "维护记录不存在: " + id);
         }
+        dataScope.assertDeviceVisible(r.getDeviceId());
         return Result.ok(r);
     }
 

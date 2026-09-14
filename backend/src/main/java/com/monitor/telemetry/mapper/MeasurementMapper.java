@@ -6,12 +6,34 @@ import com.monitor.telemetry.entity.Measurement;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 @Mapper
 public interface MeasurementMapper extends BaseMapper<Measurement> {
 
     /** 幂等：device_id + message_id 是否已存在。 */
     @Select("SELECT COUNT(*) FROM measurement WHERE device_id = #{deviceId} AND message_id = #{messageId}")
     long countByMessageId(String deviceId, String messageId);
+
+    /**
+     * 某台设备在窗口内**收到**的测量值（数据可信度判定用）。
+     *
+     * <p>{@code deviceId} 传的是**设备码**（{@code device.code}）不是数字主键——
+     * {@code measurement.device_id} 是 {@code VARCHAR(64)}、存的是上报报文里那个设备码，
+     * 而 {@code device_point.device_id} 才是 {@code BIGINT}。同名不同物，混用会静默查出空集
+     * （不报错、只是判据永远不成立），是最容易写错又最难发现的一处。</p>
+     *
+     * <p>窗口卡在 {@code receive_time}（平台侧收到的时间）而不是 {@code collect_time}：
+     * 「最近收到的数据」才是这条链路的当下状态；按采集时间卡的话，
+     * 一台回补历史数据的设备会看起来「最近什么都没收到」。</p>
+     */
+    @SuppressWarnings("null")
+    default List<Measurement> recentOfDevice(String deviceCode, LocalDateTime since) {
+        return selectList(new LambdaQueryWrapper<Measurement>()
+                .eq(Measurement::getDeviceId, deviceCode)
+                .ge(Measurement::getReceiveTime, since));
+    }
 
     /**
      * 「取某测点最新一行」的**唯一**查询口径：{@code collect_time DESC, id DESC}。

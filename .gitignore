@@ -46,3 +46,6 @@ Thumbs.db
 !.env.example
 *.local
 application-local.yml
+
+# 备份产物（tools/backup/*.sh 的输出；含全库 dump，不入库）
+backups/

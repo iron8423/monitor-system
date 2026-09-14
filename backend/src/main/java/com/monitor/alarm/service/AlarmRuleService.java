@@ -8,6 +8,7 @@ import com.monitor.alarm.mapper.AlarmRuleMapper;
 import com.monitor.common.exception.BizException;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MonitorPointMapper;
+import com.monitor.scope.service.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -35,10 +36,22 @@ public class AlarmRuleService {
 
     private final AlarmRuleMapper ruleMapper;
     private final MonitorPointMapper pointMapper;
+    private final DataScopeService dataScope;
 
+    /**
+     * 规则列表。数据范围：全局规则（{@code point_id} 为空）对所有登录用户可见，
+     * 加上挂在本用户可见测点上的规则——口径与理由见
+     * {@link DataScopeService#alarmRuleFilter()}。
+     *
+     * <p>本方法只有控制器一个调用者，告警引擎走的是 {@code AlarmRuleMapper}，
+     * 所以这里的范围断言不会影响告警评估（引擎没有登录上下文，真要在这儿取用户反而会出错）。</p>
+     */
     public List<AlarmRuleVO> list() {
-        List<AlarmRule> rules = ruleMapper.selectList(new LambdaQueryWrapper<AlarmRule>()
-                .orderByAsc(AlarmRule::getId));
+        LambdaQueryWrapper<AlarmRule> wrapper = dataScope.alarmRuleFilter();
+        if (wrapper == null) {
+            wrapper = new LambdaQueryWrapper<>();
+        }
+        List<AlarmRule> rules = ruleMapper.selectList(wrapper.orderByAsc(AlarmRule::getId));
         Set<Long> pointIds = rules.stream().map(AlarmRule::getPointId)
                 .filter(Objects::nonNull).collect(Collectors.toSet());
         Map<Long, String> codes = pointIds.isEmpty() ? Map.of()

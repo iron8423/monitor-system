@@ -108,6 +108,10 @@ NEWR=$(curl -s -X POST "$BASE/alarm-rules" -H "$AUTH" -H "$JSON" \
   -d "{\"name\":\"验收-THRESHOLD-$RUN_ID\",\"pointId\":$PID,\"metricCode\":\"rate_mm_d\",\"type\":\"THRESHOLD\",\"operator\":\"gte\",\"value\":5.0,\"level\":\"notice\",\"enabled\":true}")
 check "建 THRESHOLD 规则业务码" "0" "$(printf '%s' "$NEWR" | code_of)"
 check "回读 type" "THRESHOLD" "$(printf '%s' "$NEWR" | data_of "['type']")"
+# 注意 NEWR 是**整个响应体**（上面两条断言要 `code_of` / `data_of` 读它），
+# 末尾回收时要的是里面的 id，不能直接把 NEWR 当 id 用——当成 id 会拼出一个垃圾 URL，
+# 删除静默失败，规则留在库里。这个坑是末尾那条「跑完不留自建规则」断言当场抓到的。
+NEWR_ID=$(printf '%s' "$NEWR" | data_of "['id']")
 
 section "⑨ 等级升级：同点同测项只保留一条未解除警情，命中更高等级规则时就地升级（验收第 3 条）"
 # 换一个干净测点：本套件已在 $NP 上产生过 +3.0 规则的警情，同点同规则在抑制窗口内不会再触发，
@@ -133,8 +137,7 @@ import sys,json;print(any(t['action']=='escalate' for t in json.load(sys.stdin)[
 ingest_id "esc-$RUN_ID-3" "$EP" "2026-08-27T13:10:00+08:00" '"defo_mm":0.5' >/dev/null
 check "回落至最初规则恢复值内 -> 自动解除" "0" \
   "$(curl -s "$BASE/alarms?pointId=$EPID&status=PENDING" -H "$AUTH" | data_of "['total']")"
-DEL2=$(http_code -X DELETE "$BASE/points/$EPID" -H "$AUTH")
-[ "$DEL2" = "200" ] && info "已回收临时测点 $EP" || info "临时测点 $EP 未回收（HTTP $DEL2），可忽略"
+recycle_point "$EPID" "临时测点 $EP"
 
 section "⑩ 鉴权"
 check "警情列表无 JWT -> 401" "401" "$(http_code "$BASE/alarms")"
@@ -145,8 +148,8 @@ section "⑪ 角色 → 处置动作：后端强制（越权 403），权威表�
 # 于是「隐藏按钮」成了唯一屏障——改一行 localStorage 或直接发请求就能越权。
 # 现在后端按角色强制放行，前端那张表只决定按钮显不显。
 #
-# 点号必须 <= 32 字符：points.code 是 VARCHAR(64)，但 measurement.point_code 只有
-# VARCHAR(32)，超了上报直接 500（详见 §⑫）。
+# 点号上限 64 字符（V5 起两处对齐；此前 measurement.point_code 只有 32，
+# 33–64 的点号建得出来但上报 500，见 B-13 / 02 套件 ⑫）。这里的点号远在限内。
 RP="P-ROLE-$RUN_ID"
 RPID=$(curl -s -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
        -d "{\"objectId\":1,\"code\":\"$RP\",\"name\":\"角色验收临时测点\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
@@ -180,10 +183,28 @@ for pair in "admin:confirm" "operator:confirm" "analyst:research" "maintainer:ha
   check "$u 合法 $a -> 200" "200" \
     "$(http_code -X POST "$BASE/alarms/$RAID/actions" -H "Authorization: Bearer $(login_as "$u")" -H "$JSON" -d "{\"action\":\"$a\"}")"
 done
-DELR=$(http_code -X DELETE "$BASE/points/$RPID" -H "$AUTH")
-[ "$DELR" = "200" ] && info "已回收临时测点 $RP" || info "临时测点 $RP 未回收（HTTP $DELR），可忽略"
+# 回收本套件自建的规则。
+#
+# 这里的点可以软删（`deleted` 列一置，读端点全看不见），**规则不行**：
+# `alarm_rule` 表没有 `deleted` 列，DELETE 就是物理删除。此前⑦⑧各建一条、都不回收，
+# 于是每跑一轮演示库就永久多留两条——跑到第 6 轮时管理端「告警规则」页签里
+# 已经排着 12 条 `验收-*` 垃圾规则。它们指向的是已软删的测点，**不会再触发**
+# （没有测点上报就没人拿它们去比），所以是演示污染而非正确性问题，但一样要清。
+for rid in "$RID" "$NEWR_ID"; do
+  [ -n "$rid" ] || continue
+  DRC=$(http_code -X DELETE "$BASE/alarm-rules/$rid" -H "$AUTH")
+  [ "$DRC" = "200" ] && info "已回收临时规则 id=$rid" || info "临时规则 id=$rid 未回收（HTTP $DRC），可忽略"
+done
 
-DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
-[ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
+recycle_point "$RPID" "临时测点 $RP"
+recycle_point "$PID"
+
+# 套件自身卫生：跑完不该留下任何 `验收-` 前缀的规则。
+# 这条**不是**在测产品，是在测本脚本自己有没有漏回收——加它是因为真的漏了很多轮。
+check "跑完不留自建规则（套件自身卫生）" "0" \
+  "$(curl -s "$BASE/alarm-rules" -H "$AUTH" | python3 -c "
+import sys,json
+rs=json.load(sys.stdin)['data']
+print(sum(1 for r in rs if r['name'].startswith('验收-')))")"
 
 summary

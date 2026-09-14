@@ -17,6 +17,12 @@ import java.time.LocalDateTime;
  * <p>{@code alarmType} 区分来源：{@code POINT} 挂测点（{@code pointId} 必填）、
  * {@code DEVICE} 挂设备（{@code deviceId} 必填、{@code pointId} 为空）。两类共用同一张表、
  * 同一套状态机与处置管线，列表 / 详情 / 处置 / 时间线 / SSE 都不必分叉。</p>
+ *
+ * <p>{@code alarmReason}（V7 起）细分 {@code DEVICE} 类的成因：
+ * {@code OFFLINE} / {@code DATA_QUALITY} / {@code DATA_DELAY}，见 {@code AlarmConstants}。
+ * 它**必须落库**而不是读时推导——成因是「当时为什么开这条警情」的历史事实，
+ * 设备掉线后不该把一条早先因数据质量开的警情重新解说成离线。
+ * {@code POINT} 类警情不适用，恒为 null。</p>
  */
 @Data
 @TableName("alarm")
@@ -31,6 +37,8 @@ public class Alarm {
     private Long pointId;
     /** 设备警情的挂靠设备；测点警情为 null。 */
     private Long deviceId;
+    /** 设备警情的成因（V7）：OFFLINE / DATA_QUALITY / DATA_DELAY；测点警情为 null。 */
+    private String alarmReason;
     private Long ruleId;
     private String alarmLevel;
     private String status;

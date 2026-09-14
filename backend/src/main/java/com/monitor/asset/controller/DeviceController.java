@@ -13,6 +13,8 @@ import com.monitor.common.Result;
 import com.monitor.common.base.BaseCrudController;
 import com.monitor.common.exception.BizException;
 import com.monitor.common.util.Times;
+import com.monitor.project.mapper.MonitorPointMapper;
+import com.monitor.scope.service.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -35,10 +37,23 @@ public class DeviceController extends BaseCrudController<Device> {
 
     private final DeviceMapper deviceMapper;
     private final DevicePointMapper devicePointMapper;
+    private final MonitorPointMapper pointMapper;
+    private final DataScopeService dataScope;
 
     @Override
     protected BaseMapper<Device> mapper() {
         return deviceMapper;
+    }
+
+    /** 设备本身不挂项目，归属由 {@code device_point} 反查测点决定；未绑定的设备只对 ADMIN 可见。 */
+    @Override
+    protected LambdaQueryWrapper<Device> scopeFilter() {
+        return dataScope.deviceFilter();
+    }
+
+    @Override
+    protected boolean inScope(Device entity) {
+        return dataScope.canSeeDevice(entity.getId());
     }
 
     /**
@@ -59,7 +74,7 @@ public class DeviceController extends BaseCrudController<Device> {
     @Override
     @GetMapping
     public Result<List<Device>> list() {
-        List<Device> devices = deviceMapper.selectList(null);
+        List<Device> devices = deviceMapper.selectList(scopeFilter());
         devices.forEach(DeviceController::fillDerivedStatus);
         return Result.ok(devices);
     }
@@ -71,6 +86,9 @@ public class DeviceController extends BaseCrudController<Device> {
         Device d = deviceMapper.selectById(id);
         if (d == null) {
             throw new BizException(404, "设备不存在: " + id);
+        }
+        if (!inScope(d)) {
+            throw new BizException(403, "无权访问该记录: " + id);
         }
         fillDerivedStatus(d);
         return Result.ok(d);
@@ -87,6 +105,7 @@ public class DeviceController extends BaseCrudController<Device> {
         if (d == null) {
             throw new BizException(404, "设备不存在: " + id);
         }
+        dataScope.assertDeviceVisible(id);
         boolean online = DeviceStatusPolicy.isOnline(d.getLastReportTime());
         boolean lowBattery = DeviceStatusPolicy.isLowBattery(d.getBattery());
         String status = DeviceStatusPolicy.statusOf(d);
@@ -104,14 +123,23 @@ public class DeviceController extends BaseCrudController<Device> {
 
     @GetMapping("/{id}/points")
     public Result<List<DevicePoint>> boundPoints(@PathVariable Long id) {
+        dataScope.assertDeviceVisible(id);
         return Result.ok(devicePointMapper.selectList(
                 new LambdaQueryWrapper<DevicePoint>().eq(DevicePoint::getDeviceId, id)));
     }
 
+    /**
+     * 绑定测点。两侧都要过范围：设备是可操作对象，测点是这次改动要落到的数据——
+     * 只判设备的话，一个 MAINTAINER 能把项目 B 的测点挂到本项目的设备上，
+     * 那条绑定随后会让这台设备对项目 B 的成员也可见（设备的可见性正是由绑定反推的）。
+     */
     @PostMapping("/{id}/points/{pointId}")
     @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER')")
     @AuditAction(action = "绑定测点")
     public Result<Void> bind(@PathVariable Long id, @PathVariable Long pointId) {
+        requireDevice(id);
+        requirePoint(pointId);
+        dataScope.assertPointVisible(pointId);
         Long count = devicePointMapper.selectCount(new LambdaQueryWrapper<DevicePoint>()
                 .eq(DevicePoint::getDeviceId, id).eq(DevicePoint::getPointId, pointId));
         if (count != null && count > 0) {
@@ -128,8 +156,31 @@ public class DeviceController extends BaseCrudController<Device> {
     @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER')")
     @AuditAction(action = "解绑测点")
     public Result<Void> unbind(@PathVariable Long id, @PathVariable Long pointId) {
+        requireDevice(id);
+        requirePoint(pointId);
+        dataScope.assertPointVisible(pointId);
         devicePointMapper.delete(new LambdaQueryWrapper<DevicePoint>()
                 .eq(DevicePoint::getDeviceId, id).eq(DevicePoint::getPointId, pointId));
         return Result.ok();
+    }
+
+    /**
+     * 存在性检查（404）。此前两个绑定端点都没有——{@code POST /devices/9999/points/9999}
+     * 会**静默插一条悬空绑定**，指向一个不存在的设备与测点。
+     *
+     * <p>判成 404 而不是让它落到 403：不存在与「存在但不在你的范围内」是两件事，
+     * 混成一个状态码之后，「为什么我绑不上」会变得没法排查。</p>
+     */
+    private void requireDevice(Long id) {
+        if (id == null || deviceMapper.selectById(id) == null) {
+            throw new BizException(404, "设备不存在: " + id);
+        }
+        dataScope.assertDeviceVisible(id);
+    }
+
+    private void requirePoint(Long id) {
+        if (id == null || pointMapper.selectById(id) == null) {
+            throw new BizException(404, "测点不存在: " + id);
+        }
     }
 }

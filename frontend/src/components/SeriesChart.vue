@@ -28,6 +28,34 @@ const props = defineProps({
 
 const hasData = computed(() => props.points.length > 0)
 
+/**
+ * y 轴范围**必须把阈值线算进去**，否则阈值线根本看不见。
+ *
+ * 这是实测撞出来的：演示库 7 个测点的 `defo_mm` 都在 0.09–0.14mm 之间，而阈值在 ±3 / +5。
+ * ECharts 的 markLine 坐标走轴空间、并**被绘图区裁掉**，轴范围又只按数据算——
+ * 于是阈值线全部落在视口外，一根都画不出来。换句话说，这块功能此前是**视觉上的死代码**：
+ * 代码里写着 ±3mm（写死的版本连标签都是错的），屏幕上却什么都没有，所以谁也没发现。
+ *
+ * 代价要说清楚：把 ±3/+5 纳入范围后，0.1 量级的数据会被压成贴着零的一条平线。
+ * 但这是**如实**的——它正确表达了「当前形变远低于阈值」。反过来只按数据缩放的话，
+ * 这条线看着有起伏，却看不出离阈值还有多远，阈值线也就失去了意义。
+ * 形变监测里「离报警线还有多少」正是要看的东西，故选前者。
+ */
+const yExtent = computed(() => {
+  const values = props.points.map((p) => p.v).filter((v) => typeof v === 'number' && Number.isFinite(v))
+  const all = [...values, ...props.thresholds.map((t) => Number(t.value)).filter(Number.isFinite)]
+  if (!all.length) return {}
+  let min = Math.min(...all)
+  let max = Math.max(...all)
+  // 全平的序列（或只有一个点）会给 min===max，留点余量免得轴塌成一条线
+  if (min === max) {
+    min -= 1
+    max += 1
+  }
+  const pad = (max - min) * 0.08
+  return { min: min - pad, max: max + pad }
+})
+
 const option = computed(() => {
   const times = props.points.map((p) => p.t)
   const values = props.points.map((p) => p.v)
@@ -60,6 +88,8 @@ const option = computed(() => {
       axisLine: { show: false },
       axisLabel: { fontSize: 11 },
       splitLine: { lineStyle: { color: '#eef1f5' } },
+      // 纳入阈值后的范围；空对象时交给 ECharts 自己按数据缩放
+      ...yExtent.value,
     },
     series: [
       {

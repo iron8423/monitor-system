@@ -10,6 +10,7 @@ import com.monitor.media.entity.Media;
 import com.monitor.media.mapper.MediaMapper;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MonitorPointMapper;
+import com.monitor.scope.service.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -58,6 +59,7 @@ public class MediaService {
 
     private final MediaMapper mediaMapper;
     private final MonitorPointMapper pointMapper;
+    private final DataScopeService dataScope;
 
     @Value("${monitor.upload.dir:./data/media}")
     private String uploadDir;
@@ -133,12 +135,36 @@ public class MediaService {
         return items;
     }
 
-    /** 取影像元数据，不存在抛 404。 */
+    /**
+     * 删除影像（**逻辑删除**，契约 §7）。
+     *
+     * <p>只把库里的行标成 {@code deleted=1}，<b>不删盘上的文件</b>——见 V6 的注释：
+     * 软删的全部价值就在于可挽回，接口顺手删文件就把这个价值抵消了。删除后该影像
+     * 从列表与内容端点一并消失（两者都走 MyBatis-Plus 的逻辑删除过滤，不必各写一遍）。</p>
+     *
+     * <p>先 {@link #requireByCode} 再删：已删的行查不出来，所以「删两次」第二次是 404，
+     * 而不是静默成功——后者会让「我到底删没删掉」无从判断。</p>
+     */
+    public void delete(String mediaId) {
+        Media media = requireByCode(mediaId);
+        mediaMapper.deleteById(media.getId());
+        log.info("影像已逻辑删除 mediaId={} pointId={} objectKey={}（盘上文件保留）",
+                mediaId, media.getPointId(), media.getObjectKey());
+    }
+
+    /**
+     * 取影像元数据，不存在抛 404，不在数据范围内抛 403。
+     *
+     * <p>影像的可见性**随它挂的测点**：{@code /media/{mediaId}/content} 是拿编码直接访问的
+     * （{@code M001} 这种顺序编码，枚举成本极低），列表端点滤得再干净，
+     * 少了这一处也等于没隔离——一个非管理员顺着编码就能把项目 B 的现场照片一张张读出来。</p>
+     */
     public Media require(Long id) {
         Media m = id == null ? null : mediaMapper.selectById(id);
         if (m == null) {
             throw new BizException(404, "影像不存在: " + id);
         }
+        dataScope.assertPointVisible(m.getPointId());
         return m;
     }
 
@@ -173,11 +199,13 @@ public class MediaService {
 
     // ---------- 内部 ----------
 
+    /** 上传与列表都经由本方法，故范围断言挂在这里（少一处就是「能往别人项目的测点上挂图」）。 */
     private MonitorPoint requirePoint(Long pointId) {
         MonitorPoint p = pointId == null ? null : pointMapper.selectById(pointId);
         if (p == null) {
             throw new BizException(404, "测点不存在: " + pointId);
         }
+        dataScope.assertPointVisible(pointId);
         return p;
     }
 

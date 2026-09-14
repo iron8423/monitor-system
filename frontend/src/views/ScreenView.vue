@@ -13,12 +13,11 @@ import {
 } from '@/cesium/createViewer'
 import { createPointLayer } from '@/cesium/pointLayer'
 import { createHeatmapLayer } from '@/cesium/heatmapLayer'
-import * as api from '@/api/monitor'
+import MediaGallery from '@/components/MediaGallery.vue'
 import { ALARM_LEVEL, resolvePointVisual } from '@/constants/status'
 import { useMonitorStore } from '@/stores/monitor'
 import { useRealtimeStore } from '@/stores/realtime'
 import { useReplayStore } from '@/stores/replay'
-import { useUserStore } from '@/stores/user'
 import { formatNumber, formatSigned, formatTime, fromNow } from '@/utils/format'
 import { frameProgress, indexFromProgress } from '@/utils/timeline'
 
@@ -47,10 +46,6 @@ const imageryState = ref('loading') // loading | ion | fallback | failed
 
 /** 跟随测点的浮窗 */
 const popup = reactive({ visible: false, pointId: null, x: 0, y: 0 })
-
-/** 浮窗里的现场照片（最多 3 张，按测点缓存——点来点去不必反复打接口） */
-const popupPhotos = ref([])
-const photoCache = new Map()
 
 const TERRAIN_TEXT = {
   loading: '地形加载中',
@@ -160,33 +155,11 @@ const LEGEND = [
 function openPopup(pointId) {
   popup.pointId = pointId
   popup.visible = true
-  loadPopupPhotos(pointId)
 }
 
 function closePopup() {
   popup.visible = false
 }
-
-/** 现场照片（阶段 5）：大屏上点开一个点，顺手就能看见它的实景 */
-async function loadPopupPhotos(pointId) {
-  const cached = photoCache.get(pointId)
-  if (cached) {
-    popupPhotos.value = cached
-    return
-  }
-  popupPhotos.value = []
-  try {
-    const list = (await api.pointMedia(pointId)) || []
-    const top = list.slice(0, 3)
-    photoCache.set(pointId, top)
-    // 拉的过程中用户可能已经点了别的点，晚到的结果不要覆盖
-    if (popup.pointId === pointId) popupPhotos.value = top
-  } catch {
-    // 拦截器已统一弹错：这里静默即可，照片不是大屏的主内容
-  }
-}
-
-const photoUrl = (mediaId) => api.mediaContentUrl(mediaId, userStore.token)
 
 // 模板里不要直接摸 viewer（它是普通变量、首帧还是 null），统一走这两个包装函数
 function focusPoint(point) {
@@ -523,21 +496,17 @@ onBeforeUnmount(() => {
           <span>采集时间</span>
           <b>{{ formatTime(selected.collectTime) }}</b>
         </div>
-        <div v-if="popupPhotos.length" class="kv photos">
-          <span>现场照片</span>
-          <div class="thumbs">
-            <el-image
-              v-for="(m, i) in popupPhotos"
-              :key="m.mediaId"
-              :src="photoUrl(m.mediaId)"
-              :preview-src-list="popupPhotos.map((x) => photoUrl(x.mediaId))"
-              :initial-index="i"
-              fit="cover"
-              class="thumb"
-              preview-teleported
-            />
-          </div>
-        </div>
+        <!-- 最新一张现场影像（验收第 6 条要求「详情**与 3D 大屏**」都能看）。
+             用 A 的 MediaGallery：缩略图只显示一张，点开可翻该点全部影像（支持删除）；
+             该点没有影像时整块不出现（hide-empty），不留空档。 -->
+        <MediaGallery
+          :point-id="popup.pointId"
+          :max="1"
+          :columns="1"
+          size="78px"
+          hide-empty
+          class="popup-media"
+        />
       </div>
       <div class="popup-foot">
         <button class="btn" @click="router.push('/points')">去看曲线</button>
@@ -877,16 +846,24 @@ onBeforeUnmount(() => {
   margin-top: 2px;
 }
 
-.thumbs {
-  display: flex;
-  gap: 6px;
+/*
+ * MediaGallery 是给亮色页面写的（--mk-border / --mk-bg），浮窗是深色的，
+ * 所以这里把缩略图的边框/底色换成 HUD 的蓝线，否则亮色描边浮在深色玻璃上很突兀。
+ * :deep() 必要：画廊的样式是 scoped 的，从外面够不着。
+ */
+.popup-media :deep(.grid) {
+  padding: 8px 0 4px;
 }
 
-.thumb {
-  width: 58px;
-  height: 44px;
-  border: 1px solid rgba(90, 170, 255, 0.35);
-  border-radius: 4px;
+.popup-media :deep(.thumb) {
+  border-color: rgba(90, 170, 255, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  width: 78px;
+}
+
+.popup-media :deep(.time),
+.popup-media :deep(.note) {
+  color: #8fa9c6;
 }
 
 /* 地面热力图开关：图例下面的小复选，不该抢视觉 */

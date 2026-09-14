@@ -78,9 +78,10 @@ const kpis = computed(() => [
   },
 ])
 
-/** 管理员专属入口。审计日志后端有接口（仅 ADMIN 可调）但前端还没有页面，故不在此列。 */
+/** 管理员专属入口。 */
 const shortcuts = [
   { path: '/admin', title: '管理端', desc: '项目 / 场景 / 对象 / 测点 / 测项 / 设备 / 告警规则的增删改' },
+  { path: '/audit', title: '审计日志', desc: '每一次写操作的操作人、动作、目标与来源 IP（仅管理员可见）' },
   { path: '/alarms', title: '告警中心', desc: '全部警情、处置时间线；管理员可执行全部六种处置动作' },
   { path: '/screen', title: '3D 大屏', desc: '真实地形 + 卫星影像 + 测点标点的三维态势' },
 ]

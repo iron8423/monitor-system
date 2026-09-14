@@ -76,7 +76,6 @@ check "错 token -> 401" "401" "$(http_code "$BASE/stream?token=garbage")"
 check_grep "事件流含 alarm 事件" "event: *alarm" "$OUT"
 check_grep "事件流含 measurement 事件" "event: *measurement" "$OUT"
 
-DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
-[ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
+recycle_point "$PID"
 
 summary

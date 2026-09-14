@@ -15,6 +15,14 @@ import java.time.LocalDateTime;
  * <p>{@code filePath} 是服务端落盘路径，{@code objectKey} 是对外对象键
  * （{@code media/<pointCode>/<uuid>.<ext>}），{@code url} 是对外访问地址
  * {@code /api/v1/media/{id}/content}。</p>
+ *
+ * <p><b>{@code deleted} 走逻辑删除</b>（V6 加的列，全局配置
+ * {@code mybatis-plus.global-config.db-config.logic-delete-field: deleted} 接管）。
+ * 本类**不继承 {@code BaseEntity}**（媒体没有「更新」语义，也就没有 {@code updatedAt}），
+ * 所以这个字段是手写的一份——全局配置只认字段名，不认继承关系，写在这里同样生效，
+ * 且所有既有查询会自动带上 {@code AND deleted = 0}。</p>
+ *
+ * <p>注意软删**不动盘上的文件**：删的只是库里的可见性，可挽回。理由见 V6 的注释。</p>
  */
 @Data
 @TableName("media")
@@ -38,4 +46,7 @@ public class Media {
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
+
+    /** 逻辑删除标记：0=正常 1=删除。字段名由全局配置识别，无需 {@code @TableLogic} 注解。 */
+    private Integer deleted;
 }

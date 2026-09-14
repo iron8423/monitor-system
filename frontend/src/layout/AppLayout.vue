@@ -1,10 +1,9 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-import { useMonitorStore } from '@/stores/monitor'
-import { useRealtimeStore } from '@/stores/realtime'
+import { openStream } from '@/api/monitor'
 import { useUserStore } from '@/stores/user'
 
 defineOptions({ name: 'AppLayout' })
@@ -12,8 +11,6 @@ defineOptions({ name: 'AppLayout' })
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const realtime = useRealtimeStore()
-const monitor = useMonitorStore()
 
 const collapsed = ref(false)
 
@@ -27,6 +24,7 @@ const menus = [
   { path: '/alarms', title: '告警中心', icon: 'Bell', ready: true },
   { path: '/media', title: '影像挂点', icon: 'Picture', ready: true },
   { path: '/admin', title: '管理端', icon: 'Setting', ready: true, roles: ['ADMIN'] },
+  { path: '/audit', title: '审计日志', icon: 'Document', ready: true, roles: ['ADMIN'] },
 ]
 
 // 菜单里的角色收口只是界面引导，真正的边界在后端 @PreAuthorize
@@ -36,17 +34,57 @@ const visibleMenus = computed(() =>
 
 const currentTitle = computed(() => route.meta?.title || '')
 
-/*
- * SSE（契约 D8）的连接**归 stores/realtime.js**，这里只是「唤醒」它。
+/**
+ * 全局 SSE（契约 D8）：只在这里开**一条**连接并保持住。
  *
- * 为什么不再放布局里：`/screen` 是顶层路由、不套本布局，连接发起若留在这里，
- * 用户直接进大屏就没人建连接；放页面里又会因路由切换反复断连（事件没有重放，
- * 断开期间全丢）。store 活在应用级，两边都覆盖得到；`start()` 是幂等的。
- *
- * 整页卸载（F5 / 直接输地址）时 onBeforeUnmount 不会执行，所以 pagehide 的
- * 显式 close 也一并由 store 负责——它绑一次就够，不必每个页面各写一份。
+ * 放在布局而不是各页面里，是因为页面组件会随路由切换销毁——
+ * 每页各开一条的话，切一次路由就断一次，断开期间的事件直接丢掉，
+ * 而事件本身没有重放机制。布局是唯一稳定存活的那一层。
  */
-onMounted(() => realtime.start())
+const live = ref(false)
+let stream = null
+
+function connectStream() {
+  if (!userStore.token || stream) return
+  // token 走 query：EventSource 发不了请求头，这是契约给 SSE 开的唯一例外
+  stream = openStream(userStore.token)
+  stream.addEventListener('open', () => (live.value = true))
+  stream.addEventListener('error', () => (live.value = false))
+  // 事件内容由各页面自己订阅；这里只需要知道「连接活着」，
+  // 顺便把连接建立起来，页面挂载时订阅就不会漏掉开头的事件。
+}
+
+/*
+ * 整页卸载（F5、直接输地址、跳外链）时 onBeforeUnmount **不会执行**——文档是被丢弃的，
+ * Vue 没有机会做清理。而这是一条长连接：nginx 非缓冲反代只能靠「向客户端写失败」察觉
+ * 对方已走，而第一次写进半关闭的 socket 会成功，所以要等**第二次**心跳（30s×2）才收尾。
+ * 这段时间里那条半关闭的 socket 仍占着浏览器「单源 6 连接」的名额——连刷 6 次，
+ * 此后所有请求全部排队，界面看起来就是死了几十秒。
+ * 显式 close 让浏览器当场回收这个名额，不必等对端。
+ */
+function onPageShow(event) {
+  // 从 bfcache 回来时 pagehide 已经关过连接了，这里必须补上，
+  // 否则用户按一次「后退」SSE 就**静默地**再也不来——页面看起来一切正常，
+  // 只是数据永远停在那一刻，这是最难查的一类故障
+  if (event.persisted) connectStream()
+}
+
+onMounted(() => {
+  connectStream()
+  window.addEventListener('pagehide', disconnectStream)
+  window.addEventListener('pageshow', onPageShow)
+})
+
+function disconnectStream() {
+  stream?.close()
+  stream = null
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', disconnectStream)
+  window.removeEventListener('pageshow', onPageShow)
+  disconnectStream()
+})
 
 async function handleCommand(command) {
   if (command !== 'logout') return
@@ -55,8 +93,6 @@ async function handleCommand(command) {
   } catch {
     return
   }
-  realtime.reset()
-  monitor.clearAlarms()
   await userStore.logout()
   ElMessage.success('已退出登录')
   router.replace('/login')
@@ -79,12 +115,8 @@ async function handleCommand(command) {
       </div>
 
       <div class="header-right">
-        <el-tag
-          :type="realtime.isLive ? 'success' : realtime.status === 'reconnecting' ? 'warning' : 'info'"
-          effect="plain"
-          size="small"
-        >
-          {{ realtime.isLive ? '实时已连接' : realtime.statusText }}
+        <el-tag :type="live ? 'success' : 'info'" effect="plain" size="small">
+          {{ live ? '实时已连接' : '实时未连接' }}
         </el-tag>
         <el-dropdown trigger="click" @command="handleCommand">
           <span class="user">

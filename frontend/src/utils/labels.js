@@ -58,6 +58,22 @@ export const ALARM_TYPE_LABELS = {
 }
 
 /**
+ * 设备告警的**成因**（契约 §4 的 `alarmReason`）。测点警情为 `null`。
+ *
+ * 只有 `DEVICE` 类有值，而且是三种成因**各自独立成条**的：同一台设备上
+ * 「离线」和「数据质量异常」可以同时在列。只看「类型」列的话，这两行长得一模一样
+ * （都是「设备 / radar-001 / 提示」），处置时根本分不清该修什么——所以成因必须露出来。
+ *
+ * `null` 走 `label()` 的兜底显示「—」：V7 之前的存量设备告警只有离线一种，
+ * 没有成因列可回溯，显示成「—」比硬猜一个「离线」诚实。
+ */
+export const ALARM_REASON_LABELS = {
+  OFFLINE: '离线',
+  DATA_QUALITY: '数据质量异常',
+  DATA_DELAY: '数据延迟',
+}
+
+/**
  * 设备状态。**与上面的告警状态是两套枚举，别混**。
  *
  * 四个值都不来自 `device.status` 那一列的存量值——列表与详情端点会用
@@ -96,6 +112,25 @@ export const ACTIONS_BY_ROLE = {
   OPERATOR: ['confirm', 'dispatch', 'handle', 'resolve', 'misreport'],
   ANALYST: ['research', 'resolve', 'misreport'],
   MAINTAINER: ['handle', 'resolve', 'misreport'],
+}
+
+/**
+ * 审计动作 → 标签配色（审计日志页用）。
+ *
+ * 键是**后端 `@AuditAction(action = "…")` 里写的中文串**，不是英文枚举——
+ * `AuditAspect` 原样落库。所以这里漏一个键不会报错，只会退回默认灰色 `info`
+ * （`AuditView` 里是 `TAG[row.action] || 'info'`）。加新 `@AuditAction` 时回来补一行。
+ *
+ * 配色按语义分：写/改=主色，删=危险，绑定类=中性。
+ */
+export const AUDIT_ACTION_TAG = {
+  创建: 'success',
+  更新: 'primary',
+  删除: 'danger',
+  删除影像: 'danger',
+  绑定测点: 'info',
+  解绑测点: 'info',
+  创建维护记录: 'warning',
 }
 
 export function label(map, key) {

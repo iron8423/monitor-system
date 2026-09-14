@@ -74,6 +74,10 @@
 > `results` 则**每条消息一项**。
 
 > 边界：`deviceId/pointCode` 不存在 → REJECTED；幂等命中 → DUPLICATE；质量规则见消息契约 §3。
+> **`pointCode` 长度上限 64 字符**（`monitor_point.code` 与 `measurement.point_code` 现同为
+> `VARCHAR(64)`，V5 对齐）。超过 64 的点号在**建档接口**就会被 `@Size(max=64)` 挡成 400，
+> 不会走到上报；设备侧若上报了档案里不存在的点号（含超长），按上面第一条 REJECTED。
+> 此前两处宽度不一致（64 / 32）导致 33–64 字符的点号「建得出来、一上报就 500」，已修（B-13）。
 > **`collectTime` 是必填且必须可解析**：缺失或格式非法 → 整条 REJECTED（计入 `rejected`），
 > 不会替你取当前时间兜底。理由：兜底取 `now()` 会让设备的坏时间戳被盖上「刚刚收到」的章，
 > 而设备在线判定（`DeviceStatusPolicy`，5 分钟窗口）只认最后上报时间——**设备一直在报垃圾却永远显示在线**，
@@ -112,33 +116,59 @@
 > `lastAction` / `lastActionAt` 是**系统或人工最后一次动作**，取值是原始动作串
 > （`trigger` 触发 / `recover` 自动解除 / `escalate` 升级 / `confirm` / `research` / `dispatch` / `handle` / `resolve` / `misreport`），
 > 不是中文标签——前端自行映射展示文案。
+> `alarmReason`（A 于 2026-09-14 新增，仅 `alarmType=DEVICE` 有值）：设备告警的**成因**，
+> `OFFLINE`（离线）/ `DATA_QUALITY`（数据可信度异常）/ `DATA_DELAY`（数据延迟上报）；
+> 测点警情与 V7 之前的存量设备告警为 `null`。列表里也给，因为同一台设备上这几种成因
+> 可以**并存**（各一条，互不掩盖），只给 `alarmType` 的话前端看到的是两行一模一样的东西。
 ```json
 { "total": 2, "pageNum": 1, "pageSize": 20, "records": [
   { "id": 1, "alarmType": "POINT", "pointId": 1000, "pointCode": "P-HK01",
-    "deviceId": null, "deviceCode": null, "level": "alarm", "status": "PENDING",
+    "deviceId": null, "deviceCode": null, "alarmReason": null, "level": "alarm", "status": "PENDING",
     "triggeredAt": "2026-08-27T09:30:00+08:00", "lastAction": "trigger", "lastActionAt": "2026-08-27T09:30:00+08:00" },
   { "id": 2, "alarmType": "DEVICE", "pointId": null, "pointCode": null,
-    "deviceId": 1000, "deviceCode": "radar-001", "level": "notice", "status": "PENDING",
+    "deviceId": 1000, "deviceCode": "radar-001", "alarmReason": "OFFLINE", "level": "notice", "status": "PENDING",
     "triggeredAt": "2026-08-27T09:35:00+08:00", "lastAction": "trigger", "lastActionAt": "2026-08-27T09:35:00+08:00" } ] }
 ```
 
 ### GET /api/v1/alarms/{id}
-> 字段同列表项 + `resolvedAt`；`snapshot` 随 `alarmType` 变化（见下）。
+> 字段同列表项 + `resolvedAt`；`snapshot` 随 `alarmType` / `alarmReason` 变化（见下）。
+> 快照里放的是**判据参数**（阈值、窗口、最小样本数），不是触发那一刻的观测值——
+> 观测值在 `timeline[0].comment` 里，那是一段不可变的历史。`lastReportTime` 是唯一例外：
+> 它是设备的**当前**状态，用来让看的人对得上「这台设备现在怎么样了」。
 ```json
 { "id": 1, "alarmType": "POINT", "pointId": 1000, "pointCode": "P-HK01", "level": "alarm", "status": "PENDING",
   "triggeredAt": "2026-08-27T09:30:00+08:00",
   "snapshot": { "defo_mm": 0.73, "threshold_mm": 10.0 },
   "timeline": [ { "time": "2026-08-27T09:30:00+08:00", "action": "trigger", "operator": "system", "comment": "累计形变 0.73mm 超阈值 10mm" } ] }
 ```
+`DEVICE` 类按成因分三种快照形状（A 于 2026-09-14 补齐后两种，对应验收第 5 条）：
 ```json
-{ "id": 2, "alarmType": "DEVICE", "pointId": null, "pointCode": null,
-  "deviceId": 1000, "deviceCode": "radar-001", "level": "notice", "status": "PENDING",
-  "triggeredAt": "2026-08-27T09:35:00+08:00",
+{ "id": 2, "alarmType": "DEVICE", "alarmReason": "OFFLINE",
+  "pointId": null, "pointCode": null, "deviceId": 1000, "deviceCode": "radar-001",
+  "level": "notice", "status": "PENDING", "triggeredAt": "2026-08-27T09:35:00+08:00",
   "snapshot": { "deviceCode": "radar-001", "deviceName": "毫米波点形变雷达 1 号",
-                "lastReportTime": "2026-08-27T09:29:10+08:00", "offlineMinutes": 5 },
+                "lastReportTime": "2026-08-27T09:29:10+08:00", "reason": "OFFLINE", "offlineMinutes": 5 },
   "timeline": [ { "time": "2026-08-27T09:35:00+08:00", "action": "trigger", "operator": "system",
                   "comment": "设备 radar-001（毫米波点形变雷达 1 号）已超过 5 分钟未上报数据，判定为离线" } ] }
 ```
+```json
+{ "id": 3, "alarmType": "DEVICE", "alarmReason": "DATA_QUALITY", "level": "notice", "status": "PENDING",
+  "snapshot": { "deviceCode": "radar-001", "deviceName": "毫米波点形变雷达 1 号",
+                "lastReportTime": "2026-09-14T11:20:00+08:00", "reason": "DATA_QUALITY",
+                "windowMinutes": 15, "minSamples": 4, "badRatio": 0.6, "badQuality": "SUSPECT/FAULT" },
+  "timeline": [ { "action": "trigger", "comment": "设备 radar-001 近 15 分钟 9 条数据中有 7 条质量异常（SUSPECT/FAULT），占比超过 60%，数据不可信" } ] }
+```
+```json
+{ "id": 4, "alarmType": "DEVICE", "alarmReason": "DATA_DELAY", "level": "notice", "status": "PENDING",
+  "snapshot": { "deviceCode": "radar-001", "deviceName": "毫米波点形变雷达 1 号",
+                "lastReportTime": "2026-09-14T11:20:00+08:00", "reason": "DATA_DELAY",
+                "windowMinutes": 15, "minSamples": 4, "badRatio": 0.6, "delayMinutes": 10 },
+  "timeline": [ { "action": "trigger", "comment": "设备 radar-001 近 15 分钟有 6 条数据延迟超过 10 分钟才到达平台" } ] }
+```
+> `snapshot.reason` 与 `alarmReason` 同值，保留 `reason` 是因为它先于 `alarmReason` 存在
+> （离线告警最初就用它），且前端已在按它分支。
+> **成因取自落库的 `alarm_reason` 列（V7），不按当前状态现推**：设备掉线后，一条早先因数据质量
+> 开出的警情不该被解说成「离线」——警情是历史事实，成因必须钉在触发那一刻。
 
 ### 警情唯一性与等级升级（A 于 2026-09-10 定案）
 - 同一**测点 + 测项**未解除的警情**至多一条**。值继续恶化、命中更高等级规则时**就地升级**
@@ -205,6 +235,52 @@
 
 > 展示口径待 B 定：设备告警是否进「警情中心」默认视图（后端可按 `alarmType` 筛，见 §4）。
 
+### 设备数据质量 / 数据延迟告警（A 于 2026-09-14 补齐，对应验收第 5 条）
+
+同一张表、同一套状态机，`alarmType = DEVICE`，成因由 `alarmReason` 区分（见 §4）：
+
+| 成因 | 判据（常量在 `DataQualityPolicy`，与 `DeviceAlarmMonitor` 同款不可配） | 等级 |
+|---|---|---|
+| `OFFLINE` | 超过 5 分钟未上报（`DeviceStatusPolicy.OFFLINE_MINUTES`） | `notice` |
+| `DATA_QUALITY` | 近 **15** 分钟内 ≥ **4** 条样本，其中 **≥60%** 质量为 `SUSPECT`/`FAULT` | `notice` |
+| `DATA_DELAY` | 近 15 分钟内 ≥ 4 条样本，有 **>10 分钟**才到平台的（`receiveTime − collectTime`） | `notice` |
+
+- **三种成因各自独立成条，互不掩盖**：同一台设备可以同时有离线警情和数据质量警情。
+  实现上 `openAlarmOf` 必须按 `alarm_reason` 过滤——少了这个条件，离线扫描会把数据质量
+  警情当成自己的那条、在设备恢复在线时把它「解除」掉（B-14 同一类缺陷）。
+- **`collectTime` 必须落在窗口内才算「延迟」**：否则回补的历史数据（采集于几天前、
+  今天才灌进平台）会被判成「延迟上报」——那是导入，不是迟到。
+- **窗口内样本不足 4 条 → 两个判据都不成立**，也不解除已有警情：样本不够时
+  「数据变好了」是个没有依据的结论，宁可原样挂着等人看。
+- **设备处于 `FAULT`、或已离线 → 暂不判定**（`judgeable` 闸门）：这两种状态下
+  我们并没有在收数，拿「没有数据」当「数据变好」是错的。闸门放开后照常判定、照常自动解除。
+- 触发备注写的是**实际观测到的数**（「近 15 分钟 9 条数据中有 7 条质量异常」），不是策略常量
+  ——策略会随代码变，历史留痕不该跟着变。
+- 扫描周期 `monitor.data-quality.sweep-ms`（默认 10s）。判据本身是常量不进配置：
+  它们同时被 `snapshot` 读去展示，两处各写一份迟早漂移。
+
+### 设备-测点绑定（A，2026-09-14 补文档）
+
+`GET /api/v1/devices/{id}/points` 读接口开放；`POST` / `DELETE .../points/{pointId}`
+限 **ADMIN / MAINTAINER**，且走 `@AuditAction`（动作名「绑定测点」/「解绑测点」）。
+
+- 返回的是**绑定关系行** `{ id, deviceId, pointId }`，**不是测点对象**——没有点号/点名，
+  要显示得自己拿 `GET /points` 去 join。A 没有做联表返回（`device_point` 是纯关系表）。
+- `POST` 重复绑定同一对 → **400**（显式判重，不是静默成功）；`DELETE` **幂等**，
+  没绑过也返回 200，不是 404。
+- `device_point` 是**硬删除**（无 `deleted` 列），解绑即删行。
+
+### 维护记录（A，2026-09-14 补文档）
+
+`GET /api/v1/maintenance-records`（可选 `deviceId`，按 `createdAt` 倒序；不传即全量）
+与 `POST /api/v1/maintenance-records`（限 **ADMIN / MAINTAINER**，`@AuditAction`）。
+
+- 字段：`{ id, deviceId, type, description, operator, createdAt }`。
+- **`operator` 由后端从当前登录用户覆盖**，客户端传什么都不作数——
+  「谁写的维护记录」不该由客户端说了算。
+- `type` 是 `VARCHAR(32)` 的**自由文本，不是枚举**，后端不校验。前端给了几个候选值
+  （日常巡检/清洁保养/…）只是省打字，不构成契约。
+
 ## 6. 实时推送：GET /api/v1/stream（SSE）
 
 > `EventSource` 带不了 Header → 用 **query token**：`GET /api/v1/stream?token=<JWT>`。仅该路径走 query，其余仍走 `Authorization` 头。
@@ -230,6 +306,25 @@ data: {"id":1,"pointCode":"P-HK01","level":"alarm","status":"PENDING","triggered
 [ { "mediaId": "M1000", "url": "/api/v1/media/M1000/content", "takenAt": "2026-08-27T10:00:00+08:00", "note": "" } ]
 ```
 
+### GET /api/v1/media/{mediaId}/content
+> 返回二进制本体（**不走统一信封**，`ResponseEntity<Resource>`），前端 `<img>` 直接引。
+> 该路径与 `/stream` 一样支持 **`?token=` 鉴权**——`<img>` 发不出 `Authorization` 头，
+> 这是契约里仅有的两处 query 鉴权（见 §6）。忘了带就是每张图各自一个 401。
+> `Content-Type` 取自库内 `mime_type`，解析失败退回 `application/octet-stream`。
+
+### DELETE /api/v1/media/{mediaId}
+> **2026-09-14 新增。** 角色限 `ADMIN` / `MAINTAINER`（与设备-测点绑定同一个口径：
+> 影像的实际使用场景就是运维上传现场照片，传错了该由传的人自己撤）。走审计留痕。
+> 返回 `Result<Void>`。
+>
+> **语义是逻辑删除，不是物理删除**：库里标 `deleted=1`，**盘上的文件保留**。
+> 与 `monitor_point` / `device` 的既有口径一致（本仓只有 `alarm_rule` 是物理删）。
+> 软删的全部价值在于可挽回，所以接口不顺手删文件——真要回收磁盘时另配离线清理策略，
+> 按「已软删且超过保留期」挑，而不是让删除接口顺手做掉。
+>
+> 删除后该影像从列表与内容端点**一并消失**（两者都走逻辑删除过滤）。
+> **重复删除返回 404**（已删的行查不出来），不静默成功——否则「到底删没删掉」无从判断。
+
 ## 8. 枚举（D5，冻结）
 
 | 枚举 | 取值 |
@@ -250,3 +345,68 @@ data: {"id":1,"pointCode":"P-HK01","level":"alarm","status":"PENDING","triggered
 3. A 的 `SecurityConfig` 放行 `/api/v1/ingest/**`（校验 `X-Ingest-Key`）；`JwtAuthFilter` 对 `/api/v1/stream` 支持 `?token=`。
 4. 幂等：A 按 `device_id+message_id` 去重。
 5. 错误码：业务错误走 A 统一，401/403 由 A 的鉴权返回。
+
+## 10. 审计日志（A，2026-09-14 补文档）
+
+`GET /api/v1/audit-logs` → `PageResult<AuditLog>`，参数 `pageNum` / `pageSize` /
+`username` / `targetType`。**整个控制器是类级 `@PreAuthorize("hasRole('ADMIN')")`**，
+非管理员一律 403。
+
+- 字段：`{ id, userId, username, action, targetType, targetId, detail, ip, createdAt }`。
+- `username` 与 `targetType` 都是 **`eq` 精确匹配，不是 `like`**——输错一个字就是空列表。
+- `action` 是**中文串，取自 `@AuditAction(action = "…")` 的字面量**，不是英文枚举；
+  当前有：`创建` / `更新` / `删除` / `删除影像` / `绑定测点` / `解绑测点` / `创建维护记录`。
+- `targetType` 由 `AuditAspect.resolveTargetType` 推出：① 第一个 `Identifiable` 参数的类名，
+  或 ② 控制器名去掉 `Controller`。所以取值集合 = `BaseCrudController` 的 7 个子类
+  （MonitorPoint/Device/Project/Scene/MonitorObject/Metric/Organization）
+  + `MaintenanceRecord` + `Media`。**同样是自由文本**，新增 `@AuditAction` 会多出新值。
+- `targetId` **可能为空**：路径变量是不透明编码而非数字主键的端点需要显式声明
+  `@AuditAction(targetIdFromStringArg = true)`（目前只有 `DELETE /media/{mediaId}`）。
+  空着比填一个猜的值好——这里**没有做「扫到 String 就当 id」的兜底**，
+  否则 `?keyword=xxx` 这类查询参数会悄悄变成 `target_id`。
+- `detail` 存的是请求参数的 JSON 串，可能很长或为空。
+
+> **告警处置不在审计日志里**：`AlarmController.act` 没挂 `@AuditAction`，
+> 处置留痕走的是 `alarm_action` 表（即警情详情里的时间线），两者不重复。
+
+## 11. 数据范围隔离（A，2026-09-14 补文档，对应验收第 7 条前半）
+
+**口径**：可见范围 = **你被加进了哪些项目**（`project_member` 表，`UNIQUE(user_id, project_id)`，
+硬删除——「移除成员」应当是幂等的增删，与软删天然冲突）。其余资源一律**沿归属链反推**：
+测点 → 对象 → 场景 → 项目；设备经 `device_point` → 测点。（不用 `sys_user.organization_id`：
+一个组织可以下有多个项目，两者不是同一个粒度，而「同组织内也隔离」这个情形一列表达不了。）
+
+**ADMIN 不受限**（平台管理员，需求里就是全量视角）。其余角色按成员关系。
+
+| 端点 | 范围条件 |
+|---|---|
+| `GET /projects`、`/projects/{id}`、`/projects/{id}/summary` | 可见项目 |
+| `GET /scenes`、`/objects`、`/points`、`/metrics` | 反推到可见项目 |
+| `GET /points/{id}/latest`、`/series`、`/media` | 该测点可见 |
+| `GET /devices`、`/devices/{id}`、`/status`、`/points` | 该设备经绑定测点反推；**未绑定任何测点的设备无归属，只对 ADMIN 可见** |
+| `GET /alarms`、`/alarms/{id}`、`POST /alarms/{id}/actions` | **两侧都滤**：`POINT` 类只写 `point_id`、`DEVICE` 类只写 `device_id`（另一侧为 NULL）——只滤一侧那类警情就整类漏 |
+| `GET /media/{mediaId}/content`、`DELETE /media/{mediaId}` | 该影像所挂测点可见（`mediaId` 是可枚举的顺序编码，列表端点滤干净了、少了这一处也等于没隔离） |
+| `GET /maintenance-records`、`/{id}` | 该设备可见 |
+| `GET /organizations` | 由其下**可见项目**反推（组织在项目之上，不反推就会把另一客户的名字漏出去） |
+| `GET /alarm-rules` | **全局规则（`point_id` 为空）对所有登录用户可见** + 挂在可见测点上的规则 |
+
+**不可见 → 403，不是 404。** 记录确实存在，只是不在你的范围内。404 更「安全」（不泄露存在性），
+但演示时要的是「看得见边界」——403 一眼就知道是隔离在起作用，404 会被误当成「数据没了」。
+这是用户可感知的取舍。不存在的记录仍然是 404，两者不混。
+
+**无认证上下文 → 拒绝，不是放行。** 范围判定读 `SecurityContextHolder`；取不到当前用户意味着
+调用姿势错了，此时放行会静默漏数据，拒绝只让那一个请求 403。
+
+**空集必须短路成「查不到」。** MyBatis-Plus 的 `in(空集合)` 会把条件**整条丢掉**，于是
+「你没有可见项目」会退化成「所有项目都可见」——fail-open 且**无声**。派生集合还要逐层判空，
+否则「可见测点为空的设备反查」会返回全部绑定、进而反推出全部设备。
+
+**演示账号**：`admin` / `operator` / `analyst` / `maintainer` 都在项目 1；
+`admin` 另在项目 2（西江水泥采空区）。**第 5 个账号 `outsider`** 不在任何项目里，
+是「可见范围为空」这条路径的活样本——它不是演示角色，**不在登录页那四张卡片里**，
+用途在 `10-scope.sh` 与隔离排查。全局告警规则对它是可见的，见上表的例外。
+
+> **SSE 尚未按订阅者过滤**（已知，未修）：`SseBroadcaster` 广播时不看订阅者是谁，
+> 所以非管理员订阅 `/stream` 仍会收到项目 2 的事件。这是**推送**而非查询，
+> 与上面的查询侧过滤是两套机制，且分用户过滤要改订阅模型（每条事件按可见性路由），
+> 属契约语义变更，未在本次范围内。演示时非管理员不看大屏即可规避。

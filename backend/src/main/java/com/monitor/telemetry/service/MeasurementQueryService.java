@@ -8,6 +8,7 @@ import com.monitor.project.entity.Metric;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MetricMapper;
 import com.monitor.project.mapper.MonitorPointMapper;
+import com.monitor.scope.service.DataScopeService;
 import com.monitor.telemetry.dto.PointLatestVO;
 import com.monitor.telemetry.dto.PointSeriesVO;
 import com.monitor.telemetry.entity.Measurement;
@@ -38,14 +39,17 @@ public class MeasurementQueryService {
     private final MeasurementMapper mapper;
     private final MonitorPointMapper pointMapper;
     private final MetricMapper metricMapper;
+    private final DataScopeService dataScope;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public MeasurementQueryService(MeasurementMapper mapper,
                                    MonitorPointMapper pointMapper,
-                                   MetricMapper metricMapper) {
+                                   MetricMapper metricMapper,
+                                   DataScopeService dataScope) {
         this.mapper = mapper;
         this.pointMapper = pointMapper;
         this.metricMapper = metricMapper;
+        this.dataScope = dataScope;
     }
 
     /**
@@ -157,11 +161,18 @@ public class MeasurementQueryService {
         return "rate_mm_d".equals(code) ? "mm/d" : "mm";
     }
 
+    /**
+     * 取测点档案，不存在 404、不在数据范围内 403。
+     *
+     * <p>范围断言放在这里而不是两个公开方法里：{@code latest} 与 {@code series}
+     * 是仅有的两个入口，都经由本方法——加在链路的必经点上，将来多一个查询端点也不会漏。</p>
+     */
     private MonitorPoint requirePoint(Long pointId) {
         MonitorPoint p = pointId == null ? null : pointMapper.selectById(pointId);
         if (p == null) {
             throw new BizException(404, "测点不存在: " + pointId);
         }
+        dataScope.assertPointVisible(pointId);
         return p;
     }
 

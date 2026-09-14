@@ -13,9 +13,11 @@ check "auth/login 返回 JWT（三段点分）" "3" "$(printf '%s' "$TOKEN" | aw
 ME=$(curl -s "$BASE/auth/me" -H "$AUTH" | data_of "['username']")
 check "auth/me 返回当前账号" "$ADMIN_USER" "$ME"
 
-section "② 种子档案：1 项目 / 2 场景 / 7 测点"
-check "项目数" "1" "$(curl -s "$BASE/projects" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
-check "测点数" "7" "$(curl -s "$BASE/points" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
+section "② 种子档案：2 项目 / 3 场景 / 9 测点"
+# 2026-09-14：项目 2（西江水泥采空区，V8）加入后，这两个数各 +1 / +2。
+# admin 是全量视角，所以「看得到」这件事没变，变的是种子的规模。
+check "项目数" "2" "$(curl -s "$BASE/projects" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
+check "测点数" "9" "$(curl -s "$BASE/points" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
 check "测点 1 号点号" "P-HK01" "$(curl -s "$BASE/points/1" -H "$AUTH" | data_of "['code']")"
 check "每点 2 测项（D1）" "2" "$(curl -s "$BASE/metrics" -H "$AUTH" | python3 -c "
 import sys,json
@@ -42,8 +44,7 @@ import sys,json
 print([p['code'] for p in json.load(sys.stdin)['data']])")"
 check "新建点可单查" "$NEW" "$(curl -s "$BASE/points/$PID" -H "$AUTH" | data_of "['code']")"
 # 清理：删掉本次临时点，避免反复运行堆积（删不掉不算失败，只提示）
-DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
-[ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
+recycle_point "$PID"
 
 section "⑤ 鉴权边界"
 check "无 JWT 读项目列表 -> 401" "401" "$(http_code "$BASE/projects")"
@@ -73,5 +74,47 @@ check "测点 createdAt 带偏移" "True" "$(curl -s "$BASE/points/1" -H "$AUTH"
 check "项目 updatedAt 带偏移" "True" "$(curl -s "$BASE/projects/1" -H "$AUTH" | has_zone "['updatedAt']")"
 check "设备 updatedAt 带偏移" "True" "$(curl -s "$BASE/devices/1" -H "$AUTH" | has_zone "['updatedAt']")"
 info "示例 points/1.createdAt = $(curl -s "$BASE/points/1" -H "$AUTH" | data_of "['createdAt']")"
+
+section "⑧ 档案时间：读出来的时间要能写回去（契约 §0）"
+# ⑦ 验的是**输出**口径；这里验**输入**口径，两者是一份契约的两端，必须成对。
+#
+# 曾经的缺陷：序列化被 JacksonTimeConfig 统一补成带偏移的 2026-09-14T11:34:45+08:00，
+# 而反序列化仍走 Jackson 默认实现——**只认不带偏移**的写法。于是「GET 回来原样 PUT 回去」
+# 直接 400，表现成「接口收下了但字段改不动」（实际是请求根本没进方法）。
+# 影响面不是某一个字段：Device.lastReportTime 与 BaseEntity.createdAt/updatedAt
+# （后者被全部 7 个 CRUD 控制器继承）都在内。
+#
+# 用临时设备而不是种子 radar-001：本组要改 status，不能把种子设备留在 FAULT 上。
+RT_DEV="DEV-RT-$RUN_ID"
+RT_ID=$(curl -s -X POST "$BASE/devices" -H "$AUTH" -H "$JSON" \
+        -d "{\"code\":\"$RT_DEV\",\"name\":\"验收临时设备\",\"type\":\"MILLIMETER_WAVE_RADAR\"}" | data_of "['id']")
+info "新建 $RT_DEV -> deviceId=$RT_ID"
+
+# ① 原样回传：把 GET 到的整个 data 对象（含 id/deleted/createdAt/updatedAt/lastReportTime）当请求体
+RT_BODY=$(curl -s "$BASE/devices/$RT_ID" -H "$AUTH" | python3 -c "
+import sys,json;print(json.dumps(json.load(sys.stdin)['data'], ensure_ascii=False))")
+check "GET 到的设备原样 PUT 回去 -> 200" "200" \
+  "$(http_code -X PUT "$BASE/devices/$RT_ID" -H "$AUTH" -H "$JSON" -d "$RT_BODY")"
+
+# ② 带偏移的时间：这正是 Times.iso 的输出写法，也是当初 400 的触发点
+RT_TIME=$(python3 -c "
+import datetime
+print(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).replace(microsecond=0).isoformat())")
+info "回填带偏移的时间 $RT_TIME"
+check "带 +08:00 偏移的时间被接受 -> 200" "200" \
+  "$(http_code -X PUT "$BASE/devices/$RT_ID" -H "$AUTH" -H "$JSON" \
+     -d "{\"code\":\"$RT_DEV\",\"name\":\"验收临时设备\",\"type\":\"MILLIMETER_WAVE_RADAR\",\"lastReportTime\":\"$RT_TIME\",\"status\":\"FAULT\"}")"
+check "带偏移的时间按原值（同一时刻）落库" "$RT_TIME" \
+  "$(curl -s "$BASE/devices/$RT_ID" -H "$AUTH" | data_of "['lastReportTime']")"
+# 同一次请求里的 status 也要落下去：证明整个请求体是被解析了的，不是「恰好 200」
+check "同一次 PUT 的 status 也落库" "FAULT" \
+  "$(curl -s "$BASE/devices/$RT_ID/status" -H "$AUTH" | data_of "['status']")"
+
+# ③ 反向：真正非法的写法仍要挡住（容忍范围是「三种已知写法」，不是「照单全收」）
+check "非法时间写法仍 -> 400" "400" \
+  "$(http_code -X PUT "$BASE/devices/$RT_ID" -H "$AUTH" -H "$JSON" \
+     -d "{\"code\":\"$RT_DEV\",\"name\":\"验收临时设备\",\"type\":\"MILLIMETER_WAVE_RADAR\",\"lastReportTime\":\"昨天下午\"}")"
+
+recycle_device "$RT_ID" "临时设备 $RT_DEV"
 
 summary

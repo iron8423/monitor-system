@@ -33,6 +33,21 @@ public final class AlarmConstants {
     public static final String TYPE_POINT = "POINT";
     public static final String TYPE_DEVICE = "DEVICE";
 
+    /**
+     * {@code DEVICE} 类警情的**成因**（V7 落库，见 {@code V7__alarm_reason.sql}）。
+     *
+     * <p>不新开 {@code alarm_type} 而细分 {@code alarm_reason}：三类成因讲的都是「设备侧的问题」，
+     * 共用同一张表、同一套状态机与处置管线正是 B-10 当初选「复用一张表」要兑现的收益；
+     * 新开枚举则要改契约 §4、波及四端过滤、前端映射与既有断言，换不来任何东西。</p>
+     *
+     * <p>但**必须区分**，不能都叫 DEVICE 就完事：一台设备可以同时欠着「数据不可信」与
+     * 「已经掉线」两条警情，两个监视器各按 {@code (deviceId, alarmReason)} 找未解除警情，
+     * 否则后到的成因会被先到的掩盖住。</p>
+     */
+    public static final String REASON_OFFLINE = "OFFLINE";
+    public static final String REASON_DATA_QUALITY = "DATA_QUALITY";
+    public static final String REASON_DATA_DELAY = "DATA_DELAY";
+
     /** 系统自动动作（非人工处置）。 */
     public static final String ACTION_TRIGGER = "trigger";
     public static final String ACTION_RECOVER = "recover";

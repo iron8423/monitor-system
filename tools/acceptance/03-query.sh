@@ -101,13 +101,13 @@ S_DEFO=$(curl -s "$BASE/projects/$T_PRJ/summary" -H "$AUTH" | data_of "['maxDefo
 check "latest 取后写库的那条" "222.2" "$L_DEFO"
 check "summary 与 latest 取到同一行" "$L_DEFO" "$S_DEFO"
 
-for r in "points/$D_PID" "objects/$T_OBJ" "scenes/$T_SCN" "projects/$T_PRJ"; do
+recycle_point "$D_PID"
+for r in "objects/$T_OBJ" "scenes/$T_SCN" "projects/$T_PRJ"; do
   C=$(http_code -X DELETE "$BASE/$r" -H "$AUTH")
   [ "$C" = "200" ] || info "临时 $r 未回收（HTTP $C），可忽略"
 done
 info "已回收临时项目链"
 
-DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
-[ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
+recycle_point "$PID"
 
 summary

@@ -1,6 +1,6 @@
 <script setup>
 import {
-  ALARM_TYPE_LABELS, LEVEL_LABELS, LEVEL_TAG, STATUS_LABELS, STATUS_TAG, label,
+  ALARM_REASON_LABELS, ALARM_TYPE_LABELS, LEVEL_LABELS, LEVEL_TAG, STATUS_LABELS, STATUS_TAG, label,
 } from '@/utils/labels'
 
 /**
@@ -51,6 +51,9 @@ const emit = defineEmits(['row-click'])
     <el-table-column min-width="120">
       <template #default="{ row }">
         <span class="mk-mono">{{ row.alarmType === 'DEVICE' ? row.deviceCode : row.pointCode }}</span>
+        <!-- 设备告警的成因就地跟一行小字：同一台设备的「离线」「数据质量异常」是各一条，
+             不写成因的话队列里两行完全一样，值班的看不出该找谁 -->
+        <span v-if="row.alarmReason" class="mk-muted reason">{{ label(ALARM_REASON_LABELS, row.alarmReason) }}</span>
       </template>
     </el-table-column>
     <el-table-column v-if="showStatus" width="90">
@@ -74,6 +77,13 @@ const emit = defineEmits(['row-click'])
 <style scoped>
 .time {
   font-size: 12px;
+}
+
+/* 设备告警成因：跟着对象名换行，小一号、弱化，不跟对象名抢位置 */
+.reason {
+  display: block;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 /* 行可点：点进去看详情 / 去告警中心处理。四处调用方都接了 row-click */
