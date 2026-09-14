@@ -13,9 +13,11 @@ check "auth/login 返回 JWT（三段点分）" "3" "$(printf '%s' "$TOKEN" | aw
 ME=$(curl -s "$BASE/auth/me" -H "$AUTH" | data_of "['username']")
 check "auth/me 返回当前账号" "$ADMIN_USER" "$ME"
 
-section "② 种子档案：1 项目 / 2 场景 / 7 测点"
-check "项目数" "1" "$(curl -s "$BASE/projects" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
-check "测点数" "7" "$(curl -s "$BASE/points" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
+section "② 种子档案：2 项目 / 3 场景 / 9 测点"
+# 2026-09-14：项目 2（西江水泥采空区，V8）加入后，这两个数各 +1 / +2。
+# admin 是全量视角，所以「看得到」这件事没变，变的是种子的规模。
+check "项目数" "2" "$(curl -s "$BASE/projects" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
+check "测点数" "9" "$(curl -s "$BASE/points" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
 check "测点 1 号点号" "P-HK01" "$(curl -s "$BASE/points/1" -H "$AUTH" | data_of "['code']")"
 check "每点 2 测项（D1）" "2" "$(curl -s "$BASE/metrics" -H "$AUTH" | python3 -c "
 import sys,json

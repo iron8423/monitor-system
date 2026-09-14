@@ -57,7 +57,8 @@ cd backend
 - 默认 H2 内存库，重启即清空——要持久化就用上面的 Compose。
 - 健康检查：`GET http://localhost:8080/api/v1/health`
 - 接口文档：`http://localhost:8080/swagger-ui.html`
-- 演示账号：admin / operator / analyst / maintainer（密码 123456）
+- 演示账号：admin / operator / analyst / maintainer（密码 123456），外加一个**不进登录页**的
+  `outsider`（访客，不属于任何项目）——它是「可见范围为空」这条边界的样本，见验收第 7 条那节。
 
 ## 验收（后端）
 
@@ -66,10 +67,10 @@ tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18
 tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上（8080）
 ```
 
-8 个套件 / 212 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
+10 个套件 / 359 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
 退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
-H2 空库（`--fresh`）**实测 212/212**（连跑两轮均绿）；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（47/47）与
-`07-device-alarm.sh`（26/26）。两者执行计划不同，
+H2 空库（`--fresh`）**实测 359/359，失败 0**（连跑两轮均绿）；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（47/47）、
+`07-device-alarm.sh`（26/26）与 `02-ingest-idempotency.sh`（34/34）。两者执行计划不同，
 有些缺陷只会在其中一个上现形（见下方「取最新一行」那条）。
 
 套件只认 `BASE` 一个地址，所以 **`docker compose up` 之后直接 `run-all.sh` 就是「一键过验收脚本」**
@@ -96,7 +97,7 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
 - M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向、`X-Ingest-Key` / `?token=` 鉴权。
 - A 底座 A0–A4 + schema/种子已入库并验证；B1 telemetry ingest 骨架 + CSV 回放已并入。
 - **后端闭环已跑通**（A-3 已落地）：ingest 校验/去重 → 落库 → 规则触发（含等级升级）→ 警情生成 → 处置留痕 → 自动恢复，外加设备离线告警。
-  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **8 套件 / 212 条断言全绿**。
+  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **10 套件 / 359 条断言全绿**。
 - **验收链第一环（模拟器）已落地**：`tools/radar_simulator/` 按契约连续造数，不依赖真雷达 CSV；
   `radar_csv_replay/` 是回放器不是生成器（要真实数据），两者分工互补，都发同一条契约消息。
 - **PostgreSQL 已验证**（B-4）：`postgres:16` 上 V1–V4 迁移全部成功，验收在 PG 上全绿
@@ -189,8 +190,24 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   **3D 大屏浮窗刻意不给**（那是「看」的场合）；但真正的边界在后端 `@PreAuthorize`，藏按钮不是权限。
   此前「没有删除端点」导致的两个后果都已消解：套件现在自己回收传的图（`06-media.sh` ⑧），
   误传的照片运维在界面上就能撤。
+- **项目数据范围隔离已落地**（2026-09-14，验收第 7 条前半）。成员关系走显式的 `project_member`
+  表（硬删，`UNIQUE(user_id, project_id)`），**不用 `sys_user.organization_id`**——组织级隔离在
+  「1 组织 1 项目」的种子下演示不出来。可见范围沿 `point → object → scene → project` 归集，
+  设备经 `device_point` 反查；**ADMIN 不受限**，其余看 membership。
+  三处值得记住的地方：
+  - **过滤做在 `BaseCrudController` 的三个钩子上**（`list` / `page` / `get`），七个 CRUD 子类各自实现。
+    只给列表加过滤是不够的——`/points/page` 与按 id 直读是**两条独立的泄漏路径**。
+  - **不可见返回 403，不存在仍返回 404**，两者不合并：「你没权限」和「这东西没了」在验收时要说的话不同。
+  - **空集合要短路**：MyBatis-Plus 的 `in(空集合)` 会**丢掉整条条件**，于是「一个项目都没有」退化成
+    「不过滤 = 看到全部」——**一个在做过滤、实际在放大权限的默认值**。收口在 `DataScopeService.inIds()`
+    （空集产出 `1 = 0`），`10-scope.sh` 里 `outsider` 那 15 条 fail-closed 断言就是钉这个的。
+  警情按 **point 与 device 两侧**都滤（B-14 的镜像），处置动作同样过范围。套件 `10-scope.sh` **93 条**，
+  `--fresh` 全量 **359/359**；**证伪过**：把 `unrestricted()` 注入 `return true;` → 46 条转红，
+  且红的正是**差值型**断言，控制型（admin 直达 200）仍绿——说明承重的是差值那一半。
+  ⚠️ **已知未修**：`SseBroadcaster` 广播时不看订阅者是谁，非管理员订阅 `/stream` 仍收得到项目 2 的
+  事件。这是**推送**不是查询，属契约的推送语义变更，见契约 §11 与工作清单 B-20。
 - 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量告警未做（用户定案：暂不做）；
-  ② 项目数据隔离未做（本周排期，见下条）；
+  ② 验收第 7 条里的**只读角色、报表、视频接入、标定/巡查模型**未做（属 P1，未定案前不动）；
   ③ SSE 的页面级消费未做（连接已在，事件没人订阅，归 B 的 3b）。
 - **设备侧三类告警已成体系**（2026-09-14，验收第 5 条）：离线的同时补上了
   **数据质量异常**（窗口内坏质量占比超阈值）与**数据延迟**（`receiveTime − collectTime` 超阈值）。

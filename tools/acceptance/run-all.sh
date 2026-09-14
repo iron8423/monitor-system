@@ -87,7 +87,9 @@ fi
 
 printf '\n%s验收目标：%s%s\n' "$C_DIM" "$BASE" "$C_OFF"
 
-SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh 08-simulator.sh 09-data-quality.sh)
+# 10-scope 放最后：它要断言「admin 与李敏看到的条数之差 == 项目 2 的规模」，
+# 虽然用的是差值（不依赖其它套件是否回收干净），但排在最后能少一层噪声。
+SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh 08-simulator.sh 09-data-quality.sh 10-scope.sh)
 TOTAL_PASS=0; TOTAL_FAIL=0; FAILED_SUITES=()
 
 for s in "${SUITES[@]}"; do
