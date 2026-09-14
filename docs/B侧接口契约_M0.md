@@ -106,6 +106,12 @@
 { "projectId": 1000, "pointCount": 7, "alertCount": 1, "onlineDeviceCount": 4, "maxDeformationMm": 0.73 }
 ```
 
+> `maxDeformationMm` **只统计 `defo_mm`**：该项目下各测点最新一行 `defo_mm` 中绝对值最大者（保留原符号，负向形变同样计入）；该项目一个测点都没报过数时为 `null`。
+> 这是**定死的口径，不是「还没做测项中立化」**：本 KPI 答的是「最大变形多少毫米」，与「当前选了哪个主测项」无关，也不随新增测项而变。
+> 前端切主测项 / 加新测项都**不影响**本字段。反例就在种子里：`rate_mm_d` 的 unit 是 `mm/d`，按单位猜会把**速率**算成形变（999 mm/d 会顶掉 2 mm 的累计形变）。
+> 真要中立化，前置条件是给 `metric` 档案加一列「量纲类别」并定出归类规则——在那之前不要改成扫全部测项。
+> 口径的回归断言在 `tools/acceptance/03-query.sh` §⑩（灌一个大速率，断言本字段不动）。
+
 ## 4. 告警（枚举按 D5，规则字段按 D6）
 
 ### GET /api/v1/alarms（筛选：level/status/pointId/deviceId/alarmType/from/to/page/size）

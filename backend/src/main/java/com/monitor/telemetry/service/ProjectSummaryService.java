@@ -39,7 +39,24 @@ import java.util.List;
 @SuppressWarnings("null")
 public class ProjectSummaryService {
 
-    /** 最大形变取该测项（D1 冻结的点形变主指标）。 */
+    /**
+     * 最大形变取该测项（D1 冻结的点形变主指标）。
+     *
+     * <p><b>这里是刻意写死的，不是没跟上「测项中立化」。</b>前端可以切主测项、可以加新测项，
+     * 但本 KPI 的名字就是 {@code maxDeformationMm}——它答的是「这个项目现在最大变形多少毫米」，
+     * 不是「所有测项里绝对值最大的那个数」。两者只在「项目下恰好只有形变测项」时才碰巧相等。</p>
+     *
+     * <p>那为什么不按测项档案口径化：{@code metric} 表只有 {@code code/name/unit} 三列，
+     * <b>没有「量纲类别」这一列</b>，判不出哪些测项算形变。想按 unit 猜的话，
+     * 现成的反例就在种子里——{@code defo_mm} 的 unit 是 {@code mm}、{@code rate_mm_d} 的 unit 是
+     * {@code mm/d}，任何 {@code contains("mm")} 的写法都会把<b>速率</b>算成形变，
+     * 于是「最大形变」被速率顶掉（速率 999 mm/d 与累计 2 mm 完全不是一个量级）。
+     * 真要中立化，得先给 {@code metric} 加一列量纲类别并定出归类规则——
+     * 在那之前，写死一个明确的 {@code defo_mm} 比猜一个错的更可辩护。</p>
+     *
+     * <p>契约已写明这一点（{@code docs/B侧接口契约_M0.md} §3）。{@code 03-query.sh} §⑩
+     * 把「灌一个大速率不动本字段」钉成了断言，改这里会红。</p>
+     */
     private static final String DEFO_METRIC = "defo_mm";
 
     private final ProjectMapper projectMapper;
@@ -145,8 +162,10 @@ public class ProjectSummaryService {
     }
 
     /**
-     * 各测点取最新一行 defo_mm，再取绝对值最大者（负向形变同样算「最大形变」）。
+     * 各测点取最新一行 {@link #DEFO_METRIC}，再取绝对值最大者（负向形变同样算「最大形变」）。
      * 逐点带 LIMIT 1，扫描量与数据总量无关，只与测点数成正比。
+     *
+     * <p>只扫 {@code defo_mm} 一行是有意的——理由见 {@link #DEFO_METRIC} 的注释。</p>
      *
      * <p>「最新一行」的判据走 {@link MeasurementMapper#latestRowOf}，与
      * {@link MeasurementQueryService#latest} 是同一个方法——两处若各写一份排序，

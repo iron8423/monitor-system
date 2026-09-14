@@ -24,6 +24,12 @@ public class ProjectSummaryVO {
     /**
      * 各测点<b>最新</b> defo_mm 中绝对值最大者，保留原符号（负向形变同样计入）；
      * 无数据时为 {@code null}。
+     *
+     * <p>虽与「测项中立化」同处一轮，本字段<b>刻意不中立</b>：名字里的 Deformation 就是口径，
+     * 它只统计 {@code defo_mm}，不随主测项切换、也不统计后加的其它测项
+     * （{@code rate_mm_d} 也是 mm 量纲，但它答的是「变化多快」而不是「变了多少」）。
+     * 为什么不按档案/单位推断、以及真要中立化需要先补什么，见
+     * {@code ProjectSummaryService#DEFO_METRIC} 与契约 §3。</p>
      */
     private Double maxDeformationMm;
 }
