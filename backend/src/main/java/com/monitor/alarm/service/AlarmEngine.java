@@ -12,6 +12,7 @@ import com.monitor.alarm.mapper.AlarmRuleMapper;
 import com.monitor.common.sse.SseBroadcaster;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MonitorPointMapper;
+import com.monitor.scope.service.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -60,6 +61,7 @@ public class AlarmEngine {
     private final AlarmActionMapper actionMapper;
     private final MonitorPointMapper pointMapper;
     private final SseBroadcaster broadcaster;
+    private final DataScopeService dataScope;
 
     /** 已就「类型不参与评估」告过警的规则，避免每条测值刷屏。 */
     private final Set<Long> warnedTypes = ConcurrentHashMap.newKeySet();
@@ -199,7 +201,8 @@ public class AlarmEngine {
         String note = String.format("%s = %s 触发规则「%s」（%s %s）", metricCode, plain(v),
                 rule.getName(), rule.getOperator(), plain(rule.getThresholdValue()));
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_TRIGGER, AlarmConstants.SYSTEM, note));
-        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, pointCode(pointId)));
+        broadcaster.broadcastScoped(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, pointCode(pointId)),
+                () -> dataScope.projectIdsOfAlarm(a));
         log.info("告警触发 alarmId={} pointId={} rule={} value={}", a.getId(), pointId, rule.getName(), v);
         return a;
     }
@@ -217,7 +220,8 @@ public class AlarmEngine {
                 metricCode, plain(v), rule.getName(), rule.getOperator(),
                 plain(rule.getThresholdValue()), from, rule.getAlarmLevel());
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_ESCALATE, AlarmConstants.SYSTEM, note));
-        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, pointCode(a.getPointId())));
+        broadcaster.broadcastScoped(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, pointCode(a.getPointId())),
+                () -> dataScope.projectIdsOfAlarm(a));
         log.info("告警升级 alarmId={} {} -> {} value={}", a.getId(), from, rule.getAlarmLevel(), v);
     }
 
@@ -227,7 +231,8 @@ public class AlarmEngine {
         alarmMapper.updateById(a);
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_RECOVER, AlarmConstants.SYSTEM,
                 String.format("%s = %s 已回落至恢复阈值内，系统自动解除", metricCode, plain(v))));
-        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, pointCode(a.getPointId())));
+        broadcaster.broadcastScoped(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, pointCode(a.getPointId())),
+                () -> dataScope.projectIdsOfAlarm(a));
         log.info("告警自动解除 alarmId={} value={}", a.getId(), v);
     }
 

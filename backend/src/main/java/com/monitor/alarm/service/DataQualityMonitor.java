@@ -14,6 +14,7 @@ import com.monitor.common.sse.SseBroadcaster;
 import com.monitor.telemetry.DataQualityPolicy;
 import com.monitor.telemetry.entity.Measurement;
 import com.monitor.telemetry.mapper.MeasurementMapper;
+import com.monitor.scope.service.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -60,6 +61,7 @@ public class DataQualityMonitor {
     private final AlarmMapper alarmMapper;
     private final AlarmActionMapper actionMapper;
     private final SseBroadcaster broadcaster;
+    private final DataScopeService dataScope;
     private final TransactionTemplate txTemplate;
 
     /** 扫描间隔与首扫延迟同一个值，理由同 DeviceAlarmMonitor。 */
@@ -145,7 +147,8 @@ public class DataQualityMonitor {
         // 留痕写**实际观测到的数**（判定用的是哪批样本、坏了几条），
         // 策略参数走 snapshot。两者分工与离线告警一致，且时间线是不可变历史。
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_TRIGGER, raiseNote(d, reason, window, now)));
-        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, null, d.getCode()));
+        broadcaster.broadcastScoped(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, null, d.getCode()),
+                () -> dataScope.projectIdsOfAlarm(a));
         log.info("数据可信度告警 alarmId={} deviceId={} code={} reason={} samples={}",
                 a.getId(), d.getId(), d.getCode(), reason, window.size());
     }
@@ -175,7 +178,8 @@ public class DataQualityMonitor {
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_RECOVER, String.format(
                 "设备 %s 最近 %d 分钟的数据已恢复正常，系统自动解除",
                 d.getCode(), DataQualityPolicy.WINDOW_MINUTES)));
-        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, null, d.getCode()));
+        broadcaster.broadcastScoped(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, null, d.getCode()),
+                () -> dataScope.projectIdsOfAlarm(a));
         log.info("数据可信度告警解除 alarmId={} deviceId={} code={} reason={}",
                 a.getId(), d.getId(), d.getCode(), reason);
     }

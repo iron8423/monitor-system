@@ -11,6 +11,7 @@ import com.monitor.asset.mapper.DevicePointMapper;
 import com.monitor.auth.security.SecurityUser;
 import com.monitor.common.constant.Role;
 import com.monitor.common.exception.BizException;
+import com.monitor.common.sse.SubscriberScope;
 import com.monitor.organization.entity.Organization;
 import com.monitor.project.entity.Metric;
 import com.monitor.project.entity.MonitorObject;
@@ -29,6 +30,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -62,7 +65,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @SuppressWarnings("null")
-public class DataScopeService {
+public class DataScopeService implements SubscriberScope {
 
     private final ProjectMemberMapper memberMapper;
     private final ProjectMapper projectMapper;
@@ -95,15 +98,29 @@ public class DataScopeService {
      * 只在受限路径上被调用，调用方一律先判 {@code null} 再决定要不要加条件。
      */
     private Set<Long> visibleProjectIdsOrNull() {
-        if (unrestricted()) {
+        SecurityUser u = currentUser();
+        return visibleProjectIdsOf(u == null ? null : u.getId(), u == null ? null : u.getRole());
+    }
+
+    /**
+     * 指定用户的可见项目 id（{@code null} = 不受限）。{@link #visibleProjectIdsOrNull()} 委托到这里。
+     *
+     * <p><b>为什么要有这个「带用户参数」的版本</b>：SSE 广播发生在<b>没有 HTTP 请求</b>的线程上
+     * （心跳线程 / 事务提交后回调），那里 {@code SecurityContextHolder} 是空的，
+     * 「当前用户」这个概念不存在——只有「这条连接当初是谁建的」。
+     * 推送侧因此必须能按<b>显式传入的用户</b>算范围，而不是去读上下文。
+     * 两条路径共用这一个方法，才不会出现「查询挡住了、推送漏出去」。</p>
+     */
+    @Override
+    public Set<Long> visibleProjectIdsOf(Long userId, String role) {
+        if (Role.ADMIN.name().equals(role)) {
             return null;
         }
-        SecurityUser u = currentUser();
-        if (u == null) {
+        if (userId == null) {
             return Set.of();
         }
         return memberMapper.selectList(new LambdaQueryWrapper<ProjectMember>()
-                        .eq(ProjectMember::getUserId, u.getId()))
+                        .eq(ProjectMember::getUserId, userId))
                 .stream().map(ProjectMember::getProjectId).filter(Objects::nonNull)
                 .collect(Collectors.toSet());
     }
@@ -177,8 +194,74 @@ public class DataScopeService {
                 .collect(Collectors.toSet());
     }
 
-    // ==================== 单条判定 ====================
+    // ==================== 反向归属（事件 -> 项目，推送侧用） ====================
 
+    /**
+     * 测点归属的项目 id。无归属（测点不存在，或对象/场景/项目链断掉）返回<b>空集</b>——
+     * 空集在各调用点的含义是「只有管理员看得到」，与 CRUD 侧同一条规则。
+     *
+     * <p>返回集合而不是单个 id：调用方（SSE 过滤）需要和设备的「多归属」用同一种形状，
+     * 免得两处各判一次空。</p>
+     */
+    public Set<Long> projectIdsOfPoint(Long pointId) {
+        MonitorPoint p = pointId == null ? null : pointMapper.selectById(pointId);
+        MonitorObject o = p == null || p.getObjectId() == null ? null : objectMapper.selectById(p.getObjectId());
+        Scene s = o == null || o.getSceneId() == null ? null : sceneMapper.selectById(o.getSceneId());
+        return s == null || s.getProjectId() == null ? Set.of() : Set.of(s.getProjectId());
+    }
+
+    /**
+     * 设备归属的项目 id：经 {@code device_point} 反查它绑过的测点，再沿测点链条上溯。
+     *
+     * <p><b>可能多于一个</b>——{@code device_point} 上没有「一台设备只属于一个项目」的约束，
+     * 一台设备可以绑两个项目的测点。这时它的设备告警对这两个项目都可见，
+     * 与 {@link #canSeeDevice} 的「任一命中」是同一条规则。</p>
+     *
+     * <p>没绑任何测点的新设备返回空集（无归属 → 只对 ADMIN 可见），这与 CRUD 侧一致：
+     * 否则「刚建好还没绑点」的设备，它的状态对所有人都可见。</p>
+     */
+    public Set<Long> projectIdsOfDevice(Long deviceId) {
+        if (deviceId == null) {
+            return Set.of();
+        }
+        List<Long> pointIds = devicePointMapper.selectList(new LambdaQueryWrapper<DevicePoint>()
+                        .eq(DevicePoint::getDeviceId, deviceId))
+                .stream().map(DevicePoint::getPointId).filter(Objects::nonNull).toList();
+        // 逐层判空：空集合交给 in() 会被 MP 丢掉条件，那就成了「上溯出全部项目」
+        if (pointIds.isEmpty()) {
+            return Set.of();
+        }
+        List<Long> objectIds = pointMapper.selectByIds(pointIds).stream()
+                .map(MonitorPoint::getObjectId).filter(Objects::nonNull).distinct().toList();
+        if (objectIds.isEmpty()) {
+            return Set.of();
+        }
+        List<Long> sceneIds = objectMapper.selectByIds(objectIds).stream()
+                .map(MonitorObject::getSceneId).filter(Objects::nonNull).distinct().toList();
+        if (sceneIds.isEmpty()) {
+            return Set.of();
+        }
+        return sceneMapper.selectByIds(sceneIds).stream()
+                .map(Scene::getProjectId).filter(Objects::nonNull).collect(Collectors.toSet());
+    }
+
+    /**
+     * 警情归属的项目 id——{@link #canSeeAlarm} 的镜像，两侧取并集。
+     *
+     * <p>与判定侧一样写「取并集」而不是「按 alarmType 分支」：分支写法在新增第三种告警类型时
+     * 会默认落到 else，而那一支判的是 NULL 字段。并集对未知类型的行为是空集 → 只发 ADMIN，
+     * fail-closed。两处若各写一套，就会出现「详情页挡得住、推送发得出去」。</p>
+     */
+    public Set<Long> projectIdsOfAlarm(Alarm alarm) {
+        if (alarm == null) {
+            return Set.of();
+        }
+        Set<Long> ids = new HashSet<>(projectIdsOfPoint(alarm.getPointId()));
+        ids.addAll(projectIdsOfDevice(alarm.getDeviceId()));
+        return ids;
+    }
+
+    // ==================== 单条判定 ====================
     /** {@code id} 为 {@code null} 表示该记录**无归属**（如刚建好、还没挂测点的设备）——只对 ADMIN 可见。 */
     public boolean canSeeProject(Long projectId) {
         if (unrestricted()) {

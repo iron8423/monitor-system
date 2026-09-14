@@ -11,6 +11,7 @@ import com.monitor.asset.DeviceStatusPolicy;
 import com.monitor.asset.entity.Device;
 import com.monitor.asset.mapper.DeviceMapper;
 import com.monitor.common.sse.SseBroadcaster;
+import com.monitor.scope.service.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -58,6 +59,7 @@ public class DeviceAlarmMonitor {
     private final AlarmMapper alarmMapper;
     private final AlarmActionMapper actionMapper;
     private final SseBroadcaster broadcaster;
+    private final DataScopeService dataScope;
     private final TransactionTemplate txTemplate;
 
     /** 扫描间隔与首扫延迟同一个值：配置项只有一个，见 application.yml 的 monitor.device-offline.sweep-ms。 */
@@ -133,7 +135,8 @@ public class DeviceAlarmMonitor {
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_TRIGGER, String.format(
                 "设备 %s（%s）已超过 %d 分钟未上报数据，判定为离线",
                 d.getCode(), d.getName(), DeviceStatusPolicy.OFFLINE_MINUTES)));
-        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, null, d.getCode()));
+        broadcaster.broadcastScoped(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, null, d.getCode()),
+                () -> dataScope.projectIdsOfAlarm(a));
         log.info("设备离线告警 alarmId={} deviceId={} code={} lastReportTime={}",
                 a.getId(), d.getId(), d.getCode(), d.getLastReportTime());
     }
@@ -145,7 +148,8 @@ public class DeviceAlarmMonitor {
 
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_RECOVER,
                 String.format("设备 %s 已恢复上报，系统自动解除", d.getCode())));
-        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, null, d.getCode()));
+        broadcaster.broadcastScoped(SseBroadcaster.EVENT_ALARM, AlarmEvent.of(a, null, d.getCode()),
+                () -> dataScope.projectIdsOfAlarm(a));
         log.info("设备离线告警解除 alarmId={} deviceId={} code={}", a.getId(), d.getId(), d.getCode());
     }
 

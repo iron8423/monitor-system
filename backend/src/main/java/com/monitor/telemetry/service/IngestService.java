@@ -12,6 +12,7 @@ import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MonitorPointMapper;
 import com.monitor.telemetry.dto.IngestMessage;
 import com.monitor.telemetry.dto.IngestRequest;
+import com.monitor.scope.service.DataScopeService;
 import com.monitor.telemetry.dto.IngestResult;
 import com.monitor.telemetry.dto.MeasurementEvent;
 import com.monitor.telemetry.entity.Measurement;
@@ -40,15 +41,17 @@ public class IngestService {
     private final DeviceMapper deviceMapper;
     private final AlarmEngine alarmEngine;
     private final SseBroadcaster broadcaster;
+    private final DataScopeService dataScope;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public IngestService(MeasurementMapper mapper, MonitorPointMapper pointMapper, DeviceMapper deviceMapper,
-                         AlarmEngine alarmEngine, SseBroadcaster broadcaster) {
+                         AlarmEngine alarmEngine, SseBroadcaster broadcaster, DataScopeService dataScope) {
         this.mapper = mapper;
         this.pointMapper = pointMapper;
         this.deviceMapper = deviceMapper;
         this.alarmEngine = alarmEngine;
         this.broadcaster = broadcaster;
+        this.dataScope = dataScope;
     }
 
     @Transactional
@@ -98,8 +101,9 @@ public class IngestService {
             // 实时推送（前端 3D 与曲线即时刷新）。必须排在告警评估**之前**：
             // 两者在事务中都是「提交后」回调，按注册顺序发出，先有测值再有警情才合乎因果。
             // 广播失败只摘连接，不影响接入结果
-            broadcaster.broadcast(SseBroadcaster.EVENT_MEASUREMENT,
-                    MeasurementEvent.of(pointId, m.getPointCode(), Times.iso(collectAt), m.getMetrics(), q));
+            broadcaster.broadcastScoped(SseBroadcaster.EVENT_MEASUREMENT,
+                    MeasurementEvent.of(pointId, m.getPointCode(), Times.iso(collectAt), m.getMetrics(), q),
+                    () -> dataScope.projectIdsOfPoint(pointId));
 
             // 回写设备最近上报时间：A 的在线判定（DeviceStatusPolicy）只认这个字段，
             // 不写则设备即使一直在报数也永远显示离线。取平台接收时间（无则当前时间）

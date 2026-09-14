@@ -183,8 +183,9 @@ public class AlarmService {
         actionMapper.insert(act);
 
         // 处置后广播新状态：驾驶舱的警情列表/角标要跟着变（事务中，实际推在提交后）
-        broadcaster.broadcast(SseBroadcaster.EVENT_ALARM,
-                AlarmEvent.of(a, pointCodeOf(a.getPointId()), deviceCodeOf(a.getDeviceId())));
+        broadcaster.broadcastScoped(SseBroadcaster.EVENT_ALARM,
+                AlarmEvent.of(a, pointCodeOf(a.getPointId()), deviceCodeOf(a.getDeviceId())),
+                () -> dataScope.projectIdsOfAlarm(a));
         return detail(id);
     }
 
