@@ -69,6 +69,13 @@ export const useMonitorStore = defineStore('monitor', {
     /** 首屏加载失败的原因；非空时视图要显示「失败」，不能一直显示「加载中」 */
     error: null,
 
+    /**
+     * 「一个项目都没加入」的说明（项目隔离落地后新增的账号就是这种状态）。
+     * 与 `error` 分开：这不是失败，是**权限范围的正常结果**——显示「加载失败」
+     * 会让人去查后端，而真正要做的是找管理员加项目成员。
+     */
+    noProjectReason: '',
+
     projects: [],
     projectId: null,
     scenes: [],
@@ -138,6 +145,24 @@ export const useMonitorStore = defineStore('monitor', {
       return this.metricMeta(this.primaryMetricCode)
     },
 
+    /**
+     * **当前项目下的测点**：按档案的归属链过滤 测点 → 对象 → 场景 → 项目。
+     *
+     * 为什么要在前端过滤：`/points` 只按「成员项目」限范围（A 的 09-14 隔离），
+     * 不接 `projectId` 参数。而这条链（scenes 里每个场景挂哪个 projectId）本来就在
+     * 已加载的档案里，所以切换项目时不必再打接口，也不会把别的项目的点画到大屏上。
+     */
+    pointsOfProject(state) {
+      if (!state.projectId) return state.points
+      const sceneIds = new Set(
+        state.scenes.filter((s) => s.projectId === state.projectId).map((s) => s.id),
+      )
+      const objectIds = new Set(
+        state.objects.filter((o) => sceneIds.has(o.sceneId)).map((o) => o.id),
+      )
+      return state.points.filter((p) => objectIds.has(p.objectId))
+    },
+
     sceneNameOf: (state) => (point) => {
       const object = state.objects.find((o) => o.id === point?.objectId)
       if (!object) return '—'
@@ -147,7 +172,7 @@ export const useMonitorStore = defineStore('monitor', {
     /** 测点 + 最新值 + 场景名，拍平成视图直接能用的结构 */
     enrichedPoints(state) {
       const code = state.primaryMetricCode
-      return state.points.map((point) => {
+      return this.pointsOfProject.map((point) => {
         const vo = state.latestMap[point.id]
         const latest = vo?.latest || null
         const metrics = metricValuesOf(latest)
@@ -195,9 +220,22 @@ export const useMonitorStore = defineStore('monitor', {
     async loadSnapshot() {
       this.loading = true
       this.error = null
+      this.noProjectReason = ''
       try {
         if (!this.projects.length) {
           this.projects = await listProjects()
+        }
+        /*
+         * 项目隔离（A 的 09-14 批）：`/projects` 只返回「我是成员」的项目。
+         * 一个都没加入时**直接收工**——继续拉 points/latest 只会得到空数组，
+         * 界面却要显示成"暂无数据"，让人以为系统坏了。
+         */
+        if (!this.projects.length) {
+          this.noProjectReason = '你还没有加入任何项目'
+          this.points = []
+          this.latestMap = {}
+          this.loadedAt = ''
+          return
         }
         if (!this.projectId) {
           this.projectId = this.projects[0]?.id ?? null
@@ -247,11 +285,13 @@ export const useMonitorStore = defineStore('monitor', {
 
     /** 只刷最新值（大屏定时刷新、或 SSE 断线后补齐时用） */
     async refreshLatest() {
-      const results = await Promise.allSettled(this.points.map((p) => pointLatest(p.id)))
+      // 只刷**当前项目可见**的测点：别的项目的点既不在画面上，也没有理由占请求
+      const visible = this.pointsOfProject
+      const results = await Promise.allSettled(visible.map((p) => pointLatest(p.id)))
       const map = { ...this.latestMap }
       results.forEach((result, index) => {
         if (result.status === 'fulfilled') {
-          map[this.points[index].id] = result.value
+          map[visible[index].id] = result.value
         }
       })
       this.latestMap = map
@@ -348,6 +388,24 @@ export const useMonitorStore = defineStore('monitor', {
       if (this.metricCodes.includes(code)) {
         this.primaryMetricCode = code
       }
+    },
+
+    /**
+     * 切换当前项目（大屏顶栏的「项目」下拉）。
+     *
+     * 只影响**读这份 store 的页面**（当前就是 3D 大屏）：其余页面（测点/设备/告警）
+     * 各有自己的取数口径，但都被后端按「成员项目」限过范围。要做成全局项目上下文，
+     * 得让那些页面也走这份 store——那是后续的事，别在这里假装已经生效。
+     */
+    async setProject(id) {
+      if (!id || id === this.projectId) return
+      if (!this.projects.some((p) => p.id === id)) return
+      this.projectId = id
+      this.summary = null
+      // 清掉上一个项目的最新值：它同时是「SSE 事件可见性」的判据（见 applyAlarm），
+      // 留着就会出现「切走之后还认得出旧项目的点」。
+      this.latestMap = {}
+      await this.loadSnapshot()
     },
   },
 })

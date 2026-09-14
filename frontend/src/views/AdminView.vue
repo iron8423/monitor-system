@@ -26,6 +26,18 @@ const REFS = {
   scenes: { path: '/v1/scenes', text: (r) => r.name },
   objects: { path: '/v1/objects', text: (r) => r.name },
   points: { path: '/v1/points', text: (r) => `${r.code} — ${r.name}` },
+  /**
+   * 测项**码**（字符串，不是 id）：给告警规则的「测项」下拉用。
+   * `/v1/metrics` 是「每点一行」，同一个 code 会出现很多次——按 code 去重，
+   * 值取 `code` 而不是 `id`（规则里存的本来就是 metric_code）。
+   * 这样加一种测项时，管理端下拉会**自动多一项**，不必再来改这里写死的数组。
+   */
+  metricCodes: {
+    path: '/v1/metrics',
+    text: (r) => `${r.code}（${r.name}${r.unit ? ' · ' + r.unit : ''}）`,
+    valueKey: 'code',
+    dedupeBy: 'code',
+  },
 }
 
 /**
@@ -128,7 +140,7 @@ const TABS = [
     fields: [
       { key: 'name', label: '规则名称', required: true },
       { key: 'pointId', label: '适用测点', type: 'ref', ref: 'points', hint: '留空 = 全局规则' },
-      { key: 'metricCode', label: '测项', type: 'select', options: ['defo_mm', 'rate_mm_d'], required: true },
+      { key: 'metricCode', label: '测项', type: 'ref', ref: 'metricCodes', required: true },
       { key: 'type', label: '规则类型', type: 'select', options: ['THRESHOLD'], default: 'THRESHOLD' },
       { key: 'operator', label: '比较方式', type: 'select', options: ['gte', 'lte'], default: 'gte', required: true },
       { key: 'value', label: '阈值', type: 'number', required: true },
@@ -204,11 +216,24 @@ async function ensureRefs(tab) {
       missing.map((name) => http.get(REFS[name].path).then((data) => normalize(data)).catch(() => [])),
     )
     missing.forEach((name, i) => {
-      refOptions[name] = results[i]
+      refOptions[name] = dedupeRef(name, results[i])
     })
   } finally {
     refLoading.value = false
   }
+}
+
+/** 外键源可选去重（见 REFS.metricCodes：同一个测项码在 /metrics 里每点一行） */
+function dedupeRef(name, rows) {
+  const key = REFS[name]?.dedupeBy
+  if (!key) return rows
+  const seen = new Set()
+  return (rows || []).filter((r) => {
+    const v = r?.[key]
+    if (v == null || seen.has(v)) return false
+    seen.add(v)
+    return true
+  })
 }
 
 /** 切页签和首次进入走同一条路：先取数，再按取到的数据推列 */
@@ -295,7 +320,7 @@ async function submit() {
     dialogVisible.value = false
     // 外键源可能因这次写入而变化（比如刚新建了一个项目，场景下拉里就该有它）
     await Promise.all([reload(), ...neededRefs(tab).map(async (n) => {
-      refOptions[n] = normalize(await http.get(REFS[n].path))
+      refOptions[n] = dedupeRef(n, normalize(await http.get(REFS[n].path)))
     })])
   } catch (e) {
     // 后端的校验信息就在这里（如「规则名称不能为空」），必须原样透出来
@@ -388,9 +413,9 @@ onMounted(reload)
           >
             <el-option
               v-for="opt in refOptions[f.ref] || []"
-              :key="opt.id"
+              :key="opt[REFS[f.ref].valueKey || 'id']"
               :label="REFS[f.ref].text(opt)"
-              :value="opt.id"
+              :value="opt[REFS[f.ref].valueKey || 'id']"
             />
           </el-select>
 

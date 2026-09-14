@@ -125,6 +125,8 @@ const selectedMetricRows = computed(() => {
 // 失败必须单独判——否则 !loadedAt 会永远成立，加载失败被显示成「加载中」，
 // 一个不会自己结束的状态（见 stores/monitor.js 的 loadSnapshot）
 const dataStatus = computed(() => {
+  // 「一个项目都没加入」不是故障，是权限范围的正常结果——要单独说，别显示成「加载失败」
+  if (store.noProjectReason) return store.noProjectReason
   if (store.error) return '加载失败'
   if (replay.enabled) return `回放中 ${replay.index + 1}/${replay.total}`
   if (store.loading || !store.loadedAt) return '加载中…'
@@ -355,6 +357,23 @@ onBeforeUnmount(() => {
         <span class="logo">UGMS</span>
         <span class="title">三维形变监测大屏</span>
         <span class="project">{{ store.currentProject?.name || '—' }}</span>
+        <!-- 项目切换：只影响读这份 store 的页面（就是本屏）——其余页面由后端按成员项目限范围 -->
+        <label v-if="store.projects.length > 1" class="metric-pick">
+          <span>项目</span>
+          <el-select
+            :model-value="store.projectId"
+            size="small"
+            style="width: 170px"
+            @update:model-value="store.setProject"
+          >
+            <el-option
+              v-for="p in store.projects"
+              :key="p.id"
+              :label="p.name"
+              :value="p.id"
+            />
+          </el-select>
+        </label>
         <!-- 主测项：3D 着色、热力图、时间轴回放都跟着它走（可选项来自测项档案） -->
         <label class="metric-pick">
           <span>主测项</span>
