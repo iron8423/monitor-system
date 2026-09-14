@@ -42,8 +42,7 @@ import sys,json
 print([p['code'] for p in json.load(sys.stdin)['data']])")"
 check "新建点可单查" "$NEW" "$(curl -s "$BASE/points/$PID" -H "$AUTH" | data_of "['code']")"
 # 清理：删掉本次临时点，避免反复运行堆积（删不掉不算失败，只提示）
-DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
-[ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
+recycle_point "$PID"
 
 section "⑤ 鉴权边界"
 check "无 JWT 读项目列表 -> 401" "401" "$(http_code "$BASE/projects")"

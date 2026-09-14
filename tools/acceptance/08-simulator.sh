@@ -78,8 +78,7 @@ check "SUSPECT + defo=4.2 -> 不产生警情" "0" "$(alarms_n "$QPID")"
 sim_at "$QP" --once --interval 0 --seed 15 --inject-overlimit --overlimit-point "$QP" \
     --overlimit-steps "4.2" --overlimit-hold 99 >/dev/null 2>&1
 check "对照组：同值但质量正常 -> 产生 1 条警情" "1" "$(alarms_n "$QPID")"
-DELQ=$(http_code -X DELETE "$BASE/points/$QPID" -H "$AUTH")
-[ "$DELQ" = "200" ] && info "已回收临时测点 $QP" || info "临时测点 $QP 未回收（HTTP $DELQ），可忽略"
+recycle_point "$QPID" "临时测点 $QP"
 
 section "⑤ 超限 -> 升级 -> 恢复 全链（验收第 3 条）"
 # 阶梯 3.2 -> 4.2 -> 5.6：第一个跨过种子规则 gte +3.0（warning），最后一个跨过 V4 的 gte +5.0（alarm）
@@ -102,7 +101,6 @@ check "注入点不在 --points 内 -> 退出码 2" "2" "$?"
 python3 "$SIM" --dry-run --points "" >/dev/null 2>&1
 check "测点集为空 -> 退出码 2" "2" "$?"
 
-DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
-[ "$DEL" = "200" ] && info "已回收临时测点 $NP" || info "临时测点 $NP 未回收（HTTP $DEL），可忽略"
+recycle_point "$PID" "临时测点 $NP"
 
 summary

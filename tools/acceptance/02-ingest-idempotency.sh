@@ -158,10 +158,7 @@ check "超长点号的报错说得清原因" "True" \
 import sys,json
 print('64' in json.load(sys.stdin)['message'])")"
 
-DEL2=$(http_code -X DELETE "$BASE/points/$LPID" -H "$AUTH")
-[ "$DEL2" = "200" ] && info "已回收长点号临时测点" || info "长点号临时测点未回收（HTTP $DEL2），可忽略"
-
-DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
-[ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
+recycle_point "$LPID" "长点号临时测点"
+recycle_point "$PID"
 
 summary

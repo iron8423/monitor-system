@@ -150,7 +150,10 @@ for d in "$DID" "$DID2"; do
   [ "$DEL" = "200" ] && info "已回收临时设备 $d" || info "临时设备 $d 未回收（HTTP $DEL），可忽略"
 done
 # 项目链从叶子往上删（同 03-query.sh）。删测点是逻辑删除，measurement 随之对所有查询不可见。
-for r in "points/$PID" "objects/$OBJ" "scenes/$SCN" "projects/$PRJ"; do
+# 测点必须走 recycle_point：这套件本身就会在这台临时设备上造出设备告警，
+# 直接删点会把它变成孤儿留在演示库里（本套件的 ①-b 断言 alertCount 的口径正是「未解除」）。
+recycle_point "$PID"
+for r in "objects/$OBJ" "scenes/$SCN" "projects/$PRJ"; do
   C=$(http_code -X DELETE "$BASE/$r" -H "$AUTH")
   [ "$C" = "200" ] || info "临时 $r 未回收（HTTP $C），可忽略"
 done

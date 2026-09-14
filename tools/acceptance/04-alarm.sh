@@ -137,8 +137,7 @@ import sys,json;print(any(t['action']=='escalate' for t in json.load(sys.stdin)[
 ingest_id "esc-$RUN_ID-3" "$EP" "2026-08-27T13:10:00+08:00" '"defo_mm":0.5' >/dev/null
 check "回落至最初规则恢复值内 -> 自动解除" "0" \
   "$(curl -s "$BASE/alarms?pointId=$EPID&status=PENDING" -H "$AUTH" | data_of "['total']")"
-DEL2=$(http_code -X DELETE "$BASE/points/$EPID" -H "$AUTH")
-[ "$DEL2" = "200" ] && info "已回收临时测点 $EP" || info "临时测点 $EP 未回收（HTTP $DEL2），可忽略"
+recycle_point "$EPID" "临时测点 $EP"
 
 section "⑩ 鉴权"
 check "警情列表无 JWT -> 401" "401" "$(http_code "$BASE/alarms")"
@@ -197,11 +196,8 @@ for rid in "$RID" "$NEWR_ID"; do
   [ "$DRC" = "200" ] && info "已回收临时规则 id=$rid" || info "临时规则 id=$rid 未回收（HTTP $DRC），可忽略"
 done
 
-DELR=$(http_code -X DELETE "$BASE/points/$RPID" -H "$AUTH")
-[ "$DELR" = "200" ] && info "已回收临时测点 $RP" || info "临时测点 $RP 未回收（HTTP $DELR），可忽略"
-
-DEL=$(http_code -X DELETE "$BASE/points/$PID" -H "$AUTH")
-[ "$DEL" = "200" ] && info "已回收临时测点" || info "临时测点未回收（HTTP $DEL），可忽略"
+recycle_point "$RPID" "临时测点 $RP"
+recycle_point "$PID"
 
 # 套件自身卫生：跑完不该留下任何 `验收-` 前缀的规则。
 # 这条**不是**在测产品，是在测本脚本自己有没有漏回收——加它是因为真的漏了很多轮。
