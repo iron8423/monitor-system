@@ -107,6 +107,21 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   **db + backend + frontend** 三个服务，前端构建进镜像、由 nginx 托管并反代 `/api`。
   已实测 —— 容器重建后数据仍在（`measurement/alarm/monitor_point` 计数与 schema 版本前后一致、
   Flyway 不重跑）、影像落卷、对容器跑验收全绿。
+- **备份恢复已落地**（2026-09-14，验收第 8 条后半）：
+  ```bash
+  tools/backup/pg-backup.sh --with-media        # -> backups/monitor-<时间>.sql + media-<时间>.tgz
+  tools/backup/pg-restore.sh --latest --with-media backups/media-<时间>.tgz
+  tools/backup/selftest.sh                      # 实测一遍整条链（需要 compose 起着）
+  ```
+  库名/用户/项目名一律从 `.env` 读，读不到才退回 compose 默认值——写死的话，
+  `.env` 一改就会去备份/清空**另一个库**（备份时是拿到错的东西，恢复时是删错东西）。
+  恢复是**破坏性**的（先 `DROP SCHEMA public CASCADE` 再灌），所以默认要交互敲 `yes`，
+  只有 `--yes` 才跳过；它还会先停后端（`DROP SCHEMA` 要拿排他锁，和后端的长连接撞上就是卡死）、
+  恢复后等后端**真的健康**再收工（后端起来时 Flyway 会核对迁移版本，备份与代码不一致在这里就会失败）。
+  `--with-media` 那半份不是可有可无：附件是**卷里的文件**，不在库里，只备库的话
+  恢复后 `media` 行回来了、点开图却是碎的。自测脚本按验收第 8 条的原话走完整条链——
+  挂真附件 → 备份 → **破坏**（灌假项目 + 删真告警 + 清空附件卷）→ 恢复 →
+  逐样查回（假项目没了 / 告警回来了 / 历史条数回到基线 / 附件读出真 PNG），**实测 17/17**。
 - **前端已可访问**（Vue3 + Vite + Element Plus + ECharts，阶段 3a 起含 Cesium）：
   开发态 `cd frontend && npm install && npm run dev` → <http://localhost:5173>；
   部署态就是上面的 `docker compose up -d` → <http://localhost>（`FRONTEND_PORT` 可改）。
@@ -174,7 +189,16 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   **3D 大屏浮窗刻意不给**（那是「看」的场合）；但真正的边界在后端 `@PreAuthorize`，藏按钮不是权限。
   此前「没有删除端点」导致的两个后果都已消解：套件现在自己回收传的图（`06-media.sh` ⑧），
   误传的照片运维在界面上就能撤。
-- 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量告警未做（**数据中断/质量告警已于
-  2026-09-14 由用户翻案，本周排期补上**，落在 `DEVICE` 类型 + `snapshot.reason` 上，不新增 `alarm_type`）；
-  ② 项目数据隔离、备份恢复未做（本周排期）；
+- 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量告警未做（用户定案：暂不做）；
+  ② 项目数据隔离未做（本周排期，见下条）；
   ③ SSE 的页面级消费未做（连接已在，事件没人订阅，归 B 的 3b）。
+- **设备侧三类告警已成体系**（2026-09-14，验收第 5 条）：离线的同时补上了
+  **数据质量异常**（窗口内坏质量占比超阈值）与**数据延迟**（`receiveTime − collectTime` 超阈值）。
+  三者共用一张 `alarm` 表、一套状态机与处置留痕，**不新增 `alarm_type`**——成因落在
+  `alarm_reason` 列（V7）+ `snapshot.reason` 上。两个判据的边界都刻意收过：
+  回补的历史数据**不算**延迟上报（那是导入不是迟到）；样本不足 4 条时两个判据都不成立，
+  也**不解除**已有警情（「数据变好了」在没有样本时是个没有依据的结论）；
+  设备处于 `FAULT`/离线时暂不判定，闸门放开后照常判定。
+  同一台设备上三种成因**各自独立成条、互不掩盖**——`openAlarmOf` 必须按成因过滤，
+  否则离线扫描会把数据质量警情当成自己的那条、在设备恢复在线时把它「解除」掉
+  （与 B-14 同一类缺陷，`09-data-quality.sh` ④ 是它的回归锚点）。
