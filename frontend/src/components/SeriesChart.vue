@@ -16,7 +16,11 @@ const props = defineProps({
   points: { type: Array, default: () => [] }, // [{ t, v }]
   unit: { type: String, default: '' },
   metricLabel: { type: String, default: '' },
-  /** 触发线（如种子规则的 ±3mm），画成虚线让「有没有超限」一眼可见 */
+  /**
+   * 阈值线，画成虚线让「有没有超限」一眼可见。
+   * 由调用方从 `/alarm-rules` 换算而来（见 `utils/thresholds.js`），
+   * 组件本身不关心规则怎么来的，只负责画。
+   */
   thresholds: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   height: { type: String, default: '320px' },

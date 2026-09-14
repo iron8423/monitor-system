@@ -98,6 +98,12 @@ const routes = [
         meta: { title: '告警中心', icon: 'Bell' },
       },
       {
+        path: 'media',
+        name: 'media',
+        component: () => import('@/views/MediaView.vue'),
+        meta: { title: '影像挂点', icon: 'Picture' },
+      },
+      {
         path: 'admin',
         name: 'admin',
         component: () => import('@/views/AdminView.vue'),

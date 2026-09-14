@@ -4,6 +4,17 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 const TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN || ''
 const TERRAIN_MODE = import.meta.env.VITE_TERRAIN_MODE || 'ion'
 
+/**
+ * 是否配了 Cesium ion token —— 给界面用（大屏顶栏那条「未配 token」的提示）。
+ *
+ * 为什么值得单独暴露：没有 token 时大屏**不白屏**（走椭球 + 兜底底图），
+ * 于是「没有地形、没有卫星影像」这件事在界面上只剩两个灰字，第一次跑这个项目的人
+ * （比如换台机器 clone 下来）根本不知道自己少配了什么——而 `.env.local` 是 gitignore 的，
+ * 每个人都要自己配一次。把这件事显式说出来，比让人去猜要省事得多。
+ */
+export const ION_CONFIGURED = Boolean(TOKEN)
+export const ION_TERRAIN_MODE = TERRAIN_MODE
+
 /** 离线兜底用的深色底图（实测这台机器可达；Cesium 官方影像走 ion，需要 token） */
 const FALLBACK_IMAGERY = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
 

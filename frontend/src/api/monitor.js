@@ -62,6 +62,14 @@ export function alarmDetail(id) {
 }
 
 /**
+ * GET /api/v1/alarm-rules → AlarmRuleVO[]（**裸数组**，不分页）。
+ * 曲线上的阈值线由它算出来（原来写死 ±3mm），管理端改规则后刷新即可见。
+ */
+export function listAlarmRules() {
+  return http.get('/v1/alarm-rules')
+}
+
+/**
  * POST /api/v1/alarms/{id}/actions
  * @param {string} action confirm | research | dispatch | handle | resolve | misreport
  */
@@ -75,25 +83,40 @@ export function listDevices() {
 }
 
 /**
- * GET /api/v1/devices/{id}/status → { status, online, lowBattery, lastReportTime }
- *
- * 这里曾经写着「列表端点返回的是档案表里存的 status，与这个是两回事」——**那句已经不是真的了**。
- * `DeviceController` 覆盖了列表与详情，两个端点都会用 `DeviceStatusPolicy.statusOf` 现算后
- * 覆盖 status，口径已经统一。所以取一台设备的状态**不必**调这个端点，`listDevices()` 里就有。
- *
- * 它比列表多给 `online` / `lowBattery` 两个布尔（列表只有推导后的 status 串）。
- * **当前全前端没有调用点**——留着是因为后端端点确实存在（契约里有），
- * 需要单台设备的布尔量时可直接用；不需要的话下次清理时删掉。
- */
-export function deviceStatus(id) {
-  return http.get(`/v1/devices/${id}/status`)
-}
-
-/**
  * 订阅实时推送（SSE）。EventSource 带不了请求头，所以 token 走 query——
  * 这是契约 D8 专门为它开的唯一例外。
  * @returns {EventSource} 调用方负责 close()，否则连接会一直挂着
  */
 export function openStream(token) {
   return new EventSource(`/api/v1/stream?token=${encodeURIComponent(token)}`)
+}
+
+/**
+ * POST /api/v1/media（multipart：file、pointId、takenAt、note）→ MediaUploadVO。
+ *
+ * 注意**不要**手写 `Content-Type: multipart/form-data`：浏览器要自己往里面补
+ * boundary，手写了反而会把 boundary 写死成空、后端解析不到文件。
+ * 交给 axios 认 FormData 自动设置即可。
+ */
+export function uploadMedia(file, { pointId, takenAt, note } = {}) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('pointId', pointId)
+  if (takenAt) form.append('takenAt', takenAt)
+  if (note) form.append('note', note)
+  return http.post('/v1/media', form)
+}
+
+/** GET /api/v1/points/{pointId}/media → MediaVO[]（非分页，裸数组） */
+export function pointMedia(pointId) {
+  return http.get(`/v1/points/${pointId}/media`)
+}
+
+/**
+ * 影像内容地址。<img>/背景图带不了 Authorization 头，故走 `?token=`
+ * —— 与 SSE 同一条例外（契约 §7、`06-media.sh` ⑤ 有断言）。
+ */
+export function mediaContentUrl(mediaId, token) {
+  const base = import.meta.env.VITE_API_BASE_URL || '/api'
+  return `${base}/v1/media/${encodeURIComponent(mediaId)}/content?token=${encodeURIComponent(token || '')}`
 }

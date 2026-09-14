@@ -1,7 +1,8 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { ref } from 'vue'
 
 import * as api from '@/api/monitor'
+import { usePolling } from '@/composables/usePolling'
 import { DEVICE_STATUS_LABELS, DEVICE_STATUS_TAG, label } from '@/utils/labels'
 
 /**
@@ -17,7 +18,6 @@ defineOptions({ name: 'DeviceView' })
 
 const rows = ref([])
 const loading = ref(false)
-let timer = null
 
 async function load() {
   loading.value = true
@@ -28,14 +28,14 @@ async function load() {
   }
 }
 
-onMounted(() => {
-  load()
-  // 设备状态是后端定时扫描出来的，前端没有推送通道（SSE 只推 measurement/alarm），
-  // 所以这里靠轮询。10s 与后端扫描周期同量级。
-  timer = setInterval(load, 10000)
-})
-
-onBeforeUnmount(() => clearInterval(timer))
+/*
+ * 设备状态是后端定时扫描出来的，前端没有推送通道（SSE 只推 measurement/alarm），
+ * 所以这里靠轮询。10s 与后端扫描周期同量级——比后端快没有意义，只会白刷接口。
+ *
+ * 用 usePolling 而不是手写 setInterval：定时器的卸载回收只写一次，
+ * 少一处「页面切走还在刷」的常驻定时器（这是本项目里出过的那类问题）。
+ */
+usePolling(load, 10000)
 
 function batteryClass(v) {
   if (v == null) return ''

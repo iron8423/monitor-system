@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import * as api from '@/api/monitor'
 import SeriesChart from '@/components/SeriesChart.vue'
+import { buildThresholdLines, describeRules } from '@/utils/thresholds'
 
 /**
  * 测点与曲线（阶段 2）。对应里程碑 M3 的判据：**前端曲线拉到真实数据**。
@@ -44,17 +45,18 @@ const RANGES = [
 const currentMetric = computed(() => METRICS.find((m) => m.value === metricCode.value))
 
 /**
- * 默认告警阈值（±3mm 双向，见 V2 种子规则）。
- * 只在看 defo_mm 时画——把 mm 的阈值画到 mm/d 的图上会误导。
- * 阈值本身应当来自 `/alarm-rules`，等规则页做出来再改成拉接口。
+ * 阈值线来自 `/alarm-rules`（原来写死 ±3mm）。
+ *
+ * 换算规则见 `utils/thresholds.js`：只取 THRESHOLD 类型、测项必须精确匹配、
+ * 全局规则对所有测点生效而测点规则只对该点生效。管理端改了规则，这里刷新一下
+ * 就跟着变——不会再出现「规则改了、图上的线还是老值」。
  */
+const rules = ref([])
 const thresholds = computed(() =>
-  metricCode.value === 'defo_mm'
-    ? [
-        { label: '告警 +3mm', value: 3, color: '#e6a23c' },
-        { label: '告警 −3mm', value: -3, color: '#e6a23c' },
-      ]
-    : [],
+  buildThresholdLines(rules.value, { pointId: selectedId.value, metricCode: metricCode.value }),
+)
+const ruleSummary = computed(() =>
+  describeRules(rules.value, { pointId: selectedId.value, metricCode: metricCode.value }),
 )
 
 const chartPoints = computed(() => series.value?.points || [])
@@ -75,6 +77,20 @@ async function loadPoints() {
   } catch {
     points.value = []
   }
+}
+
+/** 规则不是「首屏必需」：拉失败不该毁掉曲线，空数组就是没有阈值线 */
+async function loadRules() {
+  try {
+    rules.value = (await api.listAlarmRules()) || []
+  } catch {
+    rules.value = []
+  }
+}
+
+/** 「刷新」一次把曲线与规则都拉一遍（规则可能在管理端刚被改过） */
+async function refreshAll() {
+  await Promise.all([loadRules(), loadDetail()])
 }
 
 async function loadDetail() {
@@ -100,7 +116,10 @@ async function loadDetail() {
   }
 }
 
-onMounted(loadPoints)
+onMounted(async () => {
+  await loadPoints()
+  await loadRules()
+})
 
 watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
 </script>
@@ -135,7 +154,7 @@ watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
             {{ series.pointCode }} · {{ series.metricCode }} · {{ series.unit }}
           </span>
           <span class="mk-spacer" />
-          <el-button size="small" link type="primary" @click="loadDetail">刷新</el-button>
+          <el-button size="small" link type="primary" @click="refreshAll">刷新</el-button>
         </div>
 
         <div class="toolbar">
@@ -157,6 +176,10 @@ watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
 
           <span class="mk-spacer" />
           <span class="mk-muted count">共 {{ chartPoints.length }} 点</span>
+          <!-- 阈值线的出处：写死的时候没人会问，接了规则就得说清楚它从哪来 -->
+          <span class="mk-muted count" :class="ruleSummary.tone === 'warn' ? 'mk-warn' : 'mk-ok'">
+            {{ ruleSummary.text }}
+          </span>
         </div>
 
         <div class="chart-box">
@@ -172,7 +195,14 @@ watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
       </div>
 
       <div class="mk-panel">
-        <div class="mk-panel-title">最新值</div>
+        <div class="mk-panel-title">
+          最新值
+          <span class="mk-spacer" />
+          <!-- 影像挂点（阶段 5）：从这里跳到该测点的现场照片 -->
+          <router-link v-if="selectedId" :to="`/media?pointId=${selectedId}`">
+            <el-button size="small" link type="primary">现场照片</el-button>
+          </router-link>
+        </div>
         <div class="latest-body">
           <template v-if="latestRows.length">
             <div v-for="r in latestRows" :key="r.key" class="latest-row">

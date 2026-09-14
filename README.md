@@ -114,10 +114,15 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   运维工作台，登录后按角色自动进入；另有一个「未分配角色」兜底页）、测点与曲线、设备状态、
   告警中心含处置时间线、**管理端读写**，以及独立整屏的
   **3D 大屏 `/screen`**（真实地形 + 卫星影像 + 测点按状态着色 + 三级降级）；
-  **影像挂点仍是待做**（`frontend/README.md` 有阶段表与已知限制）。
+  另有 **影像挂点 `/media`**（上传/列表/看图，大屏测点弹窗里也能看现场照片）——
+  验收第 6 条「无人机照片挂测点 → 详情页看得到图」在这条链上闭合。
+  大屏还带**时间轴回放**（历史帧逐点回放，实时链路不受影响）与**地面热力图**
+  （每个测点一圈径向渐变，半径随 |形变| 放大；不做插值，见 frontend/README）。
   浏览器端到端已在 **compose 形态**实测（下条）。
-  ⚠️ 仍未完成：顶栏的 SSE 实时连接**尚无页面消费事件**（只有连接状态标签，
-  页面级消费由 B 的 3b 接手）。
+  **SSE 已由 B 在阶段 3b 收口**：连接归 `frontend/src/stores/realtime.js`（应用级，
+  不再绑在布局上——否则直接进 `/screen` 这个大屏顶层路由时没人建连接），事件落进
+  `stores/monitor.js` 的单一数据源；大屏改为推送驱动（点位实时跳动 + 告警脉冲 +
+  顶部横幅），轮询降级为兜底（断流 15s / 正常 60s）。
 - **浏览器端到端已在 compose 形态实测**（2026-09-11）：未登录访问 `/home` 被守卫拦下并
   回跳 `/login?redirect=/home`、登录后回到原目标；**四个角色各自落到自己的工作台**
   （`/home/admin` `/home/operator` `/home/analyst` `/home/maintainer`，四条 URL 与四个页面
@@ -153,5 +158,4 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   现行事实源 = `docs/message-contract.md`（消息契约）+ `docs/B侧接口契约_M0.md`（接口/字段/枚举）；
   `M0_接口冻结_致B_v1.md` 已就地作废（D1–D10 编号仍由它定义，数值以现行文档/代码为准）。
 - 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量/数据中断告警未做——**用户定案暂不做**；
-  ② 影像挂点 `/media`（阶段 5）未做；
-  ③ SSE 的页面级消费未做（连接已在，事件没人订阅，归 B 的 3b）。
+  ② 维护记录（`/maintenance-records`）前端页面未做（后端接口在，运维台里留了说明）。
