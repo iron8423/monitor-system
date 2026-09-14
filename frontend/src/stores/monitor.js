@@ -1,6 +1,23 @@
 import { defineStore } from 'pinia'
 
-import { listObjects, listPoints, listProjects, listScenes, pointLatest, projectSummary } from '@/api/monitor'
+import { listAlarms, listObjects, listPoints, listProjects, listScenes, pointLatest, projectSummary } from '@/api/monitor'
+import { TERMINAL_STATUSES } from '@/utils/labels'
+
+/** 把警情列表折成「测点 → 未解除警情」的映射；终态与设备告警不进这张表。 */
+function toAlarmMap(records) {
+  const map = {}
+  for (const a of records || []) {
+    if (!a?.pointId) continue
+    if (TERMINAL_STATUSES.includes(a.status)) continue
+    map[a.pointId] = {
+      alarmId: a.id,
+      level: a.level,
+      status: a.status,
+      at: a.triggeredAt,
+    }
+  }
+  return map
+}
 
 /**
  * 监测数据仓库（单一数据源）。
@@ -25,6 +42,16 @@ export const useMonitorStore = defineStore('monitor', {
 
     /** pointId -> PointLatestVO（{ pointId, pointCode, latest, state }） */
     latestMap: {},
+
+    /**
+     * pointId -> 未解除警情 { alarmId, level, status, at }。
+     * 首屏由 `listAlarms` 播种，之后由 SSE 的 `alarm` 事件增量维护——
+     * 这样「进页面时已有告警的点」和「刚推送来的告警」着色口径一致。
+     */
+    activeAlarms: {},
+
+    /** 最近的告警事件（新到旧，有上限）。大屏的告警横幅读它 */
+    recentAlarms: [],
   }),
 
   getters: {
@@ -51,6 +78,11 @@ export const useMonitorStore = defineStore('monitor', {
           quality: latest?.quality || null,
           signal: latest?.signal ?? null,
           state: vo?.state || null,
+          // 告警优先级最高（resolvePointVisual 的第一档），
+          // 3D 那圈脉冲环就是靠这两个字段转起来的
+          hasAlarm: Boolean(state.activeAlarms[point.id]),
+          alarmLevel: state.activeAlarms[point.id]?.level || null,
+          alarmStatus: state.activeAlarms[point.id]?.status || null,
         }
       })
     },
@@ -73,16 +105,21 @@ export const useMonitorStore = defineStore('monitor', {
           this.projectId = this.projects[0]?.id ?? null
         }
 
-        const [scenes, objects, points, summary] = await Promise.all([
+        const [scenes, objects, points, summary, alarms] = await Promise.all([
           listScenes(),
           listObjects(),
           listPoints(),
           this.projectId ? projectSummary(this.projectId) : Promise.resolve(null),
+          // 警情是「非首屏必需」的：失败不该把整个快照判成失败，故单独 catch
+          listAlarms({ pageNum: 1, pageSize: 200 }).catch(() => null),
         ])
         this.scenes = scenes
         this.objects = objects
         this.points = points
         this.summary = summary
+        if (alarms?.records) {
+          this.activeAlarms = toAlarmMap(alarms.records)
+        }
 
         await this.refreshLatest()
         this.loadedAt = new Date().toISOString()
@@ -107,6 +144,73 @@ export const useMonitorStore = defineStore('monitor', {
       })
       this.latestMap = map
       this.loadedAt = new Date().toISOString()
+    },
+
+    /**
+     * SSE `measurement` 事件 → 并进对应测点的 latest（单位与字段口径见契约 §6）。
+     *
+     * 为什么要落回这一份：大屏、侧栏、弹窗、曲线都从 `latestMap` 取数，
+     * 推送若各页面各存一份，同一个时刻会出现「3D 上已经跳了、列表里还是旧值」。
+     *
+     * 不认识的 pointId 直接忽略——SSE 推的是全库，本项目之外的测点不该进快照。
+     * @returns {boolean} 是否真的并进了一份数据（调用方据此计数）
+     */
+    applyMeasurement(evt) {
+      const id = evt?.pointId
+      if (!id || !this.latestMap[id]) return false
+      const { pointId, pointCode, ...rest } = evt
+      const prev = this.latestMap[id]
+      this.latestMap = {
+        ...this.latestMap,
+        [id]: {
+          ...prev,
+          pointId: prev.pointId ?? pointId,
+          pointCode: prev.pointCode ?? pointCode,
+          // 保留 prev.latest 里的 signal/position 等推送里没有的字段
+          latest: { ...(prev.latest || {}), ...rest },
+        },
+      }
+      this.loadedAt = new Date().toISOString()
+      return true
+    },
+
+    /**
+     * SSE `alarm` 事件 → 维护未解除警情表 + 事件流。
+     *
+     * 解除/误报要把点从表里摘掉，否则「箭头回落后颜色一直是红的」。
+     * 设备告警没有 pointId，仍进事件流（大屏横幅要说得出「哪台设备离线了」），
+     * 但不参与测点着色。
+     * @returns {boolean} 是否是一次有效的告警事件
+     */
+    applyAlarm(evt) {
+      if (!evt) return false
+      const id = evt.pointId
+      const closed = TERMINAL_STATUSES.includes(evt.status)
+      if (id) {
+        const next = { ...this.activeAlarms }
+        if (closed) {
+          delete next[id]
+        } else {
+          next[id] = {
+            alarmId: evt.id,
+            level: evt.level,
+            status: evt.status,
+            at: evt.triggeredAt,
+          }
+        }
+        this.activeAlarms = next
+      }
+      this.recentAlarms = [
+        { ...evt, receivedAt: new Date().toISOString() },
+        ...this.recentAlarms,
+      ].slice(0, 20)
+      return true
+    },
+
+    /** 登出：清掉告警态，避免换账号后还留着上一个人的红点 */
+    clearAlarms() {
+      this.activeAlarms = {}
+      this.recentAlarms = []
     },
   },
 })

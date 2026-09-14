@@ -17,6 +17,8 @@ const RING_MAX = 95
 export function createPointLayer(viewer) {
   /** pointId -> { mast, dot, ring, item } */
   const handles = new Map()
+  /** 正在闪的点（SSE 刚推来告警）：这些点即使没有未解除警情也要亮环 */
+  const pulsing = new Set()
 
   function drawItem(item, stackIndex = 0) {
     const lon = Number(item.longitude)
@@ -134,7 +136,8 @@ export function createPointLayer(viewer) {
     handle.dot.label.fillColor = item.hasData ? Cesium.Color.WHITE : Cesium.Color.fromCssColorString('#b8c0cc')
     handle.mast.polyline.material = color.withAlpha(0.75)
     handle.ring.ellipse.outlineColor = color.withAlpha(0.55)
-    handle.ring.show = visual.key === 'alarm'
+    // 两种情况亮环：① 该点有未解除警情（持续亮）；② 刚收到告警事件（闪几秒）
+    handle.ring.show = visual.key === 'alarm' || pulsing.has(item.id)
     handle.visual = visual
   }
 
@@ -177,11 +180,38 @@ export function createPointLayer(viewer) {
 
     applyTerrainHeights,
 
-    /** 拾取点击：返回点号 id，点空白处返回 null */
+    /**
+     * 告警脉冲：让某个点的扩散环亮 `durationMs` 毫秒。
+     *
+     * 为什么要有这个（而不是只靠 `visual.key === 'alarm'`）：
+     * 「这个点现在有未解除警情」和「刚刚又推来一条告警」是两件事——
+     * 后者是**事件**，一闪而过才符合直觉；否则同一级别重复升级时，
+     * 界面上什么变化都看不到（环本来就亮着）。
+     */
+    flash(pointId, durationMs = 6000) {
+      const handle = handles.get(pointId)
+      if (!handle) return
+      pulsing.add(pointId)
+      paint(handle, handle.item)
+      setTimeout(() => {
+        pulsing.delete(pointId)
+        const current = handles.get(pointId)
+        if (current) paint(current, current.item)
+      }, durationMs)
+    },
+
+    /**
+     * 拾取点击：返回点号 id，点空白处返回 null。
+     *
+     * **只认那颗点（kind='point'）**：立柱、热力晕圈这些同样带 pointId 的实体不能算点击目标
+     * —— 热力晕圈半径能到上千米，若它可拾取，整片地面都会变成「点了就弹窗」，
+     * 想关掉弹窗反而关不掉。
+     */
     pickId(picked) {
       const id = picked?.id
       if (!id) return null
       if (!(id instanceof Cesium.Entity)) return null
+      if (id.properties?.kind?.getValue?.() !== 'point') return null
       const value = id.properties?.pointId?.getValue?.()
       return typeof value === 'number' ? value : null
     },
@@ -193,6 +223,7 @@ export function createPointLayer(viewer) {
         viewer.entities.remove(handle.ring)
       }
       handles.clear()
+      pulsing.clear()
     },
   }
 }
