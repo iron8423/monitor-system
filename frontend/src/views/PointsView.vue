@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import * as api from '@/api/monitor'
 import SeriesChart from '@/components/SeriesChart.vue'
+import { useThresholds } from '@/composables/useThresholds'
 
 /**
  * 测点与曲线（阶段 2）。对应里程碑 M3 的判据：**前端曲线拉到真实数据**。
@@ -44,18 +45,10 @@ const RANGES = [
 const currentMetric = computed(() => METRICS.find((m) => m.value === metricCode.value))
 
 /**
- * 默认告警阈值（±3mm 双向，见 V2 种子规则）。
- * 只在看 defo_mm 时画——把 mm 的阈值画到 mm/d 的图上会误导。
- * 阈值本身应当来自 `/alarm-rules`，等规则页做出来再改成拉接口。
+ * 阈值线取自 `/alarm-rules`（管理员在管理端「告警规则」页签里改），不再写死。
+ * 过滤口径与「拉不到就不画」的理由都在 {@link useThresholds} 里。
  */
-const thresholds = computed(() =>
-  metricCode.value === 'defo_mm'
-    ? [
-        { label: '告警 +3mm', value: 3, color: '#e6a23c' },
-        { label: '告警 −3mm', value: -3, color: '#e6a23c' },
-      ]
-    : [],
-)
+const { thresholds, failed: thresholdsFailed } = useThresholds(metricCode, selectedId)
 
 const chartPoints = computed(() => series.value?.points || [])
 
@@ -135,6 +128,12 @@ watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
             {{ series.pointCode }} · {{ series.metricCode }} · {{ series.unit }}
           </span>
           <span class="mk-spacer" />
+          <el-tooltip
+            v-if="thresholdsFailed"
+            content="拉取 /alarm-rules 失败，本图未画阈值线——宁可没有线，也不画错的线"
+          >
+            <span class="mk-muted th-warn">阈值线未加载</span>
+          </el-tooltip>
           <el-button size="small" link type="primary" @click="loadDetail">刷新</el-button>
         </div>
 
@@ -259,6 +258,11 @@ watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
 
 .count {
   font-size: 12px;
+}
+
+.th-warn {
+  font-size: 12px;
+  cursor: help;
 }
 
 .chart-box {

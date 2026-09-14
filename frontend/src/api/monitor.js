@@ -56,6 +56,17 @@ export function listAlarms(params = {}) {
   return http.get('/v1/alarms', { params })
 }
 
+/**
+ * GET /api/v1/alarm-rules → AlarmRuleVO[]（裸数组，不分页）
+ *
+ * 读接口开放（`AlarmRuleController` 只在写上加 `@PreAuthorize`），所以画曲线的页面
+ * 任何角色都能拉到阈值。字段名是**对外口径**：`type`/`value`/`level`，
+ * 不是库里的 `rule_type`/`threshold_value`/`alarm_level`（`AlarmRuleService#toVO` 转过一道）。
+ */
+export function listAlarmRules() {
+  return http.get('/v1/alarm-rules')
+}
+
 /** GET /api/v1/alarms/{id} → { ...快照, timeline: [{ time, action, operator, comment }] } */
 export function alarmDetail(id) {
   return http.get(`/v1/alarms/${id}`)

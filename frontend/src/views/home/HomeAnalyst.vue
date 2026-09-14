@@ -7,6 +7,7 @@ import AlarmQueue from '@/components/AlarmQueue.vue'
 import SeriesChart from '@/components/SeriesChart.vue'
 import StatTiles from '@/components/StatTiles.vue'
 import { usePolling } from '@/composables/usePolling'
+import { useThresholds } from '@/composables/useThresholds'
 
 /**
  * 研判工作台（研判员）。需求 §3 给研判员的定位是「看曲线/照片/现场，判断真假」——
@@ -40,11 +41,11 @@ const selected = ref(null)
 const series = ref(null)
 const seriesLoading = ref(false)
 
-/** 阈值线口径与 `PointsView` 一致（当前是写死的 ±3mm，见那里的已知限制） */
-const thresholds = [
-  { label: '告警 +3mm', value: 3, color: '#e6a23c' },
-  { label: '告警 −3mm', value: -3, color: '#e6a23c' },
-]
+/**
+ * 阈值线与 `PointsView` 同一份实现（{@link useThresholds}）。
+ * 这里只研判 defo_mm 的原始点位，所以测项固定；测点跟着选中那条警情走。
+ */
+const { thresholds } = useThresholds('defo_mm', computed(() => selected.value?.pointId))
 
 async function pick(row) {
   selected.value = row
@@ -214,8 +215,10 @@ const chartPoints = computed(() => series.value?.points || [])
         <span class="mk-mono">OBSERVING</span>。曲线只画
         <span class="mk-mono">defo_mm</span> 的原始点位并直接显示后端给的原始 ISO 时间——
         不做聚合，聚合会磨平瞬时突跳，而突跳正是分辨「传感器异常」与「真实形变」的关键。
-        阈值线当前是写死的 ±3mm（与 <span class="mk-mono">/points</span> 同口径，
-        待规则页做出来后改成拉 <span class="mk-mono">/alarm-rules</span>）。
+        阈值线取自 <span class="mk-mono">/alarm-rules</span>（与
+        <span class="mk-mono">/points</span> 同一份实现
+        <span class="mk-mono">composables/useThresholds</span>），
+        所以图上线的条数与等级跟着管理员配的规则走，不再是写死的 ±3mm。
         需求里的「照片/现场」属影像挂点（阶段 5），尚未落地，本页暂只能看图。
       </div>
     </div>
