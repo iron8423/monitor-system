@@ -43,6 +43,11 @@
 ## 2. 接入：POST /api/v1/ingest/measurements
 
 > 免 JWT；需请求头 **`X-Ingest-Key: <key>`**（key 来自环境变量 `MONITOR_INGEST_KEY`，dev 默认在 A 的 application.yml）。密钥不符 → 401。body = 单条标准消息或 `{ "items": [...] }`。
+>
+> **两种形态都真实支持（2026-09-14 修）**：直接给数组 `[ {...} ]` 也按 items 处理。
+> 既不像消息、又没有 `items`（如 `{}`），或 `items` 为空 / 含 `null` / 不是数组，一律 **400**
+> —— 此前单条消息会被静默丢成空批量（HTTP 200 + `accepted=0`），调用方看不出错。
+> 消息字段类型写错（如 `metrics` 传字符串）也是 400，错误信息只给一行原因，不甩 Jackson 内部引用链。
 
 **请求头**：`X-Ingest-Key: <MONITOR_INGEST_KEY 的 dev 值>`
 
