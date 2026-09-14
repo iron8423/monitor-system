@@ -75,3 +75,21 @@ export function describeRules(rules, ctx) {
     tone: lines.length ? 'ok' : 'warn',
   }
 }
+
+/**
+ * 该测点、该测项的**超限判据值**（取绝对值最小的那条阈值线）。
+ *
+ * 3D 标点「超限变黄」要用它——原来那里自带一个写死的 `warnThreshold = 3`，
+ * 与规则是两套口径：规则改成 ±5mm 之后，后端按 5mm 报警、界面仍旧 3mm 变黄。
+ * 现在两边同源（曲线上的阈值线也是这几个数）。
+ *
+ * 取绝对值最小：它是**最容易被触发**的那一档，也就是「到这个数就该变色了」。
+ * 没有任何规则时返回 null —— 此时界面不判超限（宁可不黄，也不要自己发明一个阈值）。
+ *
+ * @returns {number|null}
+ */
+export function warnThresholdOf(rules, ctx) {
+  const lines = buildThresholdLines(rules, ctx)
+  if (!lines.length) return null
+  return lines.reduce((min, line) => Math.min(min, Math.abs(line.value)), Number.POSITIVE_INFINITY)
+}

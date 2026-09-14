@@ -91,7 +91,8 @@ const displayPoints = computed(() => {
     const v = values[p.id]
     return {
       ...p,
-      defoMm: v ?? null,
+      value: v ?? null,
+      metrics: { ...p.metrics, [p.metricCode]: v ?? null },
       hasData: v !== null && v !== undefined,
       collectTime: replay.time || p.collectTime,
     }
@@ -99,6 +100,32 @@ const displayPoints = computed(() => {
 })
 
 const selected = computed(() => displayPoints.value.find((p) => p.id === popup.pointId) || null)
+
+/**
+ * 弹窗里的测项行：**按测项档案列**，不再写死「累计形变 / 形变速率」两行。
+ * 档案取不到时退回 latest 里发现的测项（至少不至于什么都看不见）。
+ */
+const selectedMetricRows = computed(() => {
+  const p = selected.value
+  if (!p) return []
+  const rows = store.metricsOf(p.id)
+  if (rows.length) {
+    return rows.map((m) => ({
+      code: m.code,
+      name: m.name,
+      unit: m.unit,
+      value: p.metrics?.[m.code] ?? null,
+      primary: m.code === p.metricCode,
+    }))
+  }
+  return Object.entries(p.metrics || {}).map(([code, value]) => ({
+    code,
+    name: code,
+    unit: '',
+    value,
+    primary: code === p.metricCode,
+  }))
+})
 // 首屏还没加载完时要显示「加载中」，不能先亮"暂无数据"（会让人以为系统坏了）
 // 失败必须单独判——否则 !loadedAt 会永远成立，加载失败被显示成「加载中」，
 // 一个不会自己结束的状态（见 stores/monitor.js 的 loadSnapshot）
@@ -319,6 +346,18 @@ watch(
 
 watch(heatOn, (on) => heatLayer?.setVisible(on))
 
+/*
+ * 换主测项：3D 的颜色/标签会自动跟着变（displayPoints 依赖它），
+ * 但回放的帧是按旧测项拉的，得重新取一遍——否则时间轴上摆着 A 测项的数据，
+ * 画面上却是 B 测项的标签。
+ */
+watch(
+  () => store.primaryMetricCode,
+  () => {
+    if (replay.enabled) replay.load()
+  },
+)
+
 onBeforeUnmount(() => {
   clearInterval(pollTimer)
   clearTimeout(bannerTimer)
@@ -343,6 +382,23 @@ onBeforeUnmount(() => {
         <span class="logo">UGMS</span>
         <span class="title">三维形变监测大屏</span>
         <span class="project">{{ store.currentProject?.name || '—' }}</span>
+        <!-- 主测项：3D 着色、热力图、时间轴回放都跟着它走（可选项来自测项档案） -->
+        <label class="metric-pick">
+          <span>主测项</span>
+          <el-select
+            :model-value="store.primaryMetricCode"
+            size="small"
+            style="width: 132px"
+            @update:model-value="store.setPrimaryMetric"
+          >
+            <el-option
+              v-for="code in store.metricCodes"
+              :key="code"
+              :label="store.metricMeta(code).name"
+              :value="code"
+            />
+          </el-select>
+        </label>
       </div>
       <div class="topbar-right">
         <span class="chip" :class="store.error ? 'err' : store.dataPointCount ? 'ok' : 'warn'">{{ dataStatus }}</span>
@@ -384,7 +440,7 @@ onBeforeUnmount(() => {
         >
           <span class="dot" :style="{ background: resolvePointVisual(p).color }" />
           <span class="code">{{ p.code }}</span>
-          <span class="value">{{ p.hasData ? `${formatSigned(p.defoMm, 2)}mm` : '—' }}</span>
+          <span class="value">{{ p.hasData ? `${formatSigned(p.value, 2)}${p.unit || ''}` : '—' }}</span>
         </li>
       </ul>
       <div class="panel-foot">
@@ -399,6 +455,7 @@ onBeforeUnmount(() => {
         <span class="dot" :style="{ background: item.color }" />{{ item.label }}
       </div>
       <span class="legend-note">立柱高度为示意，非实测量值</span>
+      <span class="legend-note">热力图按主测项：{{ store.primaryMetric.name }}</span>
       <label class="heat-toggle">
         <input v-model="heatOn" type="checkbox" />
         地面热力图
@@ -426,6 +483,7 @@ onBeforeUnmount(() => {
         />
         <span class="stamp mk-mono">{{ formatTime(replay.time) }}</span>
         <span class="dim-text">{{ replay.index + 1 }} / {{ replay.total }}</span>
+        <span class="dim-text">{{ store.metricMeta(replay.metricCode).name }}</span>
         <span class="dim-text">{{ replayFrameInfo }}</span>
         <span v-if="replay.error" class="err-text">{{ replay.error }}</span>
       </template>
@@ -445,13 +503,13 @@ onBeforeUnmount(() => {
         <button class="close" @click="closePopup">×</button>
       </div>
       <div class="popup-body">
-        <div class="kv">
-          <span>累计形变</span>
-          <b>{{ formatSigned(selected.defoMm, 4) }} <em>mm</em></b>
-        </div>
-        <div class="kv">
-          <span>形变速率</span>
-          <b>{{ formatNumber(selected.rateMmD, 4) }} <em>mm/d</em></b>
+        <!-- 测项按档案列（当前主测项标出来），不再写死「累计形变 / 形变速率」 -->
+        <div v-for="row in selectedMetricRows" :key="row.code" class="kv" :class="{ main: row.primary }">
+          <span>{{ row.name }}<template v-if="row.primary">（主）</template></span>
+          <b>
+            {{ row.value === null || row.value === undefined ? '—' : formatNumber(row.value, 3) }}
+            <em>{{ row.unit }}</em>
+          </b>
         </div>
         <div class="kv">
           <span>场景</span>
@@ -533,6 +591,16 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+/* 顶栏的主测项选择：大屏自己的一条设置，不抢戏 */
+.metric-pick {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: 6px;
+  font-size: 12px;
+  color: #8fa9c6;
 }
 
 /* 告警横幅：贴在顶栏下方居中，12s 后自己消失（见 showBanner 的定时器） */
@@ -797,6 +865,11 @@ onBeforeUnmount(() => {
   font-style: normal;
   font-weight: 400;
   color: #8fa9c6;
+}
+
+/* 主测项那一行加粗一点：弹窗里好几行测项，得一眼看出画面上的颜色是按哪个来的 */
+.kv.main b {
+  color: #7fc4ff;
 }
 
 .kv.photos {

@@ -118,6 +118,10 @@ python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-af
   验收第 6 条「无人机照片挂测点 → 详情页看得到图」在这条链上闭合。
   大屏还带**时间轴回放**（历史帧逐点回放，实时链路不受影响）与**地面热力图**
   （每个测点一圈径向渐变，半径随 |形变| 放大；不做插值，见 frontend/README）。
+  **前端已做「测项中立化」**：「有哪些测项」只认 `GET /metrics` 档案（名称/单位也来自它），
+  3D 着色、热力图、时间轴回放、测点列表统一按「主测项」表现，大屏顶栏可切换；
+  超限判据取自 `/alarm-rules`（不再自带写死的 3mm）。**加一种测项 = 管理端加一行数据**，
+  前端零改动（详见 frontend/README「测项中立化」一节）。
   浏览器端到端已在 **compose 形态**实测（下条）。
   **SSE 已由 B 在阶段 3b 收口**：连接归 `frontend/src/stores/realtime.js`（应用级，
   不再绑在布局上——否则直接进 `/screen` 这个大屏顶层路由时没人建连接），事件落进

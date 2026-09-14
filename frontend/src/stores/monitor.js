@@ -1,7 +1,42 @@
 import { defineStore } from 'pinia'
 
-import { listAlarms, listObjects, listPoints, listProjects, listScenes, pointLatest, projectSummary } from '@/api/monitor'
+import {
+  listAlarmRules,
+  listAlarms,
+  listMetrics,
+  listObjects,
+  listPoints,
+  listProjects,
+  listScenes,
+  pointLatest,
+  projectSummary,
+} from '@/api/monitor'
 import { TERMINAL_STATUSES } from '@/utils/labels'
+import { warnThresholdOf } from '@/utils/thresholds'
+
+/** 主测项的默认选择：形变是本项目的第一个场景，档案里没有它就退回排序最靠前的测项 */
+const DEFAULT_PRIMARY_METRIC = 'defo_mm'
+
+/** latest 里这几项不是测项值，不能当测项读（contract §3） */
+const NON_METRIC_KEYS = new Set(['collectTime', 'receiveTime', 'quality', 'signal', 'position', 'state'])
+
+/** 从测项档案里挑一个可用的主测项；当前值仍有效就保持不变 */
+function pickPrimaryMetric(rows, current) {
+  const codes = [...new Set((rows || []).map((r) => r?.code).filter(Boolean))]
+  if (current && codes.includes(current)) return current
+  if (codes.includes(DEFAULT_PRIMARY_METRIC)) return DEFAULT_PRIMARY_METRIC
+  return codes[0] || DEFAULT_PRIMARY_METRIC
+}
+
+/** 把 latest 里的测项值挑出来：数值字段、且不是时间/质量这些元信息 */
+function metricValuesOf(latest) {
+  const out = {}
+  for (const [key, value] of Object.entries(latest || {})) {
+    if (NON_METRIC_KEYS.has(key)) continue
+    if (typeof value === 'number') out[key] = value
+  }
+  return out
+}
 
 /** 把警情列表折成「测点 → 未解除警情」的映射；终态与设备告警不进这张表。 */
 function toAlarmMap(records) {
@@ -40,6 +75,24 @@ export const useMonitorStore = defineStore('monitor', {
     points: [],
     summary: null,
 
+    /**
+     * 测项档案（GET /metrics，每点一份：`{pointId, code, name, unit, sortOrder}`）。
+     * 名称与单位都以它为准，界面里不再自己拼「累计形变(mm)」这种字符串。
+     */
+    metrics: [],
+
+    /**
+     * 当前**主测项**：3D 着色、热力图、时间轴回放、测点列表都跟着它走。
+     * 大屏上可以切换（见 ScreenView 顶栏的「主测项」下拉）。
+     */
+    primaryMetricCode: DEFAULT_PRIMARY_METRIC,
+
+    /**
+     * 告警规则（GET /alarm-rules）。放这里是为了让 3D 的「超限变色」与曲线上的
+     * 阈值线同源——以前 3D 那边自带一个写死的 3mm，规则改了它不会跟着变。
+     */
+    rules: [],
+
     /** pointId -> PointLatestVO（{ pointId, pointCode, latest, state }） */
     latestMap: {},
 
@@ -57,6 +110,24 @@ export const useMonitorStore = defineStore('monitor', {
   getters: {
     currentProject: (state) => state.projects.find((p) => p.id === state.projectId) || null,
 
+    /** 去重后的测项代码（按档案出现顺序） */
+    metricCodes: (state) => [...new Set(state.metrics.map((m) => m.code))],
+
+    /** 某个测点的测项档案（按 sortOrder） */
+    metricsOf: (state) => (pointId) =>
+      state.metrics
+        .filter((m) => m.pointId === pointId)
+        .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)),
+
+    /** 测项的展示元信息（名称/单位）；档案里没有就退回代码本身 */
+    metricMeta: (state) => (code) =>
+      state.metrics.find((m) => m.code === code) || { code, name: code, unit: '' },
+
+    /** 当前主测项的元信息 */
+    primaryMetric() {
+      return this.metricMeta(this.primaryMetricCode)
+    },
+
     sceneNameOf: (state) => (point) => {
       const object = state.objects.find((o) => o.id === point?.objectId)
       if (!object) return '—'
@@ -65,16 +136,33 @@ export const useMonitorStore = defineStore('monitor', {
 
     /** 测点 + 最新值 + 场景名，拍平成视图直接能用的结构 */
     enrichedPoints(state) {
+      const code = state.primaryMetricCode
       return state.points.map((point) => {
         const vo = state.latestMap[point.id]
         const latest = vo?.latest || null
+        const metrics = metricValuesOf(latest)
+        const value = metrics[code] ?? null
+        const meta = state.metrics.find((m) => m.pointId === point.id && m.code === code)
+          || state.metrics.find((m) => m.code === code)
         return {
           ...point,
           sceneName: this.sceneNameOf(point),
-          hasData: Boolean(latest),
+
+          // —— 与测项无关的那份：谁需要就自己查，界面不再写死字段名 ——
+          metrics,
+          metricCode: code,
+          metricName: meta?.name || code,
+          unit: meta?.unit || '',
+          /** 当前主测项的值：3D 标签/热力图/列表都用它 */
+          value,
+          hasData: value !== null && value !== undefined,
+          /**
+           * 超限判据（来自规则，取绝对值最小的那条）。没有规则就是 null，
+           * 此时不判超限——宁可不黄，也不要自己发明一个阈值。
+           */
+          threshold: warnThresholdOf(state.rules, { pointId: point.id, metricCode: code }),
+
           collectTime: latest?.collectTime || null,
-          defoMm: latest?.defo_mm ?? null,
-          rateMmD: latest?.rate_mm_d ?? null,
           quality: latest?.quality || null,
           signal: latest?.signal ?? null,
           state: vo?.state || null,
@@ -120,6 +208,18 @@ export const useMonitorStore = defineStore('monitor', {
         if (alarms?.records) {
           this.activeAlarms = toAlarmMap(alarms.records)
         }
+
+        /*
+         * 测项档案与规则同理：它们决定「显示哪个测项、超限从多少算起」，
+         * 取不到就退回默认（defo_mm + 不判超限），不该让整个首屏失败。
+         */
+        const [metrics, rules] = await Promise.all([
+          listMetrics().catch(() => []),
+          listAlarmRules().catch(() => []),
+        ])
+        this.metrics = metrics || []
+        this.rules = rules || []
+        this.primaryMetricCode = pickPrimaryMetric(this.metrics, this.primaryMetricCode)
 
         await this.refreshLatest()
         this.loadedAt = new Date().toISOString()
@@ -211,6 +311,17 @@ export const useMonitorStore = defineStore('monitor', {
     clearAlarms() {
       this.activeAlarms = {}
       this.recentAlarms = []
+    },
+
+    /**
+     * 切换主测项（大屏顶栏的下拉）。
+     * 只认档案里存在的代码——手输一个不存在的测项，界面会全是「暂无数据」，
+     * 那种空白最难解释。
+     */
+    setPrimaryMetric(code) {
+      if (this.metricCodes.includes(code)) {
+        this.primaryMetricCode = code
+      }
     },
   },
 })

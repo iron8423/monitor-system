@@ -24,10 +24,20 @@ const granularity = ref('raw')
 const rangeHours = ref(24)
 const loading = ref(false)
 
-const METRICS = [
-  { value: 'defo_mm', label: '累计形变', unit: 'mm' },
-  { value: 'rate_mm_d', label: '形变速率', unit: 'mm/d' },
-]
+/**
+ * 测项选项来自**档案**（GET /metrics，每点一份），不再写死 defo_mm / rate_mm_d。
+ * 优先用「该测点自己的测项」；档案里没有该点就退回全部测项。
+ */
+const metrics = ref([])
+const metricOptions = computed(() => {
+  const mine = metrics.value.filter((m) => m.pointId === selectedId.value)
+  const use = mine.length ? mine : metrics.value
+  const seen = new Map()
+  for (const m of use) if (m?.code && !seen.has(m.code)) seen.set(m.code, m)
+  return [...seen.values()]
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+    .map((m) => ({ value: m.code, label: m.name || m.code, unit: m.unit || '' }))
+})
 
 const GRANULARITIES = [
   { value: 'raw', label: '原始' },
@@ -42,7 +52,9 @@ const RANGES = [
   { value: 24 * 30, label: '近 30 天' },
 ]
 
-const currentMetric = computed(() => METRICS.find((m) => m.value === metricCode.value))
+const currentMetric = computed(
+  () => metricOptions.value.find((m) => m.value === metricCode.value) || metricOptions.value[0] || null,
+)
 
 /**
  * 阈值线来自 `/alarm-rules`（原来写死 ±3mm）。
@@ -61,13 +73,35 @@ const ruleSummary = computed(() =>
 
 const chartPoints = computed(() => series.value?.points || [])
 
-/** 最新值面板：把 latest 那袋杂七杂八的字段整理成可展示的行 */
-const latestRows = computed(() => {
+/** latest 里这些不是测项，是元信息（契约 §3）——分开显示，免得混在测项里 */
+const META_LABELS = {
+  collectTime: '采集时间',
+  receiveTime: '接收时间',
+  quality: '数据质量',
+  signal: '信号强度',
+}
+
+/** 测项行：名称/单位都来自档案，界面不再自己拼 */
+const metricRows = computed(() => {
   const l = latest.value?.latest
   if (!l) return []
-  return Object.entries(l)
-    .filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object')
-    .map(([k, v]) => ({ key: k, value: v }))
+  const rows = metricOptions.value
+    .filter((o) => l[o.value] !== undefined && l[o.value] !== null)
+    .map((o) => ({ code: o.value, name: o.label, unit: o.unit, value: l[o.value] }))
+  // 档案里没有、但设备已经报上来的测项也别丢（否则「明明有数据却不显示」最费解）
+  for (const [k, v] of Object.entries(l)) {
+    if (META_LABELS[k] || k === 'position' || rows.some((r) => r.code === k)) continue
+    if (typeof v === 'number') rows.push({ code: k, name: k, unit: '', value: v })
+  }
+  return rows
+})
+
+const metaRows = computed(() => {
+  const l = latest.value?.latest
+  if (!l) return []
+  return Object.entries(META_LABELS)
+    .filter(([k]) => l[k] !== null && l[k] !== undefined)
+    .map(([k, label]) => ({ key: k, label, value: l[k] }))
 })
 
 async function loadPoints() {
@@ -79,7 +113,25 @@ async function loadPoints() {
   }
 }
 
-/** 规则不是「首屏必需」：拉失败不该毁掉曲线，空数组就是没有阈值线 */
+/** 测项与规则都不是「首屏必需」：拉失败不该毁掉曲线，空数组就是没有选项/阈值线 */
+async function loadMetrics() {
+  try {
+    metrics.value = (await api.listMetrics()) || []
+  } catch {
+    metrics.value = []
+  }
+  syncMetricCode()
+}
+
+/** 当前测项在该点没有档案时，切到该点第一个可用测项（否则曲线永远是空的） */
+function syncMetricCode() {
+  const options = metricOptions.value
+  if (!options.length) return
+  if (!options.some((o) => o.value === metricCode.value)) {
+    metricCode.value = options[0].value
+  }
+}
+
 async function loadRules() {
   try {
     rules.value = (await api.listAlarmRules()) || []
@@ -118,10 +170,11 @@ async function loadDetail() {
 
 onMounted(async () => {
   await loadPoints()
-  await loadRules()
+  await Promise.all([loadMetrics(), loadRules()])
 })
 
 watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
+watch(selectedId, syncMetricCode)
 </script>
 
 <template>
@@ -159,7 +212,7 @@ watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
 
         <div class="toolbar">
           <el-radio-group v-model="metricCode" size="small">
-            <el-radio-button v-for="m in METRICS" :key="m.value" :value="m.value">
+            <el-radio-button v-for="m in metricOptions" :key="m.value" :value="m.value">
               {{ m.label }}
             </el-radio-button>
           </el-radio-group>
@@ -204,9 +257,13 @@ watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
           </router-link>
         </div>
         <div class="latest-body">
-          <template v-if="latestRows.length">
-            <div v-for="r in latestRows" :key="r.key" class="latest-row">
-              <span class="mk-muted">{{ r.key }}</span>
+          <template v-if="metricRows.length || metaRows.length">
+            <div v-for="r in metricRows" :key="r.code" class="latest-row">
+              <span class="mk-muted">{{ r.name }}</span>
+              <span class="mk-mono">{{ r.value }} {{ r.unit }}</span>
+            </div>
+            <div v-for="r in metaRows" :key="r.key" class="latest-row meta">
+              <span class="mk-muted">{{ r.label }}</span>
               <span class="mk-mono">{{ r.value }}</span>
             </div>
           </template>
@@ -306,5 +363,10 @@ watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
   display: flex;
   gap: 10px;
   font-size: 13px;
+}
+
+/* 元信息（采集时间/质量/信号）压暗一档，别和测项值抢注意力 */
+.latest-row.meta {
+  opacity: 0.72;
 }
 </style>

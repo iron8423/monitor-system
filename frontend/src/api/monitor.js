@@ -83,6 +83,17 @@ export function listDevices() {
 }
 
 /**
+ * GET /api/v1/metrics → Metric[]（裸数组）：`{ id, pointId, code, name, unit, sortOrder }`。
+ *
+ * **「有哪些测项」的唯一来源。** 此前业务页面把 defo_mm / rate_mm_d 写死在代码里，
+ * 只有管理端把它当普通表 CRUD 过，于是加一种测项要改一堆前端文件。
+ * 测项的**名称与单位**也从这里取，界面里不要再自己拼字符串。
+ */
+export function listMetrics() {
+  return http.get('/v1/metrics')
+}
+
+/**
  * 订阅实时推送（SSE）。EventSource 带不了请求头，所以 token 走 query——
  * 这是契约 D8 专门为它开的唯一例外。
  * @returns {EventSource} 调用方负责 close()，否则连接会一直挂着

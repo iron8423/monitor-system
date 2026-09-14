@@ -235,6 +235,52 @@ Pinia store 的实例活在应用级，比布局和大屏都活得久，是唯�
 两个容易踩的点：热力晕圈半径可达上千米，所以**它不能被拾取**（`pointLayer.pickId` 只认
 `kind === 'point'` 的那颗点），否则整片地面都变成「点了就弹窗、想关还关不掉」。
 
+## 测项中立化（骨架）
+
+**「有哪些测项」只有一个来源：`GET /api/v1/metrics`**（每点一份：`{pointId, code, name, unit, sortOrder}`）。
+界面里不再出现 `defo_mm` / `rate_mm_d` 这种写死的字段名，测项的**名称与单位也从档案取**。
+
+### 「主测项」是什么
+
+一份测点数据里可能有多个测项（形变、速率、温度…），但 3D 着色、地面热力图、点位标签、
+时间轴回放**同一时刻只能按一个测项来表现**——这个就是主测项（`monitor.primaryMetricCode`）：
+
+- 默认取档案里的 `defo_mm`（形变是本项目的第一场景）；档案里没有它就取排序最靠前的那个；
+- 大屏顶栏有「主测项」下拉，切换后 3D、热力图、弹窗、时间轴一起切；
+- 切到档案里不存在的代码会被拒绝（`setPrimaryMetric`）——界面全空是最难解释的一种故障。
+
+每个测点拍平后的结构（`enrichedPoints`）与测项无关：
+
+```js
+{ id, code, metrics: { defo_mm: 1.8, temp_c: 41.5 },   // 所有测项的原值
+  metricCode: 'defo_mm', value: 1.8, unit: 'mm', metricName: '累计形变',
+  threshold: 3,                                         // 来自告警规则，见下
+  quality, signal, state, hasAlarm, alarmLevel, ... }
+```
+
+3D 图层只认 `value / unit / metricName` 这三样，所以换测项时 `cesium/*` 一个字都不用改。
+
+### 超限判据来自规则，不再自带默认值
+
+`resolvePointVisual` 原来有个写死的 `warnThreshold = 3`——规则改成 ±5mm 之后，后端按 5mm 报警、
+界面还按 3mm 变黄，同一件事两套口径。现在判据由调用方从 `/alarm-rules` 算出来：
+`utils/thresholds.js#warnThresholdOf()` 取**绝对值最小**的那条阈值线（最容易触发的那一档）。
+**没有规则就返回 null，界面不判超限**——宁可不黄，也不要自己发明一个阈值。
+曲线上的虚线也是这几个数，两处同源。
+
+### 加一种测项要做什么
+
+1. 管理端「测项」页给该测点加一行（`code` / `name` / `unit`）——**前端零改动**；
+2. 想让它有阈值告警，再加一条 `/alarm-rules` 规则（同一个 `metricCode`）；
+3. 设备按 `message-contract` 上报这个测项的值即可。
+
+> 唯一还需要手改的地方：`cesium/heatmapLayer.js` 里的 `RADIUS_PER_UNIT`（每单位放大多少米）
+> 是**呈现标度**，因为档案里暂时没有量程字段。mm 与 ℃ 的数值范围差几个量级，
+> 用同一个系数会让某类测项要么糊满全屏、要么看不见。将来 metric 档案若加 `range`，改成读档案即可。
+
+> 另一处同类遗留**不在本仓前端**：`views/AdminView.vue` 的告警规则表单里，测项下拉仍是写死的
+> `['defo_mm', 'rate_mm_d']`（A 的文件），加第三种测项时那里会选不到——已记入交接清单。
+
 ## 关于跨域（重要）
 
 后端 `SecurityConfig` **没有配置 CORS**，所以前端统一走 **Vite 代理**：

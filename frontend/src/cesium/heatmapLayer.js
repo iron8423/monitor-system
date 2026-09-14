@@ -15,10 +15,27 @@ import { resolvePointVisual } from '@/constants/status'
  * 材质是一张画好的径向渐变贴图（按颜色缓存，别每帧重画）。
  */
 
-/** 晕圈半径（米）：基础 + 按 |形变| 线性放大，封顶免得一个大值糊满全屏 */
+/** 晕圈半径（米）：基础 + 按 |值| 线性放大，封顶免得一个大值糊满全屏 */
 const RADIUS_MIN = 260
-const RADIUS_PER_MM = 80
 const RADIUS_MAX = 1400
+
+/**
+ * 每个测项「每 1 个单位放大多少米」。
+ *
+ * 这是**呈现标度**，不是数据口径：mm 与 mm/d、℃ 的数值范围差着几个量级，
+ * 用同一个每单位系数会让某一类测项要么糊满全屏、要么看不见。
+ * 档案里目前没有量程字段，所以先在界面这一层配置；将来 metric 档案若加了 range，
+ * 这里换成读档案即可（`heatScaleOf` 是唯一入口）。
+ */
+const RADIUS_PER_UNIT = {
+  defo_mm: 80,
+  rate_mm_d: 20,
+}
+const DEFAULT_RADIUS_PER_UNIT = 40
+
+export function heatScaleOf(metricCode) {
+  return RADIUS_PER_UNIT[metricCode] ?? DEFAULT_RADIUS_PER_UNIT
+}
 
 const TEXTURE_SIZE = 128
 const textureCache = new Map()
@@ -52,10 +69,10 @@ function gradientTexture(color, alpha) {
 }
 
 /** 值 → 晕圈半径；没有值（null）返回 0，调用方据此隐藏 */
-export function heatRadiusOf(value) {
+export function heatRadiusOf(value, metricCode) {
   const v = Math.abs(Number(value))
   if (!Number.isFinite(v)) return 0
-  return Math.min(RADIUS_MAX, RADIUS_MIN + v * RADIUS_PER_MM)
+  return Math.min(RADIUS_MAX, RADIUS_MIN + v * heatScaleOf(metricCode))
 }
 
 export function createHeatmapLayer(viewer) {
@@ -66,7 +83,7 @@ export function createHeatmapLayer(viewer) {
     const lon = Number(item.longitude)
     const lat = Number(item.latitude)
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null
-    const radius = heatRadiusOf(item.defoMm)
+    const radius = heatRadiusOf(item.value, item.metricCode)
     if (!radius) return null
 
     const visual = resolvePointVisual(item)
@@ -92,7 +109,7 @@ export function createHeatmapLayer(viewer) {
 
   function paint(handle, item) {
     const visual = resolvePointVisual(item)
-    const radius = heatRadiusOf(item.defoMm)
+    const radius = heatRadiusOf(item.value, item.metricCode)
     if (!radius) {
       handle.entity.show = false
       return
@@ -128,7 +145,7 @@ export function createHeatmapLayer(viewer) {
           }
         }
         const handle = handles.get(item.id)
-        if (handle) handle.entity.show = visible && heatRadiusOf(item.defoMm) > 0
+        if (handle) handle.entity.show = visible && heatRadiusOf(item.value, item.metricCode) > 0
       }
       for (const [id, handle] of [...handles.entries()]) {
         if (seen.has(id)) continue
@@ -140,7 +157,7 @@ export function createHeatmapLayer(viewer) {
     /** 开关（界面上的「热力图」复选框） */
     setVisible(visible) {
       for (const handle of handles.values()) {
-        handle.entity.show = visible && heatRadiusOf(handle.item?.defoMm) > 0
+        handle.entity.show = visible && heatRadiusOf(handle.item?.value, handle.item?.metricCode) > 0
       }
     },
 

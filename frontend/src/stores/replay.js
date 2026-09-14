@@ -33,6 +33,8 @@ export const useReplayStore = defineStore('replay', {
     frames: [],
     index: 0,
     playing: false,
+    /** 这批帧是哪个测项的（大屏上要写明，切换主测项后帧会重新拉） */
+    metricCode: '',
   }),
 
   getters: {
@@ -61,11 +63,13 @@ export const useReplayStore = defineStore('replay', {
       }
       this.loading = true
       this.error = ''
+      // 回放看的就是**当前主测项**——它由测项档案决定，不再写死 defo_mm
+      const metricCode = monitor.primaryMetricCode
       try {
         const from = new Date(Date.now() - this.rangeHours * 3600 * 1000).toISOString()
         const list = await Promise.all(
           monitor.points.map((p) =>
-            pointSeries(p.id, { metricCode: 'defo_mm', granularity: 'raw', from }).catch(() => null),
+            pointSeries(p.id, { metricCode, granularity: 'raw', from }).catch(() => null),
           ),
         )
         const seriesByPoint = monitor.points.map((p, i) => ({
@@ -73,6 +77,7 @@ export const useReplayStore = defineStore('replay', {
           points: list[i]?.points || [],
         }))
         this.frames = buildFrames(seriesByPoint)
+        this.metricCode = metricCode
         // 落在**最后一帧**：进来先看「最近的历史」，与实时画面相差最小
         this.index = Math.max(0, this.frames.length - 1)
         if (!this.frames.length) {

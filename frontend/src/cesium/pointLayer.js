@@ -13,6 +13,9 @@ const RING_MAX = 95
  *
  * 对外只暴露 sync(items) / highlight(pointId) 两个动作，
  * 数据从哪来（快照还是 SSE）它不关心 —— 这就是数据与视图解耦。
+ *
+ * 数据里跟测项有关的部分只有三样：`value`（当前主测项的值）、`unit`、`metricName`。
+ * 它不认 `defo_mm` 这种具体测项代码——换一种测项，这一层一个字都不用改。
  */
 export function createPointLayer(viewer) {
   /** pointId -> { mast, dot, ring, item } */
@@ -129,7 +132,7 @@ export function createPointLayer(viewer) {
   function paint(handle, item) {
     const visual = resolvePointVisual(item)
     const color = Cesium.Color.fromCssColorString(visual.color)
-    const value = item.hasData ? `${formatSigned(item.defoMm, 2)}mm` : '暂无数据'
+    const value = item.hasData ? `${formatSigned(item.value, 2)}${item.unit || ''}` : '暂无数据'
 
     handle.dot.point.color = color
     handle.dot.label.text = `${item.code}  ${value}`
