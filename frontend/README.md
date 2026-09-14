@@ -86,6 +86,17 @@ npm run build      # 产物在 dist/
 npm run preview    # 本地预览 dist
 ```
 
+## 5. 前端自检（不需要浏览器）
+
+```powershell
+npm run selfcheck   # 需要后端在跑（默认 http://127.0.0.1:8080，可用 MONITOR_BASE 覆盖）
+```
+
+`scripts/selfcheck.mjs` 用 Vite 的 SSR 加载器把 store 与纯函数**真跑一遍**（不是读代码），
+覆盖三块：实时推送（连接归属/幂等、measurement 并表、alarm 升降级、**SSE 可见性收口**）、
+时间轴回放（多序列合帧、前值保持、滑块往返）、测项中立化与项目过滤（含「编一个档案里
+本来没有的第三种测项」那种端到端断言）。当前 **31 条**，失败会以非零码退出。
+
 ## 目录结构
 
 ```
