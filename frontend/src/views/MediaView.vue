@@ -94,6 +94,7 @@ onMounted(loadPoints)
         :point-id="p.id"
         :columns="6"
         size="88px"
+        deletable
         @loaded="(items) => onLoaded(p.id, items)"
       />
     </div>

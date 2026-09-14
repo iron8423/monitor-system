@@ -1,5 +1,6 @@
 package com.monitor.media.web;
 
+import com.monitor.audit.annotation.AuditAction;
 import com.monitor.auth.security.SecurityUser;
 import com.monitor.common.Result;
 import com.monitor.media.dto.MediaUploadVO;
@@ -10,7 +11,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -62,6 +65,27 @@ public class MediaController {
         return ResponseEntity.ok()
                 .contentType(contentTypeOf(media))
                 .body(resource);
+    }
+
+    /**
+     * 删除影像（**逻辑删除**，契约 §7）。
+     *
+     * <p>角色取 {@code ADMIN}/{@code MAINTAINER}：与设备-测点绑定/解绑同一个口径
+     * （见 {@code DeviceController}），因为影像的实际使用场景就是运维上传现场照片——
+     * 传错了该由传的人自己撤，不该非要找管理员。值班/研判是**读**影像的角色，
+     * 不给他们删的权限。</p>
+     *
+     * <p>{@code @AuditAction} 必须挂：软删意味着「删了还在库里」，不留痕的话
+     * 「这张图为什么不见了」在库层面无从查证——审计日志是软删唯一的补位手段。</p>
+     */
+    @DeleteMapping("/media/{mediaId}")
+    @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER')")
+    // targetIdFromStringArg：路径变量是编码 "M1024" 而非数字主键，
+    // 不声明的话审计行会缺 target_id（详见该属性的注释）
+    @AuditAction(action = "删除影像", targetIdFromStringArg = true)
+    public Result<Void> delete(@PathVariable String mediaId) {
+        mediaService.delete(mediaId);
+        return Result.ok();
     }
 
     /** 库内 MIME 只作提示：解析失败退回二进制流，不因一个字段让图片读不出来。 */

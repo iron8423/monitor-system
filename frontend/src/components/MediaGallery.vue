@@ -1,7 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 import * as api from '@/api/monitor'
+import { useUserStore } from '@/stores/user'
 
 /**
  * 测点影像画廊（验收第 6 条「点一个监测点……照片/影像全出来」的那一半）。
@@ -27,9 +29,24 @@ const props = defineProps({
   max: { type: Number, default: 0 },
   /** 无影像时连空状态一起藏掉（大屏浮窗那种「有就显示、没有就别占地方」的场合） */
   hideEmpty: { type: Boolean, default: false },
+  /**
+   * 是否允许删除。**默认 false**——三处调用点里只有「测点详情」与「/media 总览页」
+   * 该有这个入口；3D 大屏点击浮窗是**看**的场合，挂个删除按钮在演示现场只会误触。
+   */
+  deletable: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['loaded'])
+
+const userStore = useUserStore()
+
+/**
+ * 角色闸。与后端 `MediaController.delete` 的 `@PreAuthorize("hasAnyRole('ADMIN','MAINTAINER')")`
+ * 同口径——**这里只是不显示按钮，不是权限**。值班/研判真去调那个接口仍然 403。
+ */
+const canDelete = computed(
+  () => props.deletable && ['ADMIN', 'MAINTAINER'].includes(userStore.role),
+)
 
 const items = ref([])
 const loading = ref(false)
@@ -65,6 +82,30 @@ async function reload() {
 
 defineExpose({ reload })
 
+/**
+ * 删除一张。文案里点明「文件仍保留在服务器上」——
+ * 后端是**逻辑删除**（契约 §7），不说清楚的话用户会以为删了就找不回来了，
+ * 要么不敢删、要么真出事时以为没救。
+ */
+async function remove(m) {
+  try {
+    await ElMessageBox.confirm(
+      '该影像将不再出现在任何页面。文件仍保留在服务器上，误删可以找回。',
+      `删除影像「${m.note || m.mediaId}」`,
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return // 点了取消
+  }
+  try {
+    await api.deleteMedia(m.mediaId)
+    ElMessage.success('已删除')
+    await reload()
+  } catch {
+    // 403/404 等由 http 拦截器统一提示，这里不重复弹
+  }
+}
+
 // 切测点必须重拉：`pointId` 变了而列表没变，就会出现「B 测点显示 A 的照片」
 watch(() => props.pointId, reload, { immediate: true })
 </script>
@@ -99,6 +140,18 @@ watch(() => props.pointId, reload, { immediate: true })
           <span class="mk-mono mk-muted time">{{ m.takenAt || '未填拍摄时间' }}</span>
           <span v-if="m.note" class="note" :title="m.note">{{ m.note }}</span>
         </div>
+        <!-- 删除入口只在可删的场合出现；`@click.stop` 必须有——
+             `el-image` 的预览是绑在整个缩略图上的，不拦住的话点删除会先弹出大图 -->
+        <el-button
+          v-if="canDelete"
+          link
+          type="danger"
+          size="small"
+          class="del"
+          @click.stop="remove(m)"
+        >
+          删除
+        </el-button>
       </div>
     </div>
 
@@ -156,6 +209,14 @@ watch(() => props.pointId, reload, { immediate: true })
   display: flex;
   flex-direction: column;
   gap: 1px;
+  font-size: 12px;
+}
+
+/* 删除按钮贴右下，不与拍摄时间抢行 */
+.del {
+  align-self: flex-end;
+  padding: 0;
+  height: auto;
   font-size: 12px;
 }
 

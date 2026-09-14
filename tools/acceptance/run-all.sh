@@ -47,6 +47,14 @@ if [ "$FRESH" = 1 ]; then
     printf '%s端口 %s 已被占用，换 FRESH_PORT=xxxx 再试%s\n' "$C_RED" "$PORT" "$C_OFF" >&2
     exit 2
   fi
+  # 跟着空库一起清掉上传目录。
+  # 库是 jdbc:h2:mem（进程一停就没了），种子也不含 media 行，所以后端一退出，
+  # 本机 data/media 里的文件就**定义上全是孤儿**——拥有它们的那张表已经不存在了。
+  # 不清的话每跑一轮 --fresh 就攒一批（06-media.sh 每轮传 3 张 1×1 测试图，
+  # 且因为影像改成了**逻辑删除**、盘上文件按设计保留，套件删了行也带不走文件）。
+  # 容器形态走的是 compose 的命名卷，不受这里影响。
+  rm -rf "$ROOT/backend/data/media"
+
   printf '%s启动全新后端：端口 %s（H2 内存库，空库）...%s\n' "$C_DIM" "$PORT" "$C_OFF"
   # --monitor.device-offline.sweep-ms=2000：07 套件要等设备离线扫描出结果，
   # 线上默认 10s 也能过（套件按 40s 上限轮询），这里调快纯粹是省时间。

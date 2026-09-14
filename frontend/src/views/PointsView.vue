@@ -308,7 +308,9 @@ watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
               <span class="mk-spacer" />
               <span class="mk-muted count">点缩略图看大图，可左右翻页</span>
             </div>
-            <MediaGallery ref="gallery" :point-id="selectedId" />
+            <!-- deletable：详情页是管理影像的场合（看 + 传 + 撤），与 /media 总览页一致；
+                 3D 大屏浮窗**不给**这个入口——那里是「看」的场合 -->
+            <MediaGallery ref="gallery" :point-id="selectedId" deletable />
           </el-tab-pane>
 
           <!-- ⑤ 告警：该测点的全部警情（不只未解除） -->

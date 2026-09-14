@@ -260,5 +260,7 @@ VITE_TERRAIN_MODE=ion     # ion = Cesium 官方真实地形；none = 不用地�
 - 运维台的「设备维护记录」与「设备-测点绑定」后端已有接口
   （`/api/v1/maintenance-records`、`/devices/{id}/points`）但前端没页面（排期周三 9/16）。
 - 审计日志后端有接口（仅 ADMIN 可调），前端 `api/monitor.js` 未封装、无页面（排期周三 9/16）。
-- **影像没有删除入口**——不是前端偷懒，是契约 §7 没给 DELETE 端点（只有上传 / 列表 / 内容）。
-  前端因此没有做「删除」按钮，误传的照片只能从库里手工清。加端点属契约变更，**已上报待定案**。
+- ~~影像没有删除入口~~ **已于 2026-09-14 补上**：`DELETE /api/v1/media/{mediaId}`（逻辑删除，
+  盘上文件保留）。入口由 `MediaGallery` 的 `deletable` 控制，只在**测点详情**与 **`/media` 总览页**
+  打开；3D 大屏浮窗**刻意不给**（那是「看」的场合，演示现场挂个删除按钮只会误触）。
+  角色限 ADMIN/MAINTAINER，由 `canDelete` 挡显示、后端 `@PreAuthorize` 挡调用——**藏按钮不是权限**。

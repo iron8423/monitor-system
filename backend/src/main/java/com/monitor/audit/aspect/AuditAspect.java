@@ -50,7 +50,7 @@ public class AuditAspect {
         entry.setUsername(user != null ? user.getUsername() : "anonymous");
         entry.setAction(auditAction.action());
         entry.setTargetType(resolveTargetType(pjp));
-        entry.setTargetId(resolveTargetId(pjp.getArgs()));
+        entry.setTargetId(resolveTargetId(pjp.getArgs(), auditAction));
         entry.setDetail(buildDetail(pjp.getArgs()));
         entry.setIp(currentIp());
         auditLogMapper.insert(entry);
@@ -77,7 +77,15 @@ public class AuditAspect {
         return name;
     }
 
-    private String resolveTargetId(Object[] args) {
+    /**
+     * 取值顺序：先 Long（主键），再 {@link Identifiable}（整个实体作为请求体）。
+     *
+     * <p>路径变量是**不透明编码**而非数字主键的端点（目前只有
+     * {@code DELETE /media/{mediaId}}）两种都命中不了，需要用
+     * {@link AuditAction#targetIdFromStringArg()} 显式声明——见该属性的注释，
+     * 这里不做「扫到 String 就用」的兜底。</p>
+     */
+    private String resolveTargetId(Object[] args, AuditAction auditAction) {
         for (Object arg : args) {
             if (arg instanceof Long id) {
                 return String.valueOf(id);
@@ -86,6 +94,13 @@ public class AuditAspect {
         for (Object arg : args) {
             if (arg instanceof Identifiable e && e.getId() != null) {
                 return String.valueOf(e.getId());
+            }
+        }
+        if (auditAction.targetIdFromStringArg()) {
+            for (Object arg : args) {
+                if (arg instanceof String s && !s.isBlank()) {
+                    return s;
+                }
             }
         }
         return null;

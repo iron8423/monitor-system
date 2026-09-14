@@ -229,6 +229,25 @@ data: {"id":1,"pointCode":"P-HK01","level":"alarm","status":"PENDING","triggered
 [ { "mediaId": "M1000", "url": "/api/v1/media/M1000/content", "takenAt": "2026-08-27T10:00:00+08:00", "note": "" } ]
 ```
 
+### GET /api/v1/media/{mediaId}/content
+> 返回二进制本体（**不走统一信封**，`ResponseEntity<Resource>`），前端 `<img>` 直接引。
+> 该路径与 `/stream` 一样支持 **`?token=` 鉴权**——`<img>` 发不出 `Authorization` 头，
+> 这是契约里仅有的两处 query 鉴权（见 §6）。忘了带就是每张图各自一个 401。
+> `Content-Type` 取自库内 `mime_type`，解析失败退回 `application/octet-stream`。
+
+### DELETE /api/v1/media/{mediaId}
+> **2026-09-14 新增。** 角色限 `ADMIN` / `MAINTAINER`（与设备-测点绑定同一个口径：
+> 影像的实际使用场景就是运维上传现场照片，传错了该由传的人自己撤）。走审计留痕。
+> 返回 `Result<Void>`。
+>
+> **语义是逻辑删除，不是物理删除**：库里标 `deleted=1`，**盘上的文件保留**。
+> 与 `monitor_point` / `device` 的既有口径一致（本仓只有 `alarm_rule` 是物理删）。
+> 软删的全部价值在于可挽回，所以接口不顺手删文件——真要回收磁盘时另配离线清理策略，
+> 按「已软删且超过保留期」挑，而不是让删除接口顺手做掉。
+>
+> 删除后该影像从列表与内容端点**一并消失**（两者都走逻辑删除过滤）。
+> **重复删除返回 404**（已删的行查不出来），不静默成功——否则「到底删没删掉」无从判断。
+
 ## 8. 枚举（D5，冻结）
 
 | 枚举 | 取值 |

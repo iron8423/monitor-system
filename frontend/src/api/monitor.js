@@ -137,6 +137,20 @@ export function uploadMedia(file, pointId, { takenAt, note } = {}) {
 }
 
 /**
+ * DELETE /api/v1/media/{mediaId} → 无返回体
+ *
+ * **逻辑删除**：后端只把库里的行标成 `deleted=1`，**盘上的文件保留**（契约 §7、迁移 V6）。
+ * 所以「删掉」在界面上是不可见的，误删时可以从服务器上找回。
+ *
+ * 角色限 ADMIN / MAINTAINER（与设备-测点绑定同一个口径）——值班/研判是**读**影像的角色，
+ * 调这个接口会得 403。界面上由 `MediaGallery` 的 `deletable` 控制入口是否出现，
+ * 但**真正的边界在后端 `@PreAuthorize`**，前端藏按钮不是权限。
+ */
+export function deleteMedia(mediaId) {
+  return http.delete(`/v1/media/${mediaId}`)
+}
+
+/**
  * 把 MediaVO 变成 `<img src>` 能直接用的地址——**必须带 `?token=`**。
  *
  * 这是契约里除 SSE 之外**唯一**的第二处 query 鉴权（理由见 `MediaController` 的类注释与

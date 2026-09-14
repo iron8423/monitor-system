@@ -133,6 +133,23 @@ public class MediaService {
         return items;
     }
 
+    /**
+     * 删除影像（**逻辑删除**，契约 §7）。
+     *
+     * <p>只把库里的行标成 {@code deleted=1}，<b>不删盘上的文件</b>——见 V6 的注释：
+     * 软删的全部价值就在于可挽回，接口顺手删文件就把这个价值抵消了。删除后该影像
+     * 从列表与内容端点一并消失（两者都走 MyBatis-Plus 的逻辑删除过滤，不必各写一遍）。</p>
+     *
+     * <p>先 {@link #requireByCode} 再删：已删的行查不出来，所以「删两次」第二次是 404，
+     * 而不是静默成功——后者会让「我到底删没删掉」无从判断。</p>
+     */
+    public void delete(String mediaId) {
+        Media media = requireByCode(mediaId);
+        mediaMapper.deleteById(media.getId());
+        log.info("影像已逻辑删除 mediaId={} pointId={} objectKey={}（盘上文件保留）",
+                mediaId, media.getPointId(), media.getObjectKey());
+    }
+
     /** 取影像元数据，不存在抛 404。 */
     public Media require(Long id) {
         Media m = id == null ? null : mediaMapper.selectById(id);
