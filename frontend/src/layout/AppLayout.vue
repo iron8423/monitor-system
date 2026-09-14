@@ -22,8 +22,8 @@ const menus = [
   { path: '/devices', title: '设备状态', icon: 'Cpu', ready: true },
   { path: '/screen', title: '3D 大屏', icon: 'Location', ready: true },
   { path: '/alarms', title: '告警中心', icon: 'Bell', ready: true },
+  { path: '/media', title: '影像挂点', icon: 'Picture', ready: true },
   { path: '/admin', title: '管理端', icon: 'Setting', ready: true, roles: ['ADMIN'] },
-  { path: '/media', title: '影像挂点', icon: 'Picture', ready: false, stage: '阶段 5' },
 ]
 
 // 菜单里的角色收口只是界面引导，真正的边界在后端 @PreAuthorize

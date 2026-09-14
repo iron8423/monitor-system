@@ -1,4 +1,5 @@
 import http from './http'
+import { getToken } from '@/utils/token'
 
 /**
  * 监测数据接口（《B侧接口契约_M0》§3）。
@@ -107,4 +108,50 @@ export function deviceStatus(id) {
  */
 export function openStream(token) {
   return new EventSource(`/api/v1/stream?token=${encodeURIComponent(token)}`)
+}
+
+/**
+ * GET /api/v1/points/{pointId}/media → MediaVO[]（裸数组，同 `/points`）
+ * 每项 `{ mediaId, url, takenAt, note }`。`url` 是**根相对路径**
+ * （`/api/v1/media/M001/content`），不是绝对地址；`<img>` 同源可直接用，但要带 token，
+ * 见 {@link mediaContentUrl}。
+ */
+export function listPointMedia(pointId) {
+  return http.get(`/v1/points/${pointId}/media`)
+}
+
+/**
+ * POST /api/v1/media（multipart：file / pointId / takenAt / note）→ MediaUploadVO
+ *
+ * **不要手工设 `Content-Type: multipart/form-data`**：boundary 是浏览器拼 FormData 时生成的，
+ * 手写一个没有 boundary 的头会让后端解析不出任何 part，报「file 缺失」——看起来像后端坏了，
+ * 其实是前端把头写死了。交给 axios 自己判断即可。
+ */
+export function uploadMedia(file, pointId, { takenAt, note } = {}) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('pointId', pointId)
+  if (takenAt) form.append('takenAt', takenAt)
+  if (note) form.append('note', note)
+  return http.post('/v1/media', form)
+}
+
+/**
+ * 把 MediaVO 变成 `<img src>` 能直接用的地址——**必须带 `?token=`**。
+ *
+ * 这是契约里除 SSE 之外**唯一**的第二处 query 鉴权（理由见 `MediaController` 的类注释与
+ * `JwtAuthFilter`）：`<img>` 发不出 Authorization 头，与 EventSource 是同一个约束。
+ * 忘了它就是满屏碎图——而且**每张图各自一个 401**，图片加载失败又不走 axios 拦截器，
+ * 控制台里只有一串裸 401、没有任何提示。这是这块最容易踩、也最难看出原因的点。
+ *
+ * 与 `openStream(token)` 的差别：那个由调用方把 token 递进来（调用方本来就持有登录态），
+ * 这里直接读 `utils/token`，因为用到它的三处（测点详情、影像总览、大屏浮窗）都不持有 token，
+ * 让它们各自去读一遍反而更散。
+ */
+export function mediaContentUrl(media) {
+  if (!media) return ''
+  const path = media.url || `/api/v1/media/${media.mediaId}/content`
+  const token = getToken()
+  if (!token) return path
+  return `${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
 }

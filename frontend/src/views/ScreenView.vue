@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+import MediaGallery from '@/components/MediaGallery.vue'
 import {
   Cesium,
   createViewer,
@@ -265,6 +266,17 @@ onBeforeUnmount(() => {
           <span>采集时间</span>
           <b>{{ formatTime(selected.collectTime) }}</b>
         </div>
+        <!-- 最新一张现场影像（验收第 6 条明说「详情**与 3D 大屏**」）。
+             只显示一张缩略图，但点开后能翻该点全部影像（max 只截展示，见 MediaGallery）；
+             该点没有影像时整块不出现，不留空档。 -->
+        <MediaGallery
+          :point-id="popup.pointId"
+          :max="1"
+          :columns="1"
+          size="78px"
+          hide-empty
+          class="popup-media"
+        />
       </div>
       <div class="popup-foot">
         <button class="btn" @click="router.push('/points')">去看曲线</button>
@@ -516,6 +528,26 @@ onBeforeUnmount(() => {
 
 .popup-body {
   padding: 8px 0;
+}
+
+/*
+ * 画廊是给亮色页面写的（--mk-border / --mk-bg），浮窗是深色的，
+ * 所以这里把缩略图的边框和底色换成 HUD 的蓝线，否则亮色描边浮在深色玻璃上很突兀。
+ * `:deep()` 必要：MediaGallery 的样式是 scoped 的，从外面够不着。
+ */
+.popup-media :deep(.grid) {
+  padding: 8px 0 4px;
+}
+
+.popup-media :deep(.thumb) {
+  border-color: rgba(90, 170, 255, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  width: 78px;
+}
+
+.popup-media :deep(.time),
+.popup-media :deep(.note) {
+  color: #8fa9c6;
 }
 
 .kv {
