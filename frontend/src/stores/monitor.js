@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import {
   listAlarmRules,
   listAlarms,
+  listDevices,
   listMetrics,
   listObjects,
   listPoints,
@@ -92,6 +93,15 @@ export const useMonitorStore = defineStore('monitor', {
      * 阈值线同源——以前 3D 那边自带一个写死的 3mm，规则改了它不会跟着变。
      */
     rules: [],
+
+    /**
+     * 当前用户**可见**的设备 id（GET /devices，A 的项目隔离已把范围限到成员项目）。
+     *
+     * 用途只有一个：SSE 目前**不按订阅者过滤**（A 的 09-14 日志 §120 记为已知未修），
+     * 推来的是全库事件。大屏那条告警横幅如果不判可见性，就会出现「别的项目的告警」
+     * 挂在屏幕上——项目隔离在界面上被 SSE 绕过去了。
+     */
+    deviceIds: [],
 
     /** pointId -> PointLatestVO（{ pointId, pointCode, latest, state }） */
     latestMap: {},
@@ -213,12 +223,14 @@ export const useMonitorStore = defineStore('monitor', {
          * 测项档案与规则同理：它们决定「显示哪个测项、超限从多少算起」，
          * 取不到就退回默认（defo_mm + 不判超限），不该让整个首屏失败。
          */
-        const [metrics, rules] = await Promise.all([
+        const [metrics, rules, devices] = await Promise.all([
           listMetrics().catch(() => []),
           listAlarmRules().catch(() => []),
+          listDevices().catch(() => []),
         ])
         this.metrics = metrics || []
         this.rules = rules || []
+        this.deviceIds = (devices || []).map((d) => d.id)
         this.primaryMetricCode = pickPrimaryMetric(this.metrics, this.primaryMetricCode)
 
         await this.refreshLatest()
@@ -284,6 +296,20 @@ export const useMonitorStore = defineStore('monitor', {
      */
     applyAlarm(evt) {
       if (!evt) return false
+
+      /*
+       * 项目隔离：SSE 不按订阅者过滤（A 的日志 §120），所以这里必须自己把「看不到的」
+       * 挡在门外，否则别的项目的告警会以横幅形式挂在大屏上。
+       *   - 测点告警：只在**已加载的可见测点**里认（latestMap 就是可见测点的集合）；
+       *   - 设备告警：只认**可见设备**（deviceIds 来自 /devices，A 已按成员项目过滤）。
+       * 服务端按订阅者过滤才是根治，那是 A 侧的待办；前端这一层是当下不再外溢的保证。
+       */
+      if (evt.alarmType === 'POINT') {
+        if (evt.pointId == null || !this.latestMap[evt.pointId]) return false
+      } else if (evt.alarmType === 'DEVICE') {
+        if (evt.deviceId == null || !this.deviceIds.includes(evt.deviceId)) return false
+      }
+
       const id = evt.pointId
       const closed = TERMINAL_STATUSES.includes(evt.status)
       if (id) {
