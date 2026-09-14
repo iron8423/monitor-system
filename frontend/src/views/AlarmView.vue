@@ -6,7 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as api from '@/api/monitor'
 import { useUserStore } from '@/stores/user'
 import {
-  ACTION_LABELS, ACTIONS_BY_ROLE, ALARM_TYPE_LABELS, LEVEL_LABELS, LEVEL_TAG,
+  ACTION_LABELS, ACTIONS_BY_ROLE, ALARM_REASON_LABELS, ALARM_TYPE_LABELS, LEVEL_LABELS, LEVEL_TAG,
   STATUS_LABELS, STATUS_TAG, TERMINAL_STATUSES, label,
 } from '@/utils/labels'
 
@@ -156,6 +156,13 @@ function onFilterChange() {
             <span class="mk-mono">{{ row.alarmType === 'DEVICE' ? row.deviceCode : row.pointCode }}</span>
           </template>
         </el-table-column>
+        <!-- 设备告警的成因。测点警情没有成因（后端返回 null），这一列对它们是空的 -->
+        <el-table-column label="成因" width="110">
+          <template #default="{ row }">
+            <span v-if="row.alarmReason">{{ label(ALARM_REASON_LABELS, row.alarmReason) }}</span>
+            <span v-else class="mk-muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="STATUS_TAG[row.status]" size="small">
@@ -203,6 +210,9 @@ function onFilterChange() {
             <el-descriptions-item label="类型">{{ label(ALARM_TYPE_LABELS, detail.alarmType) }}</el-descriptions-item>
             <el-descriptions-item label="对象">
               <span class="mk-mono">{{ detail.alarmType === 'DEVICE' ? detail.deviceCode : detail.pointCode }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detail.alarmReason" label="成因" :span="2">
+              {{ label(ALARM_REASON_LABELS, detail.alarmReason) }}
             </el-descriptions-item>
             <el-descriptions-item label="触发时间" :span="2">
               <span class="mk-mono">{{ detail.triggeredAt }}</span>

@@ -160,6 +160,40 @@ print(' '.join(str(r['id']) for r in rs if r['status'] not in ('RESOLVED', 'FALS
   if [ "$code" = "200" ]; then info "已回收$note"; else info "$note 未回收（HTTP $code），可忽略"; fi
 }
 
+# recycle_device <deviceId> [说明]
+#
+#   回收临时设备：**先结掉它上面未解除的警情，再删设备**。理由与 recycle_point 完全一样，
+#   只是挂在设备侧——`device` 也是逻辑删除，而 `alarm` 同样不做联表校验，
+#   点一删那些 `DEVICE` 类警情就成了孤儿：列表里还在排队，`deviceCode` 却解析成 null，
+#   告警中心会多出一行「空白设备」的待办。
+#
+#   为什么 07 套件没用它也没留孤儿：那套件的设备告警在 ③ 被**恢复上报**正常解除掉了，
+#   走到删除时已经没有未解除警情。但那是那一条用例的巧合，不是通用保证——
+#   凡是「造出设备告警又不还原」的套件都得走这里（09-data-quality.sh 就是）。
+recycle_device() {
+  local did="$1" note="${2:-临时设备}"
+  [ -n "$did" ] || return 0
+
+  local ids n=0 id
+  ids=$(curl -s "$BASE/alarms?deviceId=$did&pageNum=1&pageSize=200" -H "$AUTH" | python3 -c "
+import sys, json
+try:
+    rs = json.load(sys.stdin)['data']['records']
+except Exception:
+    print(''); raise SystemExit
+print(' '.join(str(r['id']) for r in rs if r['status'] not in ('RESOLVED', 'FALSE_ALARM')))")
+
+  for id in $ids; do
+    curl -s -o /dev/null -X POST "$BASE/alarms/$id/actions" -H "$AUTH" -H "$JSON" \
+      -d '{"action":"resolve","comment":"验收套件回收：临时设备即将删除"}' && n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] && info "已结掉 $note 上的 $n 条未解除警情（避免留下孤儿）"
+
+  local code
+  code=$(http_code -X DELETE "$BASE/devices/$did" -H "$AUTH")
+  if [ "$code" = "200" ]; then info "已回收$note"; else info "$note 未回收（HTTP $code），可忽略"; fi
+}
+
 # 脚本收口：打印计数、输出机器可读行供 run-all 汇总、设置退出码。
 summary() {
   local name; name="$(basename "$0")"

@@ -39,6 +39,11 @@ import java.util.List;
  * </ol>
  *
  * <p>每个设备一次事务，单个设备出错不影响其余（异常只记日志）。</p>
+ *
+ * <p><b>V7 起</b>：{@code alarm_type = DEVICE} 不再只有离线一种成因
+ * （另有 {@code DATA_QUALITY} / {@code DATA_DELAY}，见 {@link DataQualityMonitor}），
+ * 故本类的「有没有未解除告警」改为按**成因**查——否则两个监视器会互相掩盖，
+ * 详见 {@link #openAlarmOf(Long)}。</p>
  */
 @Slf4j
 @Component
@@ -77,6 +82,7 @@ public class DeviceAlarmMonitor {
     private void reconcile(Device d, LocalDateTime cutoff) {
         Alarm open = openAlarmOf(d.getId());
         boolean offline = isOffline(d, cutoff);
+
         if (offline && open == null) {
             raise(d);
         } else if (!offline && open != null) {
@@ -95,9 +101,18 @@ public class DeviceAlarmMonitor {
         return d.getLastReportTime() != null && d.getLastReportTime().isBefore(cutoff);
     }
 
+    /**
+     * 找该设备**离线成因**下未解除的警情。
+     *
+     * <p>成因条件（V7 起）不可省：{@code alarm_type = DEVICE} 底下现在有三种成因，
+     * 只按类型找的话，一台「数据不可信」的设备永远不会被判离线（会以为已经告过警了），
+     * 反过来数据质量告警也一样被掩盖——两个监视器互相屏蔽，谁都开不出警情。
+     * 这与 B-14（设备告警整类漏算）是同一类错误：拿一个更宽的条件当更窄条件的判据。</p>
+     */
     private Alarm openAlarmOf(Long deviceId) {
         return alarmMapper.selectOne(new LambdaQueryWrapper<Alarm>()
                 .eq(Alarm::getAlarmType, AlarmConstants.TYPE_DEVICE)
+                .eq(Alarm::getAlarmReason, AlarmConstants.REASON_OFFLINE)
                 .eq(Alarm::getDeviceId, deviceId)
                 .notIn(Alarm::getStatus, AlarmConstants.CLOSED)
                 .orderByDesc(Alarm::getTriggeredAt)
@@ -109,6 +124,7 @@ public class DeviceAlarmMonitor {
         Alarm a = new Alarm();
         a.setAlarmType(AlarmConstants.TYPE_DEVICE);
         a.setDeviceId(d.getId());
+        a.setAlarmReason(AlarmConstants.REASON_OFFLINE);
         a.setAlarmLevel(OFFLINE_LEVEL);
         a.setStatus(AlarmConstants.PENDING);
         a.setTriggeredAt(LocalDateTime.now());

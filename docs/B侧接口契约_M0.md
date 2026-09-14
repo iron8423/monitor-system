@@ -111,33 +111,59 @@
 > `lastAction` / `lastActionAt` 是**系统或人工最后一次动作**，取值是原始动作串
 > （`trigger` 触发 / `recover` 自动解除 / `escalate` 升级 / `confirm` / `research` / `dispatch` / `handle` / `resolve` / `misreport`），
 > 不是中文标签——前端自行映射展示文案。
+> `alarmReason`（A 于 2026-09-14 新增，仅 `alarmType=DEVICE` 有值）：设备告警的**成因**，
+> `OFFLINE`（离线）/ `DATA_QUALITY`（数据可信度异常）/ `DATA_DELAY`（数据延迟上报）；
+> 测点警情与 V7 之前的存量设备告警为 `null`。列表里也给，因为同一台设备上这几种成因
+> 可以**并存**（各一条，互不掩盖），只给 `alarmType` 的话前端看到的是两行一模一样的东西。
 ```json
 { "total": 2, "pageNum": 1, "pageSize": 20, "records": [
   { "id": 1, "alarmType": "POINT", "pointId": 1000, "pointCode": "P-HK01",
-    "deviceId": null, "deviceCode": null, "level": "alarm", "status": "PENDING",
+    "deviceId": null, "deviceCode": null, "alarmReason": null, "level": "alarm", "status": "PENDING",
     "triggeredAt": "2026-08-27T09:30:00+08:00", "lastAction": "trigger", "lastActionAt": "2026-08-27T09:30:00+08:00" },
   { "id": 2, "alarmType": "DEVICE", "pointId": null, "pointCode": null,
-    "deviceId": 1000, "deviceCode": "radar-001", "level": "notice", "status": "PENDING",
+    "deviceId": 1000, "deviceCode": "radar-001", "alarmReason": "OFFLINE", "level": "notice", "status": "PENDING",
     "triggeredAt": "2026-08-27T09:35:00+08:00", "lastAction": "trigger", "lastActionAt": "2026-08-27T09:35:00+08:00" } ] }
 ```
 
 ### GET /api/v1/alarms/{id}
-> 字段同列表项 + `resolvedAt`；`snapshot` 随 `alarmType` 变化（见下）。
+> 字段同列表项 + `resolvedAt`；`snapshot` 随 `alarmType` / `alarmReason` 变化（见下）。
+> 快照里放的是**判据参数**（阈值、窗口、最小样本数），不是触发那一刻的观测值——
+> 观测值在 `timeline[0].comment` 里，那是一段不可变的历史。`lastReportTime` 是唯一例外：
+> 它是设备的**当前**状态，用来让看的人对得上「这台设备现在怎么样了」。
 ```json
 { "id": 1, "alarmType": "POINT", "pointId": 1000, "pointCode": "P-HK01", "level": "alarm", "status": "PENDING",
   "triggeredAt": "2026-08-27T09:30:00+08:00",
   "snapshot": { "defo_mm": 0.73, "threshold_mm": 10.0 },
   "timeline": [ { "time": "2026-08-27T09:30:00+08:00", "action": "trigger", "operator": "system", "comment": "累计形变 0.73mm 超阈值 10mm" } ] }
 ```
+`DEVICE` 类按成因分三种快照形状（A 于 2026-09-14 补齐后两种，对应验收第 5 条）：
 ```json
-{ "id": 2, "alarmType": "DEVICE", "pointId": null, "pointCode": null,
-  "deviceId": 1000, "deviceCode": "radar-001", "level": "notice", "status": "PENDING",
-  "triggeredAt": "2026-08-27T09:35:00+08:00",
+{ "id": 2, "alarmType": "DEVICE", "alarmReason": "OFFLINE",
+  "pointId": null, "pointCode": null, "deviceId": 1000, "deviceCode": "radar-001",
+  "level": "notice", "status": "PENDING", "triggeredAt": "2026-08-27T09:35:00+08:00",
   "snapshot": { "deviceCode": "radar-001", "deviceName": "毫米波点形变雷达 1 号",
-                "lastReportTime": "2026-08-27T09:29:10+08:00", "offlineMinutes": 5 },
+                "lastReportTime": "2026-08-27T09:29:10+08:00", "reason": "OFFLINE", "offlineMinutes": 5 },
   "timeline": [ { "time": "2026-08-27T09:35:00+08:00", "action": "trigger", "operator": "system",
                   "comment": "设备 radar-001（毫米波点形变雷达 1 号）已超过 5 分钟未上报数据，判定为离线" } ] }
 ```
+```json
+{ "id": 3, "alarmType": "DEVICE", "alarmReason": "DATA_QUALITY", "level": "notice", "status": "PENDING",
+  "snapshot": { "deviceCode": "radar-001", "deviceName": "毫米波点形变雷达 1 号",
+                "lastReportTime": "2026-09-14T11:20:00+08:00", "reason": "DATA_QUALITY",
+                "windowMinutes": 15, "minSamples": 4, "badRatio": 0.6, "badQuality": "SUSPECT/FAULT" },
+  "timeline": [ { "action": "trigger", "comment": "设备 radar-001 近 15 分钟 9 条数据中有 7 条质量异常（SUSPECT/FAULT），占比超过 60%，数据不可信" } ] }
+```
+```json
+{ "id": 4, "alarmType": "DEVICE", "alarmReason": "DATA_DELAY", "level": "notice", "status": "PENDING",
+  "snapshot": { "deviceCode": "radar-001", "deviceName": "毫米波点形变雷达 1 号",
+                "lastReportTime": "2026-09-14T11:20:00+08:00", "reason": "DATA_DELAY",
+                "windowMinutes": 15, "minSamples": 4, "badRatio": 0.6, "delayMinutes": 10 },
+  "timeline": [ { "action": "trigger", "comment": "设备 radar-001 近 15 分钟有 6 条数据延迟超过 10 分钟才到达平台" } ] }
+```
+> `snapshot.reason` 与 `alarmReason` 同值，保留 `reason` 是因为它先于 `alarmReason` 存在
+> （离线告警最初就用它），且前端已在按它分支。
+> **成因取自落库的 `alarm_reason` 列（V7），不按当前状态现推**：设备掉线后，一条早先因数据质量
+> 开出的警情不该被解说成「离线」——警情是历史事实，成因必须钉在触发那一刻。
 
 ### 警情唯一性与等级升级（A 于 2026-09-10 定案）
 - 同一**测点 + 测项**未解除的警情**至多一条**。值继续恶化、命中更高等级规则时**就地升级**
@@ -203,6 +229,30 @@
   B 不需要新开警情接口；`POST /alarms/{id}/actions` 对设备告警同样可用。
 
 > 展示口径待 B 定：设备告警是否进「警情中心」默认视图（后端可按 `alarmType` 筛，见 §4）。
+
+### 设备数据质量 / 数据延迟告警（A 于 2026-09-14 补齐，对应验收第 5 条）
+
+同一张表、同一套状态机，`alarmType = DEVICE`，成因由 `alarmReason` 区分（见 §4）：
+
+| 成因 | 判据（常量在 `DataQualityPolicy`，与 `DeviceAlarmMonitor` 同款不可配） | 等级 |
+|---|---|---|
+| `OFFLINE` | 超过 5 分钟未上报（`DeviceStatusPolicy.OFFLINE_MINUTES`） | `notice` |
+| `DATA_QUALITY` | 近 **15** 分钟内 ≥ **4** 条样本，其中 **≥60%** 质量为 `SUSPECT`/`FAULT` | `notice` |
+| `DATA_DELAY` | 近 15 分钟内 ≥ 4 条样本，有 **>10 分钟**才到平台的（`receiveTime − collectTime`） | `notice` |
+
+- **三种成因各自独立成条，互不掩盖**：同一台设备可以同时有离线警情和数据质量警情。
+  实现上 `openAlarmOf` 必须按 `alarm_reason` 过滤——少了这个条件，离线扫描会把数据质量
+  警情当成自己的那条、在设备恢复在线时把它「解除」掉（B-14 同一类缺陷）。
+- **`collectTime` 必须落在窗口内才算「延迟」**：否则回补的历史数据（采集于几天前、
+  今天才灌进平台）会被判成「延迟上报」——那是导入，不是迟到。
+- **窗口内样本不足 4 条 → 两个判据都不成立**，也不解除已有警情：样本不够时
+  「数据变好了」是个没有依据的结论，宁可原样挂着等人看。
+- **设备处于 `FAULT`、或已离线 → 暂不判定**（`judgeable` 闸门）：这两种状态下
+  我们并没有在收数，拿「没有数据」当「数据变好」是错的。闸门放开后照常判定、照常自动解除。
+- 触发备注写的是**实际观测到的数**（「近 15 分钟 9 条数据中有 7 条质量异常」），不是策略常量
+  ——策略会随代码变，历史留痕不该跟着变。
+- 扫描周期 `monitor.data-quality.sweep-ms`（默认 10s）。判据本身是常量不进配置：
+  它们同时被 `snapshot` 读去展示，两处各写一份迟早漂移。
 
 ### 设备-测点绑定（A，2026-09-14 补文档）
 

@@ -60,6 +60,11 @@ monitor:
   # 默认 10s 是演示观感与开销的折中——断连后最多 10s 就出告警，而一次扫描只是几条内存比较。
   device-offline:
     sweep-ms: ${DEVICE_OFFLINE_SWEEP_MS:10000}
+  # 数据可信度扫描（数据质量异常 / 数据延迟上报）。
+  # 判据本身是常量（DataQualityPolicy），与 device-offline 的分工一致：只有「多久扫一次」可配。
+  # 常量不进配置，是因为它们同时被告警快照读去展示——判据两处各写一份迟早漂移。
+  data-quality:
+    sweep-ms: ${DATA_QUALITY_SWEEP_MS:10000}
   # ingest 接入共享密钥（M0-D7）：无网关，/api/v1/ingest/** 校验 X-Ingest-Key 头
   # dev 默认值已与 B 统一为 dev-ingest-key（B 上报脚本默认同此值，见 B 答复 2026-09-09）；
   # 联调/生产用环境变量 MONITOR_INGEST_KEY 覆盖此默认值（与 B 协商一致的密钥）

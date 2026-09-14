@@ -22,6 +22,7 @@ import com.monitor.common.sse.SseBroadcaster;
 import com.monitor.common.util.Times;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MonitorPointMapper;
+import com.monitor.telemetry.DataQualityPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -94,6 +95,7 @@ public class AlarmService {
             vo.setPointCode(a.getPointId() == null ? null : codes.get(a.getPointId()));
             vo.setDeviceId(a.getDeviceId());
             vo.setDeviceCode(a.getDeviceId() == null ? null : devCodes.get(a.getDeviceId()));
+            vo.setAlarmReason(a.getAlarmReason());
             vo.setLevel(a.getAlarmLevel());
             vo.setStatus(a.getStatus());
             vo.setTriggeredAt(Times.iso(a.getTriggeredAt()));
@@ -123,6 +125,7 @@ public class AlarmService {
         vo.setPointCode(pointCodeOf(a.getPointId()));
         vo.setDeviceId(a.getDeviceId());
         vo.setDeviceCode(deviceCodeOf(a.getDeviceId()));
+        vo.setAlarmReason(a.getAlarmReason());
         vo.setLevel(a.getAlarmLevel());
         vo.setStatus(a.getStatus());
         vo.setTriggeredAt(Times.iso(a.getTriggeredAt()));
@@ -188,15 +191,39 @@ public class AlarmService {
         return a;
     }
 
+    /**
+     * 触发快照（读时组装）。
+     *
+     * <p>只放**判据参数**（策略常量），不放实际观测值——观测值在时间线的 trigger 备注里，
+     * 那是一段不可变的历史。设备侧的「最后上报时间」是唯一的例外：它是当前状态，
+     * 用来让看的人对得上「现在这台设备怎么样了」。</p>
+     */
     private Map<String, Object> snapshot(Alarm a) {
         Map<String, Object> snap = new LinkedHashMap<>();
         if (AlarmConstants.TYPE_DEVICE.equals(a.getAlarmType())) {
-            // 设备告警没有测点、没有规则、也没有触发值：快照讲清「哪台设备、断多久了」
+            // 设备告警没有测点、没有规则、也没有触发值：快照讲清「哪台设备、因为什么」
             Device d = a.getDeviceId() == null ? null : deviceMapper.selectById(a.getDeviceId());
             snap.put("deviceCode", d == null ? null : d.getCode());
             snap.put("deviceName", d == null ? null : d.getName());
             snap.put("lastReportTime", d == null ? null : Times.iso(d.getLastReportTime()));
-            snap.put("offlineMinutes", DeviceStatusPolicy.OFFLINE_MINUTES);
+            // 成因取自落库的 alarm_reason，不按当前状态现推——设备掉线后，
+            // 一条早先因数据质量开的警情不该被解说成离线（见 V7 迁移的说明）。
+            String reason = a.getAlarmReason();
+            snap.put("reason", reason);
+            if (AlarmConstants.REASON_DATA_QUALITY.equals(reason)) {
+                snap.put("windowMinutes", DataQualityPolicy.WINDOW_MINUTES);
+                snap.put("minSamples", DataQualityPolicy.MIN_SAMPLES);
+                snap.put("badRatio", DataQualityPolicy.BAD_RATIO);
+                snap.put("badQuality", "SUSPECT/FAULT");
+            } else if (AlarmConstants.REASON_DATA_DELAY.equals(reason)) {
+                snap.put("windowMinutes", DataQualityPolicy.WINDOW_MINUTES);
+                snap.put("minSamples", DataQualityPolicy.MIN_SAMPLES);
+                snap.put("badRatio", DataQualityPolicy.BAD_RATIO);
+                snap.put("delayMinutes", DataQualityPolicy.DELAY_MINUTES);
+            } else {
+                // 离线（也是 V7 之前存量数据的成因）：保留原有字段名，07 套件依赖它
+                snap.put("offlineMinutes", DeviceStatusPolicy.OFFLINE_MINUTES);
+            }
             return snap;
         }
         AlarmRule rule = a.getRuleId() == null ? null : ruleMapper.selectById(a.getRuleId());
