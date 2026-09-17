@@ -49,6 +49,10 @@ onMounted(() => {
 })
 
 async function handleCommand(command) {
+  if (command === 'profile') {
+    router.push('/profile')
+    return
+  }
   if (command !== 'logout') return
   try {
     await ElMessageBox.confirm('确认退出登录？', '提示', { type: 'warning' })
@@ -95,6 +99,9 @@ async function handleCommand(command) {
             <el-dropdown-menu>
               <el-dropdown-item disabled>
                 账号：{{ userStore.user?.username }}
+              </el-dropdown-item>
+              <el-dropdown-item command="profile">
+                <el-icon><User /></el-icon>个人中心
               </el-dropdown-item>
               <el-dropdown-item divided command="logout">
                 <el-icon><SwitchButton /></el-icon>退出登录

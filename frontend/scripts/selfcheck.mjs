@@ -57,7 +57,7 @@ try {
   const { useUserStore } = await server.ssrLoadModule('/src/stores/user.js')
   const { resolvePointVisual } = await server.ssrLoadModule('/src/constants/status.js')
   const { warnThresholdOf } = await server.ssrLoadModule('/src/utils/thresholds.js')
-  const { buildFrames, frameDataCount, frameFreshCount, frameProgress, indexFromProgress } = await server.ssrLoadModule('/src/utils/timeline.js')
+  const { buildFrames, frameDataCount, frameFreshCount, frameProgress, indexFromProgress, suggestRange } = await server.ssrLoadModule('/src/utils/timeline.js')
   const { createRequestGuard } = await server.ssrLoadModule('/src/utils/requestGuard.js')
   const api = await server.ssrLoadModule('/src/api/monitor.js')
 
@@ -132,7 +132,10 @@ try {
   const beforeForeign = monitor.recentAlarms.length
   FakeEventSource.last.emit('alarm', { id: 2, alarmType: 'POINT', pointId: 999, pointCode: 'P-OTHER', level: 'alarm', status: 'PENDING' })
   FakeEventSource.last.emit('alarm', { id: 3, alarmType: 'DEVICE', pointId: null, deviceId: 99, level: 'notice', status: 'PENDING' })
-  check('SSE 不按订阅者过滤（A 日志 §120）→ 前端必须挡住不可见项目的告警',
+  // 2026-09-17 改名：服务端自 09-14 起已按订阅者过滤（`SseBroadcaster#broadcastScoped`，
+  // 无过滤的 `broadcast` 入口已删除），前端这层是**防御**而不是唯一屏障。
+  // 断言本身一个字没改——它验的是"前端不依赖服务端一定只推该推的"。
+  check('SSE 已按订阅者过滤（服务端）；前端这层是防御：不可见项目的告警仍被挡住',
     monitor.recentAlarms.length === beforeForeign)
 
   // ── ② 时间轴回放 ──────────────────────────────────────────────
@@ -346,6 +349,33 @@ try {
     check('分段：相邻边界差 1ms 不重叠（后端 from/to 是双闭区间，不减 1ms 边界那行会出现两次）',
       segs.every((s, i) => i === 0 || s.to === segs[i - 1].from - 1))
     check('分段：最后一段的左端不越过 from', segs.at(-1).from === from)
+  }
+
+  // ── ⑥ 曲线窗口建议（2026-09-17）─────────────────────────────
+  // 起因是实测到的困惑：演示库最新数据停在两天前，测点页默认「近 24 小时」→ 曲线空着，
+  // 界面只说「当前条件下没有数据」，看的人分不清「没上报」和「比窗口旧」。
+  {
+    const RANGES = [
+      { value: 1, label: '近 1 小时' },
+      { value: 24, label: '近 24 小时' },
+      { value: 24 * 7, label: '近 7 天' },
+      { value: 24 * 30, label: '近 30 天' },
+    ]
+    const now = Date.parse('2026-09-17T16:00:00+08:00')
+    const iso = (hoursAgo) => new Date(now - hoursAgo * 3600 * 1000).toISOString()
+
+    check('窗口建议：10 分钟前的数据落在最小档（近 1 小时）',
+      suggestRange(iso(10 / 60), RANGES, now)?.value === 1)
+    check('窗口建议：47 小时前的数据要跨到近 7 天，而不是卡在近 24 小时',
+      suggestRange(iso(47), RANGES, now)?.value === 24 * 7)
+    check('窗口建议：刚好卡在边界上算覆盖（24 小时整用近 24 小时就够）',
+      suggestRange(iso(23.5), RANGES, now)?.value === 24)
+    check('窗口建议：超过最大档也只给最大档，不发明一个不存在的窗口',
+      suggestRange(iso(24 * 60), RANGES, now)?.value === 24 * 30)
+    check('窗口建议：没有数据 / 时间非法 → null（不是默默给最小档）',
+      suggestRange(null, RANGES, now) === null && suggestRange('不是时间', RANGES, now) === null)
+    check('窗口建议：未来时间（设备时钟超前）不抛，落最小档',
+      suggestRange(iso(-2), RANGES, now)?.value === 1)
   }
 } finally {
   await server.close()

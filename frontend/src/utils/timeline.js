@@ -164,3 +164,29 @@ export function indexFromProgress(progress, total) {
   if (!total || total <= 1) return 0
   return Math.min(total - 1, Math.max(0, Math.round((progress / 1000) * (total - 1))))
 }
+
+/**
+ * 「曲线为空」时该建议切到哪一档窗口（纯函数，可直接跑断言）。
+ *
+ * 起因是 2026-09-17 实测到的一个真实困惑：测点页默认取「近 24 小时」，
+ * 而演示库（production 编排）里最新一行数据停在两天前——曲线空着，
+ * 空态只写「当前条件下没有数据」，看的人无法区分
+ * 「这个点从来没上报过」和「上报过，但比窗口旧」。
+ *
+ * 判据用的是 `GET /points/{id}/latest` 的 `collectTime`：**它不受窗口限制**
+ * （与 series 不同，latest 取的是该点最新一行），所以正好能回答「最后一条数据在哪」。
+ *
+ * @param latestIso 最近一条数据的采集时间（ISO8601 带时区）
+ * @param ranges    可选窗口，形如 `[{ value: 24, label: '近 24 小时' }]`，**单位是小时**
+ * @param nowMs     当前时刻（默认 Date.now()；显式传入是为了可断言）
+ * @returns 能覆盖该时刻的**最小**档位；都不覆盖则返回最大档；无数据/非法时间返回 null
+ */
+export function suggestRange(latestIso, ranges, nowMs = Date.now()) {
+  const t = ms(latestIso)
+  if (!Number.isFinite(t) || !Array.isArray(ranges) || ranges.length === 0) return null
+  const now = Number.isFinite(nowMs) ? nowMs : Date.now()
+  const sorted = [...ranges].sort((a, b) => a.value - b.value)
+  // 窗口下界 = now − value 小时；数据时刻落在窗口内即算覆盖。
+  // 未来时间（设备时钟超前）算出负差值，同样落在最小档里——那时候该查的是时钟闸门，不是窗口。
+  return sorted.find((r) => now - t <= r.value * 3600 * 1000) || sorted[sorted.length - 1]
+}

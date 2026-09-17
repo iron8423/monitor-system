@@ -80,11 +80,27 @@ public class DataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        ensureDemoAccount("admin", "陈立", Role.ADMIN);
-        ensureDemoAccount("operator", "李敏", Role.OPERATOR);
-        ensureDemoAccount("analyst", "王越", Role.ANALYST);
-        ensureDemoAccount("maintainer", "赵安", Role.MAINTAINER);
-        ensureDemoAccount(OUTSIDER, "访客（未加入任何项目）", Role.ANALYST);
+        ensureDemoAccount("admin", "陈立", Role.ADMIN,
+                new DemoProfile("监测室主任", "138-0000-0001", "chenli@example.com"));
+        ensureDemoAccount("operator", "李敏", Role.OPERATOR,
+                new DemoProfile("值班长", "138-0000-0002", "limin@example.com"));
+        ensureDemoAccount("analyst", "王越", Role.ANALYST,
+                new DemoProfile("监测分析师", "138-0000-0003", "wangyue@example.com"));
+        ensureDemoAccount("maintainer", "赵安", Role.MAINTAINER,
+                new DemoProfile("设备运维工程师", "138-0000-0004", "zhaoan@example.com"));
+        // 对照组的资料刻意留空：个人中心要能看到「空字段显示成 —」这条路径，
+        // 而不是所有账号都恰好填满（那会把「没登记」这件事从界面上抹掉）。
+        ensureDemoAccount(OUTSIDER, "访客（未加入任何项目）", Role.ANALYST,
+                new DemoProfile("访客", null, null));
+    }
+
+    /**
+     * 演示账号的个人资料（V17 的 phone/email/job_title）。
+     *
+     * <p>值都是**明显假**的：电话用 {@code 138-0000-00xx}，邮箱用 IANA 保留的
+     * {@code example.com}——演示数据一旦长得像真的，就会有人拿去打电话。</p>
+     */
+    private record DemoProfile(String jobTitle, String phone, String email) {
     }
 
     /**
@@ -101,15 +117,35 @@ public class DataInitializer implements CommandLineRunner {
      * <p>副作用：每次启动都会把这四个演示账号的显示名拉回来。可接受——这四个账号密码固定、
      * 无法在界面上编辑，本就不是可改数据。</p>
      */
-    private void ensureDemoAccount(String username, String displayName, Role role) {
+    private void ensureDemoAccount(String username, String displayName, Role role, DemoProfile profile) {
         // username 上有唯一约束（uk_sys_user_username），selectOne 不会撞多条
         SysUser existing = userMapper.selectOne(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username));
         if (existing != null) {
+            boolean changed = false;
             if (!displayName.equals(existing.getDisplayName())) {
                 existing.setDisplayName(displayName);
-                userMapper.updateById(existing);
+                changed = true;
                 log.info("已校正演示账号显示名: {} -> {}", username, displayName);
+            }
+            // 资料只在**为空**时补：显示名是这份种子文件的自有字段（全仓无第二处写入），
+            // 而岗位/电话/邮箱将来会由管理员录入——那些值不该被每次启动按字面量抹掉。
+            if (profile != null) {
+                if (isBlank(existing.getJobTitle()) && profile.jobTitle() != null) {
+                    existing.setJobTitle(profile.jobTitle());
+                    changed = true;
+                }
+                if (isBlank(existing.getPhone()) && profile.phone() != null) {
+                    existing.setPhone(profile.phone());
+                    changed = true;
+                }
+                if (isBlank(existing.getEmail()) && profile.email() != null) {
+                    existing.setEmail(profile.email());
+                    changed = true;
+                }
+            }
+            if (changed) {
+                userMapper.updateById(existing);
             }
             return;
         }
@@ -120,6 +156,11 @@ public class DataInitializer implements CommandLineRunner {
         u.setRole(role.name());
         u.setOrganizationId(1L);
         u.setEnabled(true);
+        if (profile != null) {
+            u.setJobTitle(profile.jobTitle());
+            u.setPhone(profile.phone());
+            u.setEmail(profile.email());
+        }
         userMapper.insert(u);
         // 不打印口令：日志会进容器日志、日志采集、以及别人贴出来的排障片段。
         log.info("已创建演示账号: {}", username);
@@ -127,5 +168,9 @@ public class DataInitializer implements CommandLineRunner {
             log.warn("演示账号 {} 使用默认密码，生产环境请设置 monitor.demo-accounts.enabled=false"
                     + "（postgres profile 已默认关闭），或至少用 DEMO_ACCOUNT_PASSWORD 覆盖", username);
         }
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 }

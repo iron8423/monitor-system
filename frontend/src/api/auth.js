@@ -19,3 +19,15 @@ export function logout() {
 export function fetchMe() {
   return http.get('/v1/auth/me')
 }
+
+/**
+ * POST /api/v1/auth/password → { token, user }
+ *
+ * 成功后服务端会把该用户的令牌版本 +1（= 别处签发的令牌全部作废），
+ * 并用**新版本**重签一张给当前会话，所以这里必须把返回的 token 落回本地，
+ * 否则下一个请求就 401 了——「改完密码页面自己掉线」就是这么来的。
+ */
+export function changePassword(payload) {
+  // silent：口令错误、新旧相同这些都是表单自己的事，不该再弹一次全局提示
+  return http.post('/v1/auth/password', payload, { silent: true })
+}

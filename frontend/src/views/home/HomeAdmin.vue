@@ -78,13 +78,6 @@ const kpis = computed(() => [
   },
 ])
 
-/** 管理员专属入口。 */
-const shortcuts = [
-  { path: '/admin', title: '管理端', desc: '项目 / 场景 / 对象 / 测点 / 测项 / 设备 / 告警规则的增删改' },
-  { path: '/audit', title: '审计日志', desc: '每一次写操作的操作人、动作、目标与来源 IP（仅管理员可见）' },
-  { path: '/alarms', title: '告警中心', desc: '全部警情、处置时间线；管理员可执行全部六种处置动作' },
-  { path: '/screen', title: '3D 大屏', desc: '真实地形 + 卫星影像 + 测点标点的三维态势' },
-]
 </script>
 
 <template>
@@ -137,26 +130,13 @@ const shortcuts = [
     </div>
 
     <div class="mk-panel">
-      <div class="mk-panel-title">管理入口</div>
-      <div class="shortcuts">
-        <div
-          v-for="s in shortcuts"
-          :key="s.path"
-          class="shortcut"
-          @click="router.push(s.path)"
-        >
-          <div class="shortcut-title">{{ s.title }}</div>
-          <div class="mk-muted shortcut-desc">{{ s.desc }}</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="mk-panel">
       <div class="mk-footnote">
         KPI 全部取自 <span class="mk-mono">GET /projects/{id}/summary</span>，
         「在线设备」按后端
         <span class="mk-mono">DeviceStatusPolicy</span>（5 分钟未上报即离线）判定。
-        三维态势见 <span class="mk-mono">/screen</span>（3D 大屏：真实地形 + 卫星影像 + 测点标点）。
+        三维态势见 <span class="mk-mono">/screen</span>（3D 大屏：默认加载仓库自持的离线山地模型 +
+        测点标点，设 <span class="mk-mono">VITE_SCENE_MODE=globe</span> 才切到真实地形 + 卫星影像）。
+        管理端 / 审计日志等入口在左侧菜单，本页不再重复列一遍。
         值班 / 研判 / 运维三个岗位各有自己的工作台，登录后按角色自动进入。
       </div>
     </div>
@@ -209,40 +189,4 @@ const shortcuts = [
   margin-left: 6px;
 }
 
-.shortcuts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  padding: 14px 16px;
-}
-
-@media (max-width: 1100px) {
-  .shortcuts {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.shortcut {
-  padding: 12px 14px;
-  border: 1px solid var(--mk-border);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-
-.shortcut:hover {
-  border-color: var(--mk-primary);
-}
-
-.shortcut-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--mk-primary);
-}
-
-.shortcut-desc {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.6;
-}
 </style>

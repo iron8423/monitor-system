@@ -8,7 +8,9 @@ import MediaGallery from '@/components/MediaGallery.vue'
 import MediaUploader from '@/components/MediaUploader.vue'
 import SeriesChart from '@/components/SeriesChart.vue'
 import { useThresholds } from '@/composables/useThresholds'
+import { formatTime, fromNow } from '@/utils/format'
 import { createRequestGuard } from '@/utils/requestGuard'
+import { suggestRange } from '@/utils/timeline'
 
 /**
  * 测点详情（阶段 2 + 阶段 5 的影像）。验收第 6 条的原文是
@@ -84,6 +86,82 @@ const selected = computed(() => points.value.find((p) => p.id === selectedId.val
 const { thresholds, failed: thresholdsFailed } = useThresholds(metricCode, selectedId)
 
 const chartPoints = computed(() => series.value?.points || [])
+
+/**
+ * 曲线为空时的「为什么」与「怎么办」。
+ *
+ * 起因是一次真实的困惑（2026-09-17 实测）：演示库最新一行数据停在两天前，
+ * 而本页默认取「近 24 小时」——曲线空着，界面只写「当前条件下没有数据」，
+ * 看的人分不清「这个点从来没上报过」和「上报过，但比窗口旧」。
+ *
+ * 判据用 `/points/{id}/latest` 的 `collectTime`：**它不受窗口限制**（取的是该点最新一行），
+ * 正好能回答「最后一条数据在哪」。三种空态分开说，并给出能覆盖它的最小窗口。
+ * 刻意**不自动**改窗口：用户选的档位就是用户选的，替他改只会让「共 N 点」变得无法解释。
+ */
+const latestTime = computed(() => latest.value?.latest?.collectTime || null)
+
+const currentRangeLabel = computed(
+  () => RANGES.find((r) => r.value === rangeHours.value)?.label || `近 ${rangeHours.value} 小时`,
+)
+
+const emptyHint = computed(() => {
+  if (loading.value || chartPoints.value.length) return null
+  // 没选测点（或点列表还没回来）时什么都不说：那不是「这个点没有数据」，而是「还没轮到它」。
+  // 2026-09-17 用无头浏览器实测撞到过：空态写着「该测点还没有收到任何数据」，
+  // 而屏幕上压根没有选中的测点——一句话把「没选」说成了「没数据」。
+  if (!selectedId.value) return null
+  const t = latestTime.value
+  if (!t) {
+    return {
+      kind: 'no-data',
+      title: `${selected.value?.code || '该测点'} 还没有收到任何数据`,
+      detail: '不是窗口的问题——档案在、数据一条都没有，先看设备是否上报。',
+      suggest: null,
+    }
+  }
+  const ts = Date.parse(t)
+  const outOfWindow = Number.isFinite(ts) && Date.now() - ts > rangeHours.value * 3600 * 1000
+  if (outOfWindow) {
+    const r = suggestRange(t, RANGES)
+    const canCover = r && r.value !== rangeHours.value
+    return {
+      kind: 'stale',
+      title: `最近一条数据在 ${formatTime(t)}（${fromNow(t)}），已超出当前「${currentRangeLabel.value}」窗口`,
+      detail: canCover
+        ? '数据没有丢，只是比窗口旧。'
+        : '已经放到最大窗口也覆盖不到它——先确认设备是否还在上报。',
+      suggest: canCover ? r : null,
+    }
+  }
+  const lm = latest.value?.latest || {}
+  const hasMetric = lm[metricCode.value] !== undefined && lm[metricCode.value] !== null
+  if (!hasMetric) {
+    return {
+      kind: 'no-metric',
+      title: `该测点在当前窗口内没有「${currentMetric.value?.label || metricCode.value}」的数据`,
+      detail: '该点有数据，但没有这个测项——换一个测项，或把窗口放大。',
+      suggest: null,
+    }
+  }
+  return {
+    kind: 'empty',
+    title: '当前条件下没有数据',
+    detail: '该测点在窗口内没有落在筛选条件里的采样点。',
+    suggest: null,
+  }
+})
+
+/**
+ * 应用建议窗口。跨到 7 天及以上时顺手把粒度切到「按小时」：
+ * 生产基线是 5 秒采样，7 天原始点 ≈ 12 万行/测项，接口和浏览器都会被拖垮
+ * （大屏回放的同类取舍见清单第 18 条）。用户仍可手动改回「原始」。
+ */
+function applySuggestedRange() {
+  const r = emptyHint.value?.suggest
+  if (!r) return
+  rangeHours.value = r.value
+  if (r.value >= 24 * 7 && granularity.value === 'raw') granularity.value = 'hour'
+}
 
 /** latest 里这些不是测项，是元信息（契约 §3）——分开显示，别混进测项行 */
 const META_LABELS = {
@@ -368,6 +446,28 @@ watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
               <el-button size="small" link type="primary" @click="loadDetail">刷新</el-button>
             </div>
 
+            <el-alert
+              v-if="emptyHint"
+              type="info"
+              :closable="false"
+              show-icon
+              class="empty-hint"
+              :title="emptyHint.title"
+            >
+              <div class="hint-body">
+                <span>{{ emptyHint.detail }}</span>
+                <el-button
+                  v-if="emptyHint.suggest"
+                  size="small"
+                  type="primary"
+                  link
+                  @click="applySuggestedRange"
+                >
+                  切到{{ emptyHint.suggest.label }}
+                </el-button>
+              </div>
+            </el-alert>
+
             <div class="chart-box">
               <SeriesChart
                 :points="chartPoints"
@@ -406,7 +506,16 @@ watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
               <el-table-column prop="t" label="采集时间（带时区）" min-width="220" sortable />
               <el-table-column prop="v" :label="`测值（${series?.unit || currentMetric?.unit || ''}）`" min-width="140" sortable />
               <template #empty>
-                <el-empty description="当前条件下没有数据" :image-size="50" />
+                <el-empty :description="emptyHint?.title || '当前条件下没有数据'" :image-size="50">
+                  <el-button
+                    v-if="emptyHint?.suggest"
+                    size="small"
+                    type="primary"
+                    @click="applySuggestedRange"
+                  >
+                    切到{{ emptyHint.suggest.label }}
+                  </el-button>
+                </el-empty>
               </template>
             </el-table>
           </el-tab-pane>
@@ -533,6 +642,19 @@ watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
 
 .chart-box {
   padding: 8px;
+}
+
+/* 空态提示条：说明「为什么空」并给一键切窗口，紧贴在图上方 */
+.empty-hint {
+  margin: 10px 16px 0;
+}
+
+.hint-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
 }
 
 .sub-title {

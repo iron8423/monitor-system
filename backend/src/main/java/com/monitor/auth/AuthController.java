@@ -1,5 +1,7 @@
 package com.monitor.auth;
 
+import com.monitor.audit.annotation.AuditAction;
+import com.monitor.auth.dto.ChangePasswordRequest;
 import com.monitor.auth.dto.LoginRequest;
 import com.monitor.auth.dto.LoginResponse;
 import com.monitor.auth.dto.UserVO;
@@ -44,5 +46,22 @@ public class AuthController {
     @GetMapping("/me")
     public Result<UserVO> me(@AuthenticationPrincipal SecurityUser currentUser) {
         return Result.ok(authService.me(currentUser));
+    }
+
+    /**
+     * 修改本人密码：成功后**返回新令牌**（当前会话继续用，其余端全部失效）。
+     *
+     * <p>这个端点**刻意不**放进 {@code SecurityConfig} 的放行名单——它必须带有效会话，
+     * 否则就成了「谁都能改别人密码」。注意 {@code /auth/logout} 是放行的（它只做作废），
+     * 两者放行与否不同不是疏忽。</p>
+     *
+     * <p>审计只记「谁、什么时候、做了什么」：{@code AuditAspect} 取的是当前登录用户，
+     * 请求体里的口令一个字都不落库。</p>
+     */
+    @PostMapping("/password")
+    @AuditAction(action = "修改密码")
+    public Result<LoginResponse> changePassword(@AuthenticationPrincipal SecurityUser currentUser,
+                                                @Valid @RequestBody ChangePasswordRequest request) {
+        return Result.ok(authService.changePassword(currentUser, request));
     }
 }

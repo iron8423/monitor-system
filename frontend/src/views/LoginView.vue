@@ -81,7 +81,7 @@ async function handleSubmit() {
         <ul class="brand-points">
           <li><span class="dot" />雷达数据接入 → 实时测点值</li>
           <li><span class="dot" />累计形变 ±3mm 超限自动预警</li>
-          <li><span class="dot" />Cesium 真实地形 + 监测点状态着色</li>
+          <li><span class="dot" />3D 数字孪生大屏：自持离线山地模型 + 测点状态着色</li>
         </ul>
 
         <div class="brand-meta">

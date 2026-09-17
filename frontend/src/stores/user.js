@@ -1,6 +1,11 @@
 import { defineStore } from 'pinia'
 
-import { fetchMe, login as loginApi, logout as logoutApi } from '@/api/auth'
+import {
+  changePassword as changePasswordApi,
+  fetchMe,
+  login as loginApi,
+  logout as logoutApi,
+} from '@/api/auth'
 import { clearAuth, getToken, getUser, setToken, setUser } from '@/utils/token'
 
 export const useUserStore = defineStore('user', {
@@ -45,6 +50,20 @@ export const useUserStore = defineStore('user', {
       this.token = ''
       this.user = null
       clearAuth()
+    },
+
+    /**
+     * 修改本人密码。成功后**换用返回的新令牌**：
+     * 服务端递增了令牌版本（其余端全部下线），当前会话拿的是重签的那一张。
+     * 只清空本地而不换令牌，页面会在下一个请求上 401——用户只会看到「改完密码就掉线」。
+     */
+    async changePassword({ oldPassword, newPassword }) {
+      const data = await changePasswordApi({ oldPassword, newPassword })
+      this.token = data.token
+      this.user = data.user
+      setToken(data.token)
+      setUser(data.user)
+      return data
     },
   },
 })

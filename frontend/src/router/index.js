@@ -120,6 +120,16 @@ const routes = [
         component: () => import('@/views/AuditView.vue'),
         meta: { title: '审计日志', icon: 'Document', roles: ['ADMIN'] },
       },
+      {
+        // 个人中心：**所有登录用户都有**，所以刻意不带 `meta.roles`
+        // （带了就只有列进去的角色能进，而「看自己的资料」不该分岗位）。
+        // 入口在顶栏头像下拉里，不进侧边栏——侧边栏列的是"页面"，
+        // 而这是"关于我"的一块，放在账号旁边才是它该在的位置。
+        path: 'profile',
+        name: 'profile',
+        component: () => import('@/views/ProfileView.vue'),
+        meta: { title: '个人中心' },
+      },
     ],
   },
   {

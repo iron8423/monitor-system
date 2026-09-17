@@ -117,7 +117,10 @@ printf '\n%s验收目标：%s%s\n' "$C_DIM" "$BASE" "$C_OFF"
 #
 # **这个数组是显式的，不是 glob**：新增套件文件不写进来就是**静默永不执行**——
 # 汇总里少一个套件、少几十条断言，而输出看不出任何异常。
-SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh 08-simulator.sh 09-data-quality.sh 13-calibration.sh 10-scope.sh 11-concurrency.sh 12-ingest-concurrency.sh)
+# 14-password-change.sh **必须是最后一个**：它在一次性实例上会把 admin 的口令轮换掉
+# （原因见其文件头），排在它后面等于排在「admin 已换口令」之后——那些套件会全部登录不上，
+# 而报错只会显示「后端不可达或登录失败」，离真正的原因很远。
+SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh 08-simulator.sh 09-data-quality.sh 13-calibration.sh 10-scope.sh 11-concurrency.sh 12-ingest-concurrency.sh 14-password-change.sh)
 TOTAL_PASS=0; TOTAL_FAIL=0; FAILED_SUITES=()
 
 # 后端日志路径：--fresh 时是本脚本自己起的那个进程的输出，可以让套件去 grep 证据行；
@@ -125,9 +128,19 @@ TOTAL_PASS=0; TOTAL_FAIL=0; FAILED_SUITES=()
 BACKEND_LOG=""
 [ "$FRESH" = 1 ] && BACKEND_LOG="$LOG"
 
+# 改密套件（14）排在最末尾，且只在**一次性实例**上做真实轮换：
+# 新口令强制 ≥8 位，而演示口令是 6 位（123456），所以「轮换后改回去」在 API 上做不到。
+# `--fresh` 起的 H2 库随进程消失，轮换无害；对着 compose 那种持久库跑时**不要**打开它，
+# 否则 admin 的口令会被真的改掉，下一次谁都登不进来。详见 14-password-change.sh 文件头。
+# 注：赋值前缀必须是**字面量**（shell 在展开之前就解析 `VAR=value cmd`），
+# 所以这里用数组 + env 传，而不是拼一个 "ALLOW_PASSWORD_ROTATION=1" 字符串再展开——
+# 那样写出来的是「命令名 ALLOW_PASSWORD_ROTATION=1」，套件当然跑不起来。
+RUN_ENV=(env "BASE=$BASE" "BACKEND_LOG=$BACKEND_LOG")
+[ "$FRESH" = 1 ] && RUN_ENV+=("ALLOW_PASSWORD_ROTATION=1")
+
 for s in "${SUITES[@]}"; do
   printf '\n%s======== %s ========%s\n' "$C_DIM" "$s" "$C_OFF"
-  OUT=$(BASE="$BASE" BACKEND_LOG="$BACKEND_LOG" bash "$HERE/$s" 2>&1)
+  OUT=$("${RUN_ENV[@]}" bash "$HERE/$s" 2>&1)
   echo "$OUT" | grep -v '^#RESULT'
   RES=$(echo "$OUT" | grep '^#RESULT' | tail -1)
   p=$(echo "$RES" | sed -n 's/.*pass=\([0-9]*\).*/\1/p'); p=${p:-0}

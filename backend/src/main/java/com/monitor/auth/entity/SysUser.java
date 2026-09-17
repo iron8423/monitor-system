@@ -30,6 +30,21 @@ public class SysUser {
 
     private Long organizationId;
 
+    /** 个人资料（V17）：联系电话。空表示未登记，展示层给「—」而不是空串。 */
+    private String phone;
+
+    /** 个人资料（V17）：邮箱。 */
+    private String email;
+
+    /**
+     * 个人资料（V17）：岗位 / 职位。
+     *
+     * <p>与 {@code role} 是两件事：{@code role} 决定权限（ADMIN/OPERATOR/…），
+     * 岗位是给人看的组织称谓（如「监测室主任」）。一个 OPERATOR 可以是「值班长」，
+     * 也可以只是「值班员」——权限一样，岗位不同。</p>
+     */
+    private String jobTitle;
+
     private Boolean enabled;
 
     /**

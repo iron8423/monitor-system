@@ -73,14 +73,14 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
     ├── radar_csv_replay/       真雷达 CSV 回放适配器（改写为 BACKFILL 模式）
     ├── production_simulator/   生产规模造数（10 雷达 / 1000 目标）+ 数据集校验
     ├── mountain_asset/         离线山地 GLB 模型生成脚本
-    ├── acceptance/             后端验收套件（13 套件）
+    ├── acceptance/             后端验收套件（14 套件）
     ├── backup/                 备份 / 恢复 / 自测（含影像卷）
     └── operations/             PostgreSQL 备份恢复脚本（运维口径）
 ```
 
 | 层 | 选型 |
 |---|---|
-| 后端 | Spring Boot 3.5.16 · Java 21 · MyBatis-Plus 3.5.17 · Flyway（V1–V16）· JJWT · springdoc-openapi |
+| 后端 | Spring Boot 3.5.16 · Java 21 · MyBatis-Plus 3.5.17 · Flyway（V1–V17）· JJWT · springdoc-openapi |
 | 数据库 | PostgreSQL 16（部署）/ H2 2.3（本地与验收 `--fresh`） |
 | 前端 | Vue 3.5 · Vite 6 · Pinia · Element Plus · ECharts 6 · CesiumJS 1.145 |
 | 鉴权 | JWT（`Authorization: Bearer`）；例外两处：ingest 用 `X-Ingest-Key` 头，SSE 与影像内容用 `?token=` |
@@ -104,6 +104,7 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 - **项目数据范围隔离**：成员关系走显式 `project_member` 表，可见范围沿 `point → object → scene → project` 归集，设备经 `device_point` 反查；**ADMIN 不受限**。过滤做在列表/分页/详情三条路径上，不可见返回 403、不存在仍返回 404；空集合 fail-closed（`1 = 0`，否则 `in(空集)` 会退化成"不过滤 = 看到全部"）。SSE 推送同样按订阅者过滤——服务端没有"发给所有人"这个入口。
 - **审计与留痕**：关键写操作走 `@AuditAction`，`/audit` 页仅 ADMIN 可见（后端类级 `@PreAuthorize`，非管理员接口层就 403）。处置人、维护记录 `operator` 一律由后端取当前登录用户，客户端传什么都不作数。
 - **会话与失效**：JWT 带令牌版本号，**每次请求回库核对**账号仍在、`enabled` 仍为真、版本一致，所以停用/降权/改密**立即生效**，不必等 24h 过期。
+- **个人中心**（`/profile`，入口在右上角头像下拉）：展示姓名 / 账号 / 角色 / 公司（= 所属组织名）/ 岗位 / 联系电话 / 邮箱——**资料只读**（组织属性不该自证，改由管理员维护）；本人可**修改密码**：需验原密码，新密码 ≥ 8 位且不得与原密码相同，成功后返回新令牌（当前页继续用，其它端与改密前签发的令牌立即 401），并留一条审计痕。
 - **测项中立化**：有哪些测项只认 `GET /metrics` 档案，3D 着色、热力图、时间轴回放、测点列表统一按"主测项"表现，大屏顶栏可切换。**加一种测项 = 管理端加一行数据**，前端零改动。
 - **3D 大屏**：推送驱动（SSE，断流 15s / 正常 60s 兜底轮询），时间轴回放 + 地面热力图（每个测点一圈径向渐变，不做插值——7 个离散点插出来的面是算出来的、不是量出来的）。
 
@@ -120,9 +121,9 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 
 | 验证 | 命令 | 本轮实测 |
 |---|---|---|
-| 后端验收（13 套件） | `tools/acceptance/run-all.sh --fresh` | **480 条断言 / 0 失败** |
+| 后端验收（14 套件） | `tools/acceptance/run-all.sh --fresh` | **493 条断言 / 0 失败** |
 | 后端单测 | `cd backend && ./mvnw test` | **89 个测试 / 0 失败** |
-| 前端自检（store 与纯函数真跑） | `cd frontend && npm run selfcheck`（需后端在跑） | **67 条 / 0 失败** |
+| 前端自检（store 与纯函数真跑） | `cd frontend && npm run selfcheck`（需在后端运行时执行） | **73 条 / 0 失败** |
 | 前端 P0 脚本（模拟网络 + 源码绊线） | `cd frontend && node scripts/check-p0-stage1.mjs` | **35 项全通过** |
 | 前端构建 | `cd frontend && npm run build` | 通过（仅有 Cesium/ECharts 大 chunk 提示） |
 
@@ -133,6 +134,8 @@ tools/acceptance/run-all.sh           # 或跑在当前已启动的后端上（8
 ```
 
 注意两个前置：套件要**演示账号开着**、要**关掉严格契约**（`INGEST_STRICT_CONTRACT=false`），否则十二个精简报文套件会成片红——看起来像功能坏了，其实是套件跑在更严的模式下；`--fresh` 不受影响。另有 13 条**浏览器内人工验证**步骤（脚本层测不到的组件内竞态与 1000 点规模），见 [`docs/手动验证步骤_第14-16-17-18-19条_20260917.md`](docs/手动验证步骤_第14-16-17-18-19条_20260917.md)。
+
+`14-password-change.sh` 有个**顺序与计数**上的讲究：新密码强制 ≥8 位，而演示口令是 6 位（`123456`），所以「轮换之后改回去」在 API 上做不到——它排在套件数组**最末**，且只在 `--fresh`（H2 随进程消失）上做真实轮换；对着 compose 那种持久库跑时自动跳过，该套件显示 6 条（总数 486）。
 
 ## 运维与部署
 
@@ -145,7 +148,7 @@ tools/backup/selftest.sh                      # 实测一遍整条链（需要 c
 - **备份必须带媒体卷**：附件是卷里的文件，不在库里；只备库的话恢复后 `media` 行回来了、点开图却是碎的。
 - **恢复是破坏性操作**（先 `DROP SCHEMA public CASCADE` 再灌），默认要交互敲 `yes`，只有 `--yes` 才跳过；它会先停后端、恢复后等后端真的健康才收工。
 - 库名/用户/项目名一律从 `.env` 读（读不到才退回 compose 默认值）——写死的话，`.env` 一改就会去备份/清空**另一个库**。
-- **迁移**：Flyway V1–V16，容器启动时自动执行，升级不要删数据卷。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`（`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`）。
+- **迁移**：Flyway V1–V17，容器启动时自动执行，升级不要删数据卷。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`（`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`）。
 - 生产上线流程与验收步骤见 [`docs/交付说明_双雷达精细山体_V2_20260916.md`](docs/交付说明_双雷达精细山体_V2_20260916.md) 与 [`docs/3D数字孪生_生产候选部署与验收.md`](docs/3D数字孪生_生产候选部署与验收.md)。
 
 ## 已知限制与后续
