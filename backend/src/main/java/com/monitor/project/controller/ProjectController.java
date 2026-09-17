@@ -36,4 +36,18 @@ public class ProjectController extends BaseCrudController<Project> {
     protected boolean inScope(Project entity) {
         return dataScope.canSeeProject(entity.getId());
     }
+
+    /**
+     * 项目列表按 id 升序 —— **默认打开哪个项目**这件事依赖它。
+     *
+     * <p>前端 {@code stores/monitor.js} 用 {@code projects[0]} 当默认项目（大屏、工作台都读它）。
+     * 不加排序时顺序由执行计划决定：2026-09-17 实测同一份数据把「西江水泥采空区」
+     * （没配数字孪生场景）排在了「清远山地边坡」前面，于是 **3D 大屏默认落在没场景的项目上**，
+     * 屏幕上只剩「场景未配置 / 离线底色」——用户看到的就是「大屏打不开」。
+     * 排序写死之后，默认项目才是稳定的（清远山地边坡 = 种子里 id=1 的那个）。</p>
+     */
+    @Override
+    protected LambdaQueryWrapper<Project> ordered(LambdaQueryWrapper<Project> wrapper) {
+        return wrapper.orderByAsc(Project::getId);
+    }
 }

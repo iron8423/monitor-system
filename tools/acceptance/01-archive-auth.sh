@@ -120,4 +120,16 @@ check "非法时间写法仍 -> 400" "400" \
 
 recycle_device "$RT_ID" "临时设备 $RT_DEV"
 
+section "⑨ 项目列表顺序必须确定（3D 大屏的默认项目依赖它）"
+#
+# 为什么这条要进套件：`GET /projects` 原先没有 ORDER BY，返回顺序由执行计划决定。
+# 2026-09-17 实测到一次——同一份数据返回的是 id=2（西江水泥采空区，**没配数字孪生场景**）
+# 排在最前，而前端 `monitor.js` 拿 `projects[0]` 当默认项目，于是 3D 大屏默认打开一个
+# 没场景的项目，屏幕上只剩「场景未配置 / 离线底色」——看起来就是「大屏打不开」。
+# 与「取最新一行必须带 id 兜底」同类：顺序被当成结论用，就必须写死。
+check "项目列表首位是 id=1（清远山地边坡）" "1" \
+  "$(curl -s "$BASE/projects" -H "$AUTH" | python3 -c "import sys,json;print(json.load(sys.stdin)['data'][0]['id'])")"
+check "分页第一页与列表同序（不排序的分页会翻出重复行）" "1" \
+  "$(curl -s "$BASE/projects/page?pageNum=1&pageSize=1" -H "$AUTH" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['records'][0]['id'])")"
+
 summary

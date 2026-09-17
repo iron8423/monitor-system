@@ -113,6 +113,7 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 - **自持模型，不依赖在线服务**：仓库内自带精细低多边形山地 GLB（320m × 240m、38,400 三角面，含复合山脊/沟谷/滑坡体），默认不依赖 Cesium ion 或在线底图；设 `VITE_SCENE_MODE=globe` 可切回真实地形 + 卫星影像模式。
 - **双雷达标定**：北/南两台雷达分别覆盖 4/3 个可见目标，一条 `device_point` 关系带目标号、方位、俯仰、斜距、反射器高度、LOS、净空、标定状态与有效期；大屏可切换当前雷达并显示其三维视场、目标 LOS 与浮窗标定信息。
 - **标定失效闭环**：设备位姿或测点几何一变，旧标定自动转 `INVALID` 并留痕（成因码 `DEVICE_POSE_CHANGED` / `POINT_MOVED`），可重新标定回 `ACTIVE`。管理端已能改雷达位姿、绑定测点、激活/人工停用标定（含有效期）。
+- **按项目加载场景**：大屏读当前项目的数字孪生资产；项目没配场景时**明说**「未配置数字孪生场景，只显示离线底色」并给一键切到已配置场景的项目（默认项目由后端固定为 id 升序返回，不再随数据库执行计划漂移——此前实测过一次：默认落到没配场景的项目上，屏幕只剩底色，看起来就是"大屏打不开"）。
 - **生产数据集**：`generated/production-baseline-20260916/`（10 台雷达 / 1000 个目标 / 141,625 条消息 + 地面真值 + catalog.sql，约 6.7MB gz），标定参数由 V2 地形实际采样；校验：`python3 tools/production_simulator/validate_dataset.py generated/production-baseline-20260916`。
 
 ## 验证与验收
@@ -121,7 +122,7 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 
 | 验证 | 命令 | 本轮实测 |
 |---|---|---|
-| 后端验收（14 套件） | `tools/acceptance/run-all.sh --fresh` | **493 条断言 / 0 失败** |
+| 后端验收（14 套件） | `tools/acceptance/run-all.sh --fresh` | **495 条断言 / 0 失败** |
 | 后端单测 | `cd backend && ./mvnw test` | **89 个测试 / 0 失败** |
 | 前端自检（store 与纯函数真跑） | `cd frontend && npm run selfcheck`（需在后端运行时执行） | **73 条 / 0 失败** |
 | 前端 P0 脚本（模拟网络 + 源码绊线） | `cd frontend && node scripts/check-p0-stage1.mjs` | **35 项全通过** |

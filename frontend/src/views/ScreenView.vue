@@ -94,6 +94,41 @@ const sceneDescription = computed(() => {
 })
 
 /**
+ * 「当前项目没配数字孪生场景」时的备用项目（一键切过去就能看到三维场景）。
+ *
+ * 为什么需要它：`GET /projects` 的首位不一定是配了场景的那个项目。2026-09-17 实测到一次——
+ * 列表把「西江水泥采空区」（assetType=NONE）排在了「清远山地边坡」前面，大屏默认选中前者，
+ * 屏幕上只剩「场景未配置 / 离线底色」，用户看到的就是「3D 大屏打不开」。
+ * 后端列表现在有了确定排序（`BaseCrudController#ordered`），但**任何**项目都可能是没配的那个，
+ * 所以这里把话说清楚、并给一个能点的出口。
+ *
+ * 只探前 5 个候选：这是顺手给的入口，不是全库扫描；项目多的时候用户自己在项目下拉里选。
+ */
+const sceneAlternate = ref(null)
+
+/** 当前项目确实是「没配场景」，而不是「加载失败」或「还没开始加载」 */
+const noScene = computed(
+  () => LOCAL_SCENE_ENABLED && mountainState.value === 'skipped' && !!store.projectId,
+)
+
+async function findSceneAlternate(excludeId, generation) {
+  sceneAlternate.value = null
+  const candidates = (store.projects || []).filter((p) => p.id !== excludeId).slice(0, 5)
+  for (const p of candidates) {
+    try {
+      const cfg = await projectDigitalTwin(p.id)
+      if (generation !== sceneLoadGeneration) return // 期间又切了项目：这一轮的结果作废
+      if (cfg?.enabled && cfg?.assetUrl) {
+        sceneAlternate.value = { id: p.id, name: p.name }
+        return
+      }
+    } catch {
+      // 探测失败就当它没配场景：这只是给用户的顺手入口，不该因此弹错或打断大屏
+    }
+  }
+}
+
+/**
  * 没配 ion token 时给一条明确的提示。
  * 不说的话，界面上只有「无地形 / 兜底底图」两个灰字——第一次跑的人（或换台机器 clone
  * 下来的人）看到的是「3D 地图加载不出来」，却不知道该配什么。token 在 `.env.local`，
@@ -290,6 +325,7 @@ async function loadProjectScene(projectId) {
   sceneError.value = ''
   sceneConfig.value = null
   activeRadarId.value = null
+  sceneAlternate.value = null
   mountainScene?.destroy()
   mountainScene = null
   window.__digitalTwinScene = null
@@ -307,6 +343,8 @@ async function loadProjectScene(projectId) {
     if (!config?.enabled) {
       mountainState.value = 'skipped'
       if (store.pointsOfProject.length) flyToPoints(viewer, store.pointsOfProject)
+      // 顺手找一个配了场景的项目：这不是全库扫描，只是给「当前项目没配」的人一个能点的出口
+      findSceneAlternate(projectId, generation)
       return null
     }
     const scene = await createDigitalTwinScene(viewer, config)
@@ -585,6 +623,25 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
+    <!--
+      当前项目没配场景：大屏这时只剩底色，和「加载失败」长得像，但成因完全不同。
+      把区别说清楚，并给一个「切到已配置场景的项目」的按钮——不然用户只能自己猜。
+    -->
+    <section v-if="noScene" class="hud scene-warn" role="status">
+      <span class="warn-title">「{{ store.currentProject?.name || '当前项目' }}」未配置数字孪生场景</span>
+      <span class="warn-desc">
+        这不是加载失败——该项目还没有三维资产，所以只显示离线底色（测点与曲线照常可用）。
+      </span>
+      <button
+        v-if="sceneAlternate"
+        class="btn"
+        @click="store.setProject(sceneAlternate.id)"
+      >
+        切到「{{ sceneAlternate.name }}」
+      </button>
+      <span v-else class="warn-desc">可在上方「项目」里切换其它项目。</span>
+    </section>
+
     <!-- 刚推来的告警：一闪而过的横幅，看一眼就知道「哪个点在报」 -->
     <transition name="banner">
       <div
@@ -857,6 +914,31 @@ onBeforeUnmount(() => {
   border-width: 1px;
   border-style: solid;
   transform: translateX(-50%);
+}
+
+/* 「本项目未配场景」：贴在左上角，不抢中央的视觉，也不能被忽略 */
+.scene-warn {
+  top: 62px;
+  left: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  max-width: 520px;
+  padding: 10px 14px;
+  border-color: rgba(230, 162, 60, 0.5);
+}
+
+.scene-warn .warn-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f2c078;
+}
+
+.scene-warn .warn-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #9fb3cc;
 }
 
 .alarm-banner .lv {
