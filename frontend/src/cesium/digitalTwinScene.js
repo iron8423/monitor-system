@@ -102,7 +102,21 @@ function localToWorld(frame, point) {
 }
 
 /** 雷达姿态来自设备档案；缺少坐标的设备仍参与业务，但不会被错误画在 (0,0)。 */
-function addRadar(viewer, radar) {
+/**
+ * 每台雷达一个**固定色**，按声明顺序轮取。
+ *
+ * 为什么不能都用品红/青这种「状态色」：扇形面是重叠的（现场两台雷达的视场本就交叠），
+ * 全用同一个颜色时，屏幕上只是几片同色半透明面叠在一起——分不出哪片是谁的，
+ * 也就无法回答「这个测点归哪台雷达看」。状态（在线/离线）已经由雷达头与目标连线表达，
+ * 覆盖面这一层要让位给「归属」。
+ */
+const RADAR_COLORS = ['#4ea8ff', '#ffb454', '#5ce1a6', '#b98cff']
+
+export function radarColorOf(index) {
+  return RADAR_COLORS[Math.abs(index) % RADAR_COLORS.length]
+}
+
+function addRadar(viewer, radar, index = 0) {
   const frame = radarFrame(radar)
   if (!frame) return { entities: [], targetEntities: [] }
   const id = radar.deviceId ?? radar.code
@@ -138,6 +152,7 @@ function addRadar(viewer, radar) {
   })
 
   const statusColor = radar.status === 'ONLINE' ? '#35c9ff' : '#8a94a6'
+  const faceColor = radarColorOf(index)
   const headHeight = Math.max(1, finite(radar.antennaHeightM, 8.8))
   add('head', {
     position: localToWorld(frame, [0, 0, headHeight]),
@@ -196,37 +211,37 @@ function addRadar(viewer, radar) {
       ]))
     }
   }
-  add('sector', {
+  const sectorFace = add('sector', {
     polygon: {
       hierarchy: new Cesium.PolygonHierarchy(fan),
       perPositionHeight: true,
-      material: Cesium.Color.fromCssColorString(statusColor).withAlpha(0.10),
+      material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.12),
       outline: false,
     },
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
   })
-  add('sector-outline', {
+  const sectorOutline = add('sector-outline', {
     polyline: {
       positions: [start, ...arc, start],
       width: 1.4,
-      material: Cesium.Color.fromCssColorString(statusColor).withAlpha(0.65),
+      material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.65),
     },
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
   })
   // 上下边界共同表达垂直视场；中心扇面保留为方向提示，但不再冒充完整覆盖体。
-  add('frustum-upper-outline', {
+  const sectorUpper = add('frustum-upper-outline', {
     polyline: {
       positions: [start, ...upperArc, start],
       width: 1.0,
-      material: Cesium.Color.fromCssColorString(statusColor).withAlpha(0.34),
+      material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.34),
     },
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
   })
-  add('frustum-lower-outline', {
+  const sectorLower = add('frustum-lower-outline', {
     polyline: {
       positions: [start, ...lowerArc, start],
       width: 1.0,
-      material: Cesium.Color.fromCssColorString(statusColor).withAlpha(0.34),
+      material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.34),
     },
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
   })
@@ -259,7 +274,14 @@ function addRadar(viewer, radar) {
     })
     targetEntities.push(line)
   }
-  return { entities, targetEntities }
+  // sector* 一并返回：选中雷达时要能**只把那一台**的覆盖面提亮（见 setActiveRadar），
+  // 图层开关也要能整体隐藏（见 setSectorVisible）——只靠 `decorations` 拿不到这几片。
+  return {
+    entities,
+    targetEntities,
+    faceColor,
+    sector: { face: sectorFace, outline: sectorOutline, upper: sectorUpper, lower: sectorLower },
+  }
 }
 
 function cameraOf(config) {
@@ -279,11 +301,12 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
   const asset = await loadAsset(viewer, config, modelMatrix)
   const decorations = []
   const radarGroups = new Map()
-  for (const radar of config.radars || []) {
-    const group = addRadar(viewer, radar)
+  // 下标用于配色：RADAR_COLORS 按声明顺序分配，保证「同一台雷达每次打开都是同一个颜色」
+  ;(config.radars || []).forEach((radar, index) => {
+    const group = addRadar(viewer, radar, index)
     decorations.push(...group.entities)
     radarGroups.set(radar.deviceId ?? radar.code, group)
-  }
+  })
 
   // 局部场景保持固定可读光照，避免系统时间改变导致夜间全黑。
   viewer.scene.light = new Cesium.DirectionalLight({
@@ -320,8 +343,30 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
 
   function setActiveRadar(deviceId) {
     for (const [id, group] of radarGroups.entries()) {
-      const show = String(id) === String(deviceId)
-      for (const entity of group.targetEntities) entity.show = show
+      const active = String(id) === String(deviceId)
+      // 视线只显示选中那台的（场景大时上千条线会把画面糊住），覆盖面则两台都留
+      for (const entity of group.targetEntities) entity.show = active
+
+      // 覆盖面：选中的提亮、其余压暗。同色面叠在一起时，「谁在看哪片」只能靠这个区分。
+      const sector = group.sector
+      if (sector) {
+        const c = Cesium.Color.fromCssColorString(group.faceColor)
+        sector.face.polygon.material = c.withAlpha(active ? 0.26 : 0.08)
+        sector.outline.polyline.width = active ? 2.6 : 1.0
+        sector.outline.polyline.material = c.withAlpha(active ? 0.95 : 0.45)
+        sector.upper.polyline.width = active ? 1.6 : 0.8
+        sector.lower.polyline.width = active ? 1.6 : 0.8
+      }
+    }
+  }
+
+  /** 覆盖面整体显隐（大屏上的「雷达视场扇面」开关）。与 setActiveRadar 互不干扰。 */
+  function setSectorVisible(show) {
+    for (const group of radarGroups.values()) {
+      for (const key of ['face', 'outline', 'upper', 'lower']) {
+        const entity = group.sector?.[key]
+        if (entity) entity.show = !!show
+      }
     }
   }
 
@@ -340,6 +385,7 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
     asset,
     flyHome,
     setActiveRadar,
+    setSectorVisible,
     pickRadarId,
     destroy() {
       for (const entity of decorations) viewer.entities.remove(entity)

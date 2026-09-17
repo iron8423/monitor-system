@@ -152,6 +152,20 @@ export function createPointLayer(viewer, { labelDistance = 2000 } = {}) {
   function paint(handle, item) {
     const visual = resolvePointVisual(item)
     const color = Cesium.Color.fromCssColorString(visual.color)
+    /*
+     * 主测项不同 → 符号不同（2026-09-17 用户提出：累积形变与形变速率「看不出区别」）。
+     *
+     * 这两个测项语义完全不同：**累积形变是状态量**（一共变形了多少），
+     * **形变速率是趋势量**（还在不在变形）。此前两者都画成实心圆 + 实线立柱，
+     * 只有数字和单位不同——而毫米级的数字长得几乎一样。
+     *
+     * 编码：
+     *   · 累积形变 → 实心圆 + 实线立柱（现状）
+     *   · 形变速率 → 空心环 + 虚线立柱
+     * 单位也照旧跟在数值后面（`item.unit`），所以「空心环 + mm/d」是同一件事的两种提示。
+     * 判据用 metricCode 而不是单位：单位是档案里的字符串，改档不该改渲染规则。
+     */
+    const isRate = String(item.metricCode || '').includes('rate')
     // 数据过期（清单第 19 条）：**值照常显示**，只加一个后缀、把字调暗。
     // 只说「过期」不显示数，值班的人还是不知道最后量到的是多少——那正是他要的信息。
     // 判定不在这里做（`stale` 由 buildFrames 算好、经 displayPoints 传进来，
@@ -162,10 +176,14 @@ export function createPointLayer(viewer, { labelDistance = 2000 } = {}) {
       : '暂无数据'
     const dim = !item.hasData || stale
 
-    handle.dot.point.color = color
+    handle.dot.point.color = isRate ? Cesium.Color.TRANSPARENT : color
+    handle.dot.point.outlineColor = isRate ? color : Cesium.Color.WHITE.withAlpha(0.95)
+    handle.dot.point.outlineWidth = isRate ? 4 : 3
     handle.dot.label.text = `${item.code}  ${value}`
     handle.dot.label.fillColor = dim ? Cesium.Color.fromCssColorString('#b8c0cc') : Cesium.Color.WHITE
-    handle.mast.polyline.material = color.withAlpha(0.75)
+    handle.mast.polyline.material = isRate
+      ? new Cesium.PolylineDashMaterialProperty({ color: color.withAlpha(0.85), dashLength: 10 })
+      : color.withAlpha(0.75)
     // 两种情况亮环：① 该点有未解除警情（持续亮）；② 刚收到告警事件（闪几秒）
     const showRing = visual.key === 'alarm' || pulsing.has(item.id)
     if (showRing && !handle.ring) handle.ring = drawRing(item, handle.baseHeight)

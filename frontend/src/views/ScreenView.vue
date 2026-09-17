@@ -239,6 +239,11 @@ const dataStatus = computed(() => {
 
 /** 热力图开关（默认开：演示时「哪片区域形变大」最直观） */
 const heatOn = ref(true)
+/** 雷达视场扇面（每台雷达一个颜色，选中那台提亮）。与热力图一样属于「图层」，可单独关掉。 */
+const sectorOn = ref(true)
+
+/** 当前主测项是不是「速率」类——点符号用它区分（见 pointLayer.js 的说明） */
+const isRateMetric = computed(() => String(store.primaryMetricCode || '').includes('rate'))
 /** 回放滑块用 0~1000 的整数步长，避免浮点抖动 */
 const replayProgress = computed({
   get: () => frameProgress(replay.index, replay.total),
@@ -355,6 +360,9 @@ async function loadProjectScene(projectId) {
     mountainScene = scene
     sceneConfig.value = config
     if (config.radars?.length) selectRadar(config.radars[0].deviceId)
+    // 新场景要继承当前的图层开关状态：关掉「视场扇面」后切项目，
+    // 不该因为新建了场景就自己又亮回来
+    scene.setSectorVisible(sectorOn.value)
     mountainState.value = 'ok'
     pointLayer?.setLabelDistance(config.labelDistance)
     heatLayer?.setMaxPoints(config.maxHeatPoints)
@@ -509,6 +517,7 @@ watch(
 )
 
 watch(heatOn, (on) => heatLayer?.setVisible(on))
+watch(sectorOn, (on) => mountainScene?.setSectorVisible(on))
 
 watch(
   () => store.projectId,
@@ -702,7 +711,11 @@ onBeforeUnmount(() => {
       </div>
     </aside>
 
-    <!-- 左下角图例 -->
+    <!--
+      图例。位置必须**高于底部时间轴**——两者原来都锚在 bottom:16px，
+      时间轴（left/right 都是 16px 的整条）把图例整个盖住了：
+      连「地面热力图」那个开关都点不到（2026-09-17 用户报的就是这个遮挡）。
+    -->
     <div class="hud legend">
       <div class="panel-title">图例</div>
       <div v-for="item in LEGEND" :key="item.key" class="legend-row">
@@ -710,11 +723,21 @@ onBeforeUnmount(() => {
       </div>
       <span class="legend-note">立柱高度为示意，非实测量值</span>
       <span class="legend-note">场景：{{ sceneDescription }}</span>
-      <span class="legend-note">热力图按主测项：{{ store.primaryMetric.name }}</span>
-      <label class="heat-toggle">
-        <input v-model="heatOn" type="checkbox" />
-        地面热力图
-      </label>
+      <!-- 主测项不只换数字：符号与立柱也跟着换，这里必须写出来，否则用户不知道「为什么变成空心环」 -->
+      <span class="legend-note">
+        主测项：{{ store.primaryMetric.name }} ——
+        {{ isRateMetric ? '空心环 + 虚线立柱' : '实心圆 + 实线立柱' }}
+      </span>
+      <div class="layer-toggles">
+        <label class="heat-toggle">
+          <input v-model="heatOn" type="checkbox" />
+          地面热力图
+        </label>
+        <label class="heat-toggle">
+          <input v-model="sectorOn" type="checkbox" />
+          雷达视场扇面
+        </label>
+      </div>
     </div>
 
     <!-- 底部时间轴：回放历史 / 退回实时 -->
@@ -1194,13 +1217,29 @@ onBeforeUnmount(() => {
 }
 
 .legend {
-  bottom: 16px;
+  /* 必须高于底部时间轴（那条 left/right:16px 的整条，高约 52px） */
+  bottom: 84px;
   left: 50%;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100% - 32px);
   gap: 16px;
   align-items: center;
   padding: 8px 16px;
   transform: translateX(-50%);
+}
+
+/* 图例是竖排的，行间距收紧一点，别把大屏占掉半屏 */
+.legend .legend-row,
+.legend .legend-note {
+  margin: 0;
+}
+
+.layer-toggles {
+  display: flex;
+  gap: 16px;
+  align-items: center;
 }
 
 .legend .panel-title {
