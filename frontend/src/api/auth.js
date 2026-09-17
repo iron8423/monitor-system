@@ -21,6 +21,22 @@ export function fetchMe() {
 }
 
 /**
+ * POST /api/v1/auth/register → { token, user }
+ *
+ * 自助注册：个人信息由本人填写，注册成功直接返回令牌（注册即登录）。
+ * **不能注册成管理员**——后端只收 OPERATOR / ANALYST / MAINTAINER（见 RegisterRequest 的说明）。
+ */
+export function register(payload) {
+  // silent：重名、口令太短这些都是表单自己的事，页面自己提示
+  return http.post('/v1/auth/register', payload, { silent: true })
+}
+
+/** PUT /api/v1/auth/me → UserVO（本人改自己的资料：姓名/公司/岗位/电话/邮箱） */
+export function updateProfile(payload) {
+  return http.put('/v1/auth/me', payload, { silent: true })
+}
+
+/**
  * POST /api/v1/auth/password → { token, user }
  *
  * 成功后服务端会把该用户的令牌版本 +1（= 别处签发的令牌全部作废），

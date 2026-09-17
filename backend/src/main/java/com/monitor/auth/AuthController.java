@@ -4,6 +4,8 @@ import com.monitor.audit.annotation.AuditAction;
 import com.monitor.auth.dto.ChangePasswordRequest;
 import com.monitor.auth.dto.LoginRequest;
 import com.monitor.auth.dto.LoginResponse;
+import com.monitor.auth.dto.ProfileUpdateRequest;
+import com.monitor.auth.dto.RegisterRequest;
 import com.monitor.auth.dto.UserVO;
 import com.monitor.auth.security.SecurityUser;
 import com.monitor.common.Result;
@@ -12,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -46,6 +49,30 @@ public class AuthController {
     @GetMapping("/me")
     public Result<UserVO> me(@AuthenticationPrincipal SecurityUser currentUser) {
         return Result.ok(authService.me(currentUser));
+    }
+
+    /**
+     * 自助注册（免登录，见 SecurityConfig 的放行名单）。
+     *
+     * <p>成功后**直接返回令牌**（等价于注册即登录）：本人刚填完账号密码，
+     * 再让他去登录页重敲一遍没有信息量。</p>
+     */
+    @PostMapping("/register")
+    public Result<LoginResponse> register(@Valid @RequestBody RegisterRequest request) {
+        return Result.ok(authService.register(request));
+    }
+
+    /**
+     * 本人修改自己的资料（个人中心）。
+     *
+     * <p>与 {@code /auth/password} 一样**刻意不放进放行名单**：它是「我的资料」，
+     * 必须有有效会话。管理员那条改**权限**的路在 {@code /api/v1/users/{id}}（只改角色与启用），
+     * 两条路各管一半，都改不到对方的字段。</p>
+     */
+    @PutMapping("/me")
+    public Result<UserVO> updateProfile(@AuthenticationPrincipal SecurityUser currentUser,
+                                        @Valid @RequestBody ProfileUpdateRequest request) {
+        return Result.ok(authService.updateProfile(currentUser, request));
     }
 
     /**

@@ -143,6 +143,12 @@ async function handleSubmit() {
           >
             {{ loading ? '登录中…' : '登录' }}
           </el-button>
+
+          <!-- 自助注册入口：个人信息由本人填，注册成功直接进系统 -->
+          <div class="register-row">
+            <span class="mk-muted">还没有账号？</span>
+            <el-button link type="primary" @click="router.push('/register')">注册账号</el-button>
+          </div>
         </el-form>
 
         <el-divider><span class="divider-text">演示账号（密码 123456）</span></el-divider>
@@ -316,6 +322,16 @@ async function handleSubmit() {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+/* 注册入口：贴着登录按钮，别抢主按钮的视觉 */
+.register-row {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 13px;
 }
 
 .account {

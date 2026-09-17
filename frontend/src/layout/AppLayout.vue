@@ -17,15 +17,28 @@ const monitor = useMonitorStore()
 
 const collapsed = ref(false)
 
-// 菜单 = 阶段 2~5 的交付清单。已实现的能点，未实现的 disabled，避免点了白页。
+/*
+ * 菜单 = 阶段 2~5 的交付清单。已实现的能点，未实现的 disabled，避免点了白页。
+ *
+ * `roles` 决定这一项对哪些角色可见（不写 = 所有角色）。这张表是**界面引导**，
+ * 真正的边界在后端（`@PreAuthorize` + 每请求回库核对角色）——藏掉菜单不等于拦住接口，
+ * 两者是「别让人白点」与「不许他做」的分工。
+ *
+ * 差异化口径（2026-09-17 用户提出「不同角色登录后应该有不同功能」）：
+ *   · 工作台 / 测点与曲线 / 3D 大屏 / 告警中心 —— 四个角色都要看数据与警情，保留；
+ *   · 设备状态 —— 运维的本职，值班也要知道设备在不在线（研判不关心，管理员要看）；
+ *   · 影像挂点 —— 研判要看现场照片，运维要传，值班不需要；
+ *   · 管理端 / 审计日志 —— 仅管理员。
+ * 要调整只改这一张表；四个角色各自的落地页本来就是不同的页面（views/home/*）。
+ */
 const menus = [
   // 四个角色共用这一个入口，由 `/home` 按角色派发到各自的工作台
   { path: '/home', title: '工作台', icon: 'Odometer', ready: true },
   { path: '/points', title: '测点与曲线', icon: 'DataLine', ready: true },
-  { path: '/devices', title: '设备状态', icon: 'Cpu', ready: true },
+  { path: '/devices', title: '设备状态', icon: 'Cpu', ready: true, roles: ['ADMIN', 'MAINTAINER', 'OPERATOR'] },
   { path: '/screen', title: '3D 大屏', icon: 'Location', ready: true },
   { path: '/alarms', title: '告警中心', icon: 'Bell', ready: true },
-  { path: '/media', title: '影像挂点', icon: 'Picture', ready: true },
+  { path: '/media', title: '影像挂点', icon: 'Picture', ready: true, roles: ['ADMIN', 'MAINTAINER', 'ANALYST'] },
   { path: '/admin', title: '管理端', icon: 'Setting', ready: true, roles: ['ADMIN'] },
   { path: '/audit', title: '审计日志', icon: 'Document', ready: true, roles: ['ADMIN'] },
 ]

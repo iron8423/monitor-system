@@ -1,8 +1,11 @@
 package com.monitor.auth;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.monitor.auth.dto.LoginRequest;
 import com.monitor.auth.dto.LoginResponse;
 import com.monitor.auth.dto.ChangePasswordRequest;
+import com.monitor.auth.dto.ProfileUpdateRequest;
+import com.monitor.auth.dto.RegisterRequest;
 import com.monitor.auth.dto.UserVO;
 import com.monitor.auth.entity.SysUser;
 import com.monitor.auth.mapper.SysUserMapper;
@@ -133,5 +136,110 @@ public class AuthService {
         }
         Organization org = organizationMapper.selectById(user.getOrganizationId());
         return org == null ? null : org.getName();
+    }
+
+    /**
+     * 自助注册。
+     *
+     * <p>三条规则：</p>
+     * <ol>
+     *   <li><b>账号名全局唯一，但「已删除」的可以重新注册</b>：删除是逻辑删除，行还在库里，
+     *       而 {@code uk_sys_user_username} 覆盖所有行——不复用墓碑行，本人就没法再用同一个账号名
+     *       （见 {@link SysUserMapper#selectAnyByUsername} 的说明）。复用时会 {@code token_version + 1}，
+     *       把上一世的令牌一并作废。</li>
+     *   <li><b>不能自助注册成管理员</b>：{@code role} 只收 OPERATOR / ANALYST / MAINTAINER。
+     *       要管理员权限，得由既有管理员在用户管理里改角色——那是权限配置，不是个人信息。</li>
+     *   <li><b>公司名自动落成组织</b>：平台的可见范围按项目成员算，组织只是展示与归属，
+     *       所以注册时允许自由填写公司名，没有就建一个（见 {@link #organizationOf}）。</li>
+     * </ol>
+     */
+    public LoginResponse register(RegisterRequest request) {
+        String role = registerableRole(request.getRole());
+        SysUser existing = userMapper.selectAnyByUsername(request.getUsername());
+        if (existing != null && (existing.getDeleted() == null || existing.getDeleted() == 0)) {
+            throw new BizException(400, "账号已存在：" + request.getUsername());
+        }
+        Long organizationId = organizationOf(request.getCompany());
+
+        SysUser user = new SysUser();
+        user.setUsername(request.getUsername());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setDisplayName(request.getDisplayName());
+        user.setRole(role);
+        user.setOrganizationId(organizationId);
+        user.setPhone(trimToNull(request.getPhone()));
+        user.setEmail(trimToNull(request.getEmail()));
+        user.setJobTitle(trimToNull(request.getJobTitle()));
+        user.setEnabled(true);
+
+        if (existing != null) {
+            user.setId(existing.getId());
+            userMapper.revive(user);
+        } else {
+            userMapper.insert(user);
+        }
+        SysUser created = userMapper.selectById(user.getId());
+        String token = jwtUtil.generateToken(created.getId(), created.getUsername(), created.getRole(),
+                tokenVersionOf(created));
+        return new LoginResponse(token, toVO(created));
+    }
+
+    /** 本人改自己的资料（「个人中心」）。改不了角色与启用状态——那不是个人信息。 */
+    public UserVO updateProfile(SecurityUser currentUser, ProfileUpdateRequest request) {
+        if (currentUser == null || currentUser.getId() == null) {
+            throw new BizException(401, "未登录");
+        }
+        SysUser user = userMapper.selectById(currentUser.getId());
+        if (user == null) {
+            throw new BizException(404, "用户不存在");
+        }
+        // 只写这几个列：role / enabled / password / username 都不在这场更新里
+        user.setDisplayName(request.getDisplayName());
+        user.setOrganizationId(organizationOf(request.getCompany()));
+        user.setJobTitle(trimToNull(request.getJobTitle()));
+        user.setPhone(trimToNull(request.getPhone()));
+        user.setEmail(trimToNull(request.getEmail()));
+        userMapper.updateById(user);
+        return toVO(userMapper.selectById(user.getId()));
+    }
+
+    /**
+     * 公司名 → 组织 id：同名复用，没有就建一个。
+     *
+     * <p>为什么不直接让用户填 organizationId：注册的人不会知道库里那套 id，
+     * 也不该为了注册先去建组织。公司名是自由文本，平台负责把它落成一条组织记录。</p>
+     */
+    private Long organizationOf(String company) {
+        String name = trimToNull(company);
+        if (name == null) {
+            return null;
+        }
+        Organization existing = organizationMapper.selectOne(
+                new LambdaQueryWrapper<Organization>().eq(Organization::getName, name).last("LIMIT 1"));
+        if (existing != null) {
+            return existing.getId();
+        }
+        Organization org = new Organization();
+        org.setName(name);
+        organizationMapper.insert(org);
+        return org.getId();
+    }
+
+    /** 自助注册可选的角色：ADMIN 不在其中（理由见 {@link #register}） */
+    private String registerableRole(String role) {
+        String value;
+        try {
+            value = Role.valueOf(role.trim().toUpperCase()).name();
+        } catch (RuntimeException e) {
+            throw new BizException(400, "角色不合法: " + role);
+        }
+        if (Role.ADMIN.name().equals(value)) {
+            throw new BizException(400, "注册不能选择管理员角色");
+        }
+        return value;
+    }
+
+    private static String trimToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 }

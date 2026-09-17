@@ -5,6 +5,8 @@ import {
   fetchMe,
   login as loginApi,
   logout as logoutApi,
+  register as registerApi,
+  updateProfile as updateProfileApi,
 } from '@/api/auth'
 import { clearAuth, getToken, getUser, setToken, setUser } from '@/utils/token'
 
@@ -50,6 +52,24 @@ export const useUserStore = defineStore('user', {
       this.token = ''
       this.user = null
       clearAuth()
+    },
+
+    /** 自助注册（注册即登录）：成功后直接写入令牌，不必再走一次登录 */
+    async register(payload) {
+      const data = await registerApi(payload)
+      this.token = data.token
+      this.user = data.user
+      setToken(data.token)
+      setUser(data.user)
+      return data
+    },
+
+    /** 本人改自己的资料（姓名/公司/岗位/电话/邮箱）；角色与启用状态不在这条路上 */
+    async updateProfile(payload) {
+      const user = await updateProfileApi(payload)
+      this.user = user
+      setUser(user)
+      return user
     },
 
     /**

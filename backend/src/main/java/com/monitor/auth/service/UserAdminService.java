@@ -21,9 +21,17 @@ import java.util.Map;
 /**
  * 用户管理（管理员）。对应改进清单第 13 条：账号的创建、停用与资料维护。
  *
- * <p>与 {@code AuthService} 的分工：那里管「我是谁」（登录、登出、改自己的口令），
- * 这里管「别人是谁」（列表、建号、改资料、停用）。两者都要用 {@link SysUserMapper}
- * 与口令编码器，但只有这里需要「管理员」这个前提。</p>
+ * <p>与 {@code AuthService} 的分工（2026-09-17 按用户口径重划过一次）：</p>
+ * <ul>
+ *   <li><b>本人</b>管自己的：注册时填个人信息、之后在个人中心自改资料、自助改口令
+ *       （{@code AuthService#register / #updateProfile / #changePassword}）。</li>
+ *   <li><b>管理员</b>管权限与存续：看到全部账号、改**角色与启用**、删除账号
+ *       （就是本类）。</li>
+ * </ul>
+ *
+ * <p>也就是说：<b>管理员改不到别人的姓名/岗位/电话/邮箱/公司</b>（那些是个人信息，
+ * 由本人负责），<b>本人也改不到自己的角色与启用状态</b>（那是权限，由管理员负责）。
+ * 两边各管一半，接口上也各走一条路（{@code PUT /auth/me} 与 {@code PUT /users/{id}}）。</p>
  *
  * <h3>两条不变量（写在 {@link #update} / {@link #remove} 里）</h3>
  * <ol>
@@ -63,28 +71,13 @@ public class UserAdminService {
         return toVO(user, organizationNames());
     }
 
-    public UserAdminVO create(UserCreateRequest request) {
-        String role = validRole(request.getRole());
-        Long exists = userMapper.selectCount(
-                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, request.getUsername()));
-        if (exists != null && exists > 0) {
-            // 400 而不是 409：管理端要的是一句能直接显示给操作者的话，不是 HTTP 语义课
-            throw new BizException(400, "账号已存在：" + request.getUsername());
-        }
-        SysUser user = new SysUser();
-        user.setUsername(request.getUsername());
-        user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setDisplayName(request.getDisplayName());
-        user.setRole(role);
-        user.setOrganizationId(request.getOrganizationId());
-        user.setPhone(blankToNull(request.getPhone()));
-        user.setEmail(blankToNull(request.getEmail()));
-        user.setJobTitle(blankToNull(request.getJobTitle()));
-        user.setEnabled(request.getEnabled() == null || request.getEnabled());
-        userMapper.insert(user);
-        return toVO(userMapper.selectById(user.getId()), organizationNames());
-    }
-
+    /**
+     * 管理员改**权限**：角色与启用状态。
+     *
+     * <p>个人信息（姓名/岗位/电话/邮箱/公司）不在这条路上——那是本人自己填、自己改的，
+     * 见 {@code AuthService#updateProfile}。这条口径是用户 2026-09-17 明确定的：
+     * 「管理员也不能修改注册用户的个人信息」。</p>
+     */
     public UserAdminVO update(Long id, UserUpdateRequest request, Long currentUserId) {
         SysUser user = require(id);
         String role = validRole(request.getRole());
@@ -97,14 +90,9 @@ public class UserAdminService {
         if (self && !role.equals(user.getRole())) {
             throw new BizException(400, "不能修改自己的角色");
         }
-        user.setDisplayName(request.getDisplayName());
         user.setRole(role);
-        user.setOrganizationId(request.getOrganizationId());
-        user.setPhone(blankToNull(request.getPhone()));
-        user.setEmail(blankToNull(request.getEmail()));
-        user.setJobTitle(blankToNull(request.getJobTitle()));
         user.setEnabled(enabled);
-        // 只更新这些列：password / token_version / username 不在这场「改资料」里
+        // 只更新这两列：姓名/岗位/电话/邮箱/公司归本人，password / token_version 也都不在这里
         userMapper.updateById(user);
         return toVO(userMapper.selectById(id), organizationNames());
     }
@@ -159,8 +147,4 @@ public class UserAdminService {
         return map;
     }
 
-    /** 空串一律存 null：界面清空某个可选字段时送的是 ''，而 '' 与「没填」在展示与校验上不是一回事 */
-    private static String blankToNull(String s) {
-        return s == null || s.isBlank() ? null : s.trim();
-    }
 }

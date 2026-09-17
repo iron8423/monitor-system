@@ -2,7 +2,6 @@ package com.monitor.auth.web;
 
 import com.monitor.audit.annotation.AuditAction;
 import com.monitor.auth.dto.UserAdminVO;
-import com.monitor.auth.dto.UserCreateRequest;
 import com.monitor.auth.dto.UserUpdateRequest;
 import com.monitor.auth.security.SecurityUser;
 import com.monitor.auth.service.UserAdminService;
@@ -51,14 +50,12 @@ public class UserController {
         return Result.ok(userAdminService.get(id));
     }
 
-    @PostMapping
-    @AuditAction(action = "新建用户")
-    public Result<UserAdminVO> create(@Valid @RequestBody UserCreateRequest request) {
-        return Result.ok(userAdminService.create(request));
-    }
-
     /**
-     * 改资料 / 改角色 / 停用启用。**不含口令**（口令有自己的入口）。
+     * 改**权限**：角色 / 停用启用。
+     *
+     * <p>没有「建号」也没有「改资料」：账号由本人自助注册（{@code POST /auth/register}），
+     * 姓名/岗位/电话/邮箱/公司由本人在个人中心自改（{@code PUT /auth/me}）。
+     * 管理员这边只管权限与存续——这条口径是用户 2026-09-17 明确定的。</p>
      *
      * <p>{@code targetIdFromStringArg} 不需要：路径变量就是 Long 主键，审计切面自己取得。
      * 当前登录用户由后端从会话里取（不信任请求体），用来挡住「停用自己 / 改自己的角色」。</p>

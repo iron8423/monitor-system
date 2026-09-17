@@ -47,6 +47,14 @@ const routes = [
     meta: { public: true, title: '登录' },
   },
   {
+    // 自助注册：与登录同为 public（还没有会话就要能访问）。
+    // 注册成功直接进系统，所以这里不套 AppLayout 之外的任何守卫逻辑。
+    path: '/register',
+    name: 'register',
+    component: () => import('@/views/RegisterView.vue'),
+    meta: { public: true, title: '注册' },
+  },
+  {
     // 3D 大屏（阶段 3）：独立于工作台布局，占满整屏、自带 HUD，不套侧边菜单
     path: '/screen',
     name: 'screen',
@@ -90,7 +98,9 @@ const routes = [
         path: 'devices',
         name: 'devices',
         component: () => import('@/views/DeviceView.vue'),
-        meta: { title: '设备状态', icon: 'Cpu' },
+        // roles 与侧边栏菜单表（AppLayout 的 menus）保持一致：菜单藏了、路由也要挡，
+        // 否则「直接输地址」和「点菜单」会给出两种结果
+        meta: { title: '设备状态', icon: 'Cpu', roles: ['ADMIN', 'MAINTAINER', 'OPERATOR'] },
       },
       {
         path: 'alarms',
@@ -102,7 +112,7 @@ const routes = [
         path: 'media',
         name: 'media',
         component: () => import('@/views/MediaView.vue'),
-        meta: { title: '影像挂点', icon: 'Picture' },
+        meta: { title: '影像挂点', icon: 'Picture', roles: ['ADMIN', 'MAINTAINER', 'ANALYST'] },
       },
       {
         path: 'admin',

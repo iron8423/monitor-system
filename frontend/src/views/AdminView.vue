@@ -59,23 +59,21 @@ const TABS = [
     ],
   },
   {
-    // 用户管理（清单第 13 条）。列表与编辑都走同一套通用 CRUD，只有三处是别的资源没有的：
-    //   · 账号与初始密码**只在新建时出现**（createOnly）——账号是身份标识，建好不该改；
-    //   · `columns` 显式声明（其余资源是「后端有什么就显示什么」，用户表有 12 个字段，
-    //     自动取前 8 个会把电话/邮箱挤掉，而这两列恰恰是这个页面最常看的）；
-    //   · 口令是密码输入框（type: 'password'）。
+    /*
+     * 用户管理（清单第 13 条）。按用户 2026-09-17 的口径，管理员在这一页**只做三件事**：
+     * 看全部账号、改**角色与启用**、删账号。
+     *
+     * 所以：
+     *   · 没有「新建」——账号由本人自助注册（/register），信息也由本人填；
+     *   · 编辑弹窗里**没有**姓名/公司/岗位/电话/邮箱——那是个人信息，本人自己在个人中心改；
+     *   · `columns` 显式声明：用户表字段多，自动取前 8 个会把电话/邮箱挤掉。
+     */
     key: 'users',
     label: '用户',
     path: '/v1/users',
+    noCreate: true,
     fields: [
-      { key: 'username', label: '账号', required: true, createOnly: true, hint: '登录名；建好后不可修改' },
-      { key: 'password', label: '初始密码', type: 'password', required: true, createOnly: true, hint: '至少 8 位；交给本人后请其到「个人中心」自行修改' },
-      { key: 'displayName', label: '姓名', required: true },
       { key: 'role', label: '角色', type: 'select', options: ['ADMIN', 'OPERATOR', 'ANALYST', 'MAINTAINER'], required: true },
-      { key: 'organizationId', label: '公司（组织）', type: 'ref', ref: 'organizations' },
-      { key: 'jobTitle', label: '岗位' },
-      { key: 'phone', label: '联系电话' },
-      { key: 'email', label: '邮箱' },
       { key: 'enabled', label: '启用', type: 'switch', default: true, hint: '停用后对方手里的令牌下一个请求即失效（不必等过期）' },
     ],
     columns: [
@@ -431,9 +429,15 @@ async function submit() {
 async function remove(row) {
   const tab = currentTab.value
   const name = row.name || row.code || `#${row.id}`
+  // 用户是唯一「删了会改变别人的使用」的资源，确认文案要把它说透：
+  // 删除后该账号立刻登不上，本人需要用同一个账号名重新注册（后端会复用那行墓碑记录）。
+  const message = tab.key === 'users'
+    ? `确认删除账号「${row.username || name}」？删除后该账号立即失效、无法登录；`
+      + '本人如需继续使用，得用同一个账号名重新注册（注册时重新填写个人信息）。'
+    : `确认删除「${name}」？删除是逻辑删除（deleted=1），数据仍在库里可追溯。`
   try {
     await ElMessageBox.confirm(
-      `确认删除「${name}」？删除是逻辑删除（deleted=1），数据仍在库里可追溯。`,
+      message,
       '删除确认',
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     )
@@ -460,7 +464,14 @@ onMounted(reload)
         写操作需 ADMIN 角色；新建后业务端无需改代码即可见
       </span>
       <span class="mk-spacer" />
-      <el-button size="small" type="primary" :disabled="!!error" @click="openCreate">新建</el-button>
+      <!-- 用户页没有「新建」：账号由本人自助注册（登录页 → 注册账号） -->
+      <el-button
+        v-if="!currentTab.noCreate"
+        size="small"
+        type="primary"
+        :disabled="!!error"
+        @click="openCreate"
+      >新建</el-button>
       <el-button size="small" link type="primary" @click="reload">刷新</el-button>
     </div>
 
@@ -481,17 +492,7 @@ onMounted(reload)
       <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">
           <el-button size="small" link type="primary" @click="openEdit(row)">编辑</el-button>
-          <!--
-            用户不提供「删除」：账号一般用「停用」（enabled=false）就够了，
-            删除留给建错的号——那是少数情况，用接口处理即可，不必在界面上放手一滑就删人的按钮。
-          -->
-          <el-button
-            v-if="currentTab.key !== 'users'"
-            size="small"
-            link
-            type="danger"
-            @click="remove(row)"
-          >删除</el-button>
+          <el-button size="small" link type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
       <template #empty>
