@@ -168,17 +168,42 @@ public class AlarmService {
             throw new BizException("警情已处于终态 " + a.getStatus() + "，不能再处置");
         }
 
+        // 写入走 CAS（前置条件 = 刚才读到的那一版状态），而不是 updateById：
+        // 上面这次「读」和下面这次「写」之间没有任何互斥，两个处置人（或一个处置人 + 引擎自动解除）
+        // 可以读到同一个 PENDING。后者若直接覆盖，前者的处置会被静默抹掉——
+        // 时间线里两条处置记录都在，最终状态却只反映其中一条。
+        // 用 status 自身当版本号：警情的每次流转都会改 status，本仓也没有 @Version 列。
+        LocalDateTime now = LocalDateTime.now();
+        boolean terminal = AlarmConstants.isClosed(target);
+        int rows = terminal
+                // 终态：置状态 + **释放未解除唯一键**。解除时间只对 RESOLVED 写，
+                // FALSE_ALARM 保持既有口径（改造前就是这样，验收断言依赖它）。
+                ? alarmMapper.closeAlarm(id, a.getStatus(), target, now,
+                        AlarmConstants.RESOLVED.equals(target) ? now : null)
+                : alarmMapper.transitionAlarm(id, a.getStatus(), target, now);
+        if (rows == 0) {
+            Alarm latest = alarmMapper.selectById(id);
+            // 409 而不是 400：请求本身没问题，是资源状态在本次请求期间被改了。
+            // 已处于终态那条路仍走 400（isClosed 检查在上面），两者语义不同，不要合并。
+            throw new BizException(409, "警情已被并发处置为 "
+                    + (latest == null ? "(已不存在)" : latest.getStatus())
+                    + "，本次「" + action + "」未生效，请刷新后重试");
+        }
         a.setStatus(target);
         if (AlarmConstants.RESOLVED.equals(target)) {
-            a.setResolvedAt(LocalDateTime.now());
+            a.setResolvedAt(now);
         }
-        alarmMapper.updateById(a);
+        if (terminal) {
+            a.setOpenKey(null);
+        }
 
         AlarmAction act = new AlarmAction();
         act.setAlarmId(a.getId());
         act.setActionType(action);
-        act.setOperator(notBlank(req.getOperator()) ? req.getOperator()
-                : (notBlank(currentUser) ? currentUser : AlarmConstants.SYSTEM));
+        // 处置人只认登录身份，请求体不再有发言权（AlarmActionRequest 已删掉该字段）。
+        // SYSTEM 只用于没有登录用户的内部调用；处置留痕是谁做的就写谁。
+        // 与 MaintenanceRecordController 的 record.setOperator(currentUser.getUsername()) 同一口径。
+        act.setOperator(notBlank(currentUser) ? currentUser : AlarmConstants.SYSTEM);
         act.setNote(req.getComment());
         actionMapper.insert(act);
 

@@ -1,0 +1,343 @@
+[
+  {
+    "name": "missing-message-id",
+    "message": {
+      "schemaVersion": "1.0",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED"
+  },
+  {
+    "name": "missing-device",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-missing-device",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED"
+  },
+  {
+    "name": "unknown-device",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-unknown-device",
+      "deviceId": "not-registered",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED"
+  },
+  {
+    "name": "missing-point",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-missing-point",
+      "deviceId": "sim-radar-01",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED"
+  },
+  {
+    "name": "unknown-point",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-unknown-point",
+      "deviceId": "sim-radar-01",
+      "pointCode": "NOT-REGISTERED",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED"
+  },
+  {
+    "name": "missing-collect-time",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-missing-collect-time",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED"
+  },
+  {
+    "name": "invalid-collect-time",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-invalid-collect-time",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "yesterday",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED"
+  },
+  {
+    "name": "empty-metrics",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-empty-metrics",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {},
+      "quality": "VALID"
+    },
+    "expected": "REJECTED"
+  },
+  {
+    "name": "missing-schema",
+    "message": {
+      "messageId": "negative-missing-schema",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED:UNSUPPORTED_SCHEMA_VERSION"
+  },
+  {
+    "name": "unsupported-schema",
+    "message": {
+      "schemaVersion": "9.9",
+      "messageId": "negative-unsupported-schema",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED:UNSUPPORTED_SCHEMA_VERSION"
+  },
+  {
+    "name": "missing-sequence",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-missing-sequence",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED:INVALID_SEQUENCE"
+  },
+  {
+    "name": "negative-sequence",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-negative-sequence",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": -1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED:INVALID_SEQUENCE"
+  },
+  {
+    "name": "invalid-receive-time",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-invalid-receive-time",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID",
+      "receiveTime": "tomorrow"
+    },
+    "expected": "REJECTED:INVALID_RECEIVE_TIME"
+  },
+  {
+    "name": "unknown-metric",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-unknown-metric",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "unknown_metric": 1.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED:UNKNOWN_METRIC"
+  },
+  {
+    "name": "unknown-quality",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-unknown-quality",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "MAYBE"
+    },
+    "expected": "REJECTED:UNKNOWN_QUALITY"
+  },
+  {
+    "name": "invalid-signal",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-invalid-signal",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID",
+      "signal": 1.5
+    },
+    "expected": "REJECTED:INVALID_SIGNAL"
+  },
+  {
+    "name": "unknown-state",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-unknown-state",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID",
+      "state": "lost-ish"
+    },
+    "expected": "REJECTED:UNKNOWN_STATE"
+  },
+  {
+    "name": "invalid-position",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-invalid-position",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID",
+      "position": {
+        "angleDeg": "east",
+        "distanceM": -2
+      }
+    },
+    "expected": "REJECTED:INVALID_POSITION"
+  },
+  {
+    "name": "position-calibration-mismatch",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-position-calibration-mismatch",
+      "deviceId": "sim-radar-01",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID",
+      "position": {
+        "angleDeg": 179.0,
+        "distanceM": 999.0
+      }
+    },
+    "expected": "REJECTED:POSITION_CALIBRATION_MISMATCH"
+  },
+  {
+    "name": "unbound-device-point",
+    "message": {
+      "schemaVersion": "1.0",
+      "messageId": "negative-unbound-device-point",
+      "deviceId": "sim-radar-02",
+      "pointCode": "SIM-D01-P001",
+      "collectTime": "2026-09-16T09:36:38.000+08:00",
+      "sequence": 1,
+      "metrics": {
+        "defo_mm": 0.1,
+        "rate_mm_d": 0.0
+      },
+      "quality": "VALID"
+    },
+    "expected": "REJECTED:DEVICE_POINT_NOT_BOUND"
+  }
+]

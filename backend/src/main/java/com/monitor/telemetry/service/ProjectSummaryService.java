@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -173,10 +174,13 @@ public class ProjectSummaryService {
      * 本方法此前正是漏了 id 兜底的那一处。</p>
      */
     private Double maxDeformation(List<Long> pointIds) {
+        // 上界取 now()：未来采集时间的行不能成为「当前值」（清单第 10 条）。
+        // 这里是项目概览 KPI，被钉住的后果是一个永远不变的最大形变数字。
+        LocalDateTime ceiling = LocalDateTime.now();
         Double max = null;
         for (Long pointId : pointIds) {
             Measurement last = measurementMapper.selectOne(
-                    measurementMapper.latestRowOf(pointId, DEFO_METRIC).last("LIMIT 1"));
+                    measurementMapper.latestRowOf(pointId, DEFO_METRIC, ceiling).last("LIMIT 1"));
             if (last == null || last.getMeasureValue() == null) {
                 continue;
             }

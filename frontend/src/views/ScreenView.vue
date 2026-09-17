@@ -5,19 +5,22 @@ import { useRouter } from 'vue-router'
 import {
   Cesium,
   ION_CONFIGURED,
+  LOCAL_SCENE_ENABLED,
   createViewer,
   flyToPoint,
   flyToPoints,
   setupImagery,
   setupTerrain,
 } from '@/cesium/createViewer'
+import { createDigitalTwinScene } from '@/cesium/digitalTwinScene'
 import { createPointLayer } from '@/cesium/pointLayer'
 import { createHeatmapLayer } from '@/cesium/heatmapLayer'
+import { projectDigitalTwin } from '@/api/monitor'
 import MediaGallery from '@/components/MediaGallery.vue'
 import { ALARM_LEVEL, resolvePointVisual } from '@/constants/status'
 import { useMonitorStore } from '@/stores/monitor'
 import { useRealtimeStore } from '@/stores/realtime'
-import { useReplayStore } from '@/stores/replay'
+import { GRANULARITY_TEXT, REPLAY_RANGES, useReplayStore } from '@/stores/replay'
 import { formatNumber, formatSigned, formatTime, fromNow } from '@/utils/format'
 import { frameProgress, indexFromProgress } from '@/utils/timeline'
 
@@ -27,22 +30,39 @@ const router = useRouter()
 const store = useMonitorStore()
 const realtime = useRealtimeStore()
 const replay = useReplayStore()
-const userStore = useUserStore()
-
 const container = ref(null)
 let viewer = null
 let pointLayer = null
 let heatLayer = null
+let mountainScene = null
 let clickHandler = null
 let removePostRender = null
 let pollTimer = null
 let bannerTimer = null
+let sceneLoadGeneration = 0
+let disposed = false
+let removeRenderError = null
+const viewerError = ref('')
+
+function reportViewerError(error) {
+  if (disposed) return
+  viewerError.value = error?.message || '请检查浏览器 WebGL 支持、硬件加速及页面资源是否加载完整。'
+  console.error('[cesium] 三维视图运行失败：', error)
+}
+
+function reloadViewer() {
+  window.location.reload()
+}
 
 /** 刚收到的告警横幅（12s 后自己消失） */
 const alarmBanner = ref(null)
 
 const terrainState = ref('loading') // loading | ok | failed | skipped
 const imageryState = ref('loading') // loading | ion | fallback | failed
+const mountainState = ref(LOCAL_SCENE_ENABLED ? 'loading' : 'skipped')
+const sceneConfig = ref(null)
+const sceneError = ref('')
+const activeRadarId = ref(null)
 
 /** 跟随测点的浮窗 */
 const popup = reactive({ visible: false, pointId: null, x: 0, y: 0 })
@@ -56,9 +76,22 @@ const TERRAIN_TEXT = {
 const IMAGERY_TEXT = {
   loading: '影像加载中',
   ion: '卫星影像',
+  offline: '离线底色',
   fallback: '兜底底图',
   failed: '无底图',
 }
+const MOUNTAIN_TEXT = {
+  loading: '场景加载中',
+  ok: '数字孪生已加载',
+  failed: '数字孪生加载失败',
+  skipped: '场景未配置',
+}
+
+const sceneDescription = computed(() => {
+  if (!sceneConfig.value) return '当前项目未配置数字孪生资产'
+  const version = sceneConfig.value.assetVersion || '未标版本'
+  return `${sceneConfig.value.assetType} · ${version}`
+})
 
 /**
  * 没配 ion token 时给一条明确的提示。
@@ -72,6 +105,8 @@ const TOKEN_HINT =
   + '并 docker compose build frontend（VITE_* 是构建期注入，restart 不生效）。'
 
 const points = computed(() => store.enrichedPoints)
+const pointSearch = ref('')
+const SIDE_LIST_LIMIT = 300
 
 /**
  * 屏幕上真正显示的那份数据：实时快照，或回放帧。
@@ -89,12 +124,46 @@ const displayPoints = computed(() => {
       value: v ?? null,
       metrics: { ...p.metrics, [p.metricCode]: v ?? null },
       hasData: v !== null && v !== undefined,
-      collectTime: replay.time || p.collectTime,
+      // 数据过期（清单第 19 条）：判定已经在 `buildFrames` 里做完，这里只搬运。
+      // 不搬的话，`resolvePointVisual` 会把这个陈旧值当成当前值去比阈值
+      stale: replay.isStale(p.id),
+      // 采集时间取**这个值自己的采样时刻**，不是帧时刻。前值保持时两者差着几分钟到几小时
+      // （原来写的是 `replay.time`），等于把「3 小时前的读数」伪装成「这一时刻的读数」。
+      // `sampleMs` 是毫秒数，`formatTime` 走 `parseTime` → `new Date(ms)`，吃这个格式
+      collectTime: replay.sampleMsOf(p.id) ?? p.collectTime,
     }
   })
 })
 
+/** 侧栏做轻量窗口化：3D 仍绘制全部点，DOM 最多保留 300 行，并可按编码/名称定位。 */
+const sidePoints = computed(() => {
+  const keyword = pointSearch.value.trim().toLowerCase()
+  const filtered = keyword
+    ? displayPoints.value.filter((p) => `${p.code || ''} ${p.name || ''}`.toLowerCase().includes(keyword))
+    : displayPoints.value
+  return filtered.slice(0, SIDE_LIST_LIMIT)
+})
+
 const selected = computed(() => displayPoints.value.find((p) => p.id === popup.pointId) || null)
+const radars = computed(() => sceneConfig.value?.radars || [])
+const activeRadar = computed(() =>
+  radars.value.find((r) => String(r.deviceId) === String(activeRadarId.value)) || null,
+)
+
+function radarSourcesOf(pointId) {
+  return radars.value.flatMap((radar) =>
+    (radar.targets || [])
+      .filter((target) => String(target.pointId) === String(pointId))
+      .map((target) => ({ radar, target })),
+  )
+}
+
+const selectedRadarSources = computed(() => radarSourcesOf(popup.pointId))
+
+function selectRadar(deviceId) {
+  activeRadarId.value = deviceId
+  mountainScene?.setActiveRadar(deviceId)
+}
 
 /**
  * 弹窗里的测项行：**按测项档案列**，不再写死「累计形变 / 形变速率」两行。
@@ -142,21 +211,32 @@ const replayProgress = computed({
 })
 const replayFrameInfo = computed(() => {
   if (!replay.enabled) return ''
-  return `${replay.currentHasData} 个测点有数据`
+  // 只能数**没过期**的点（第 19 条）：把陈旧值算进「有数据」，设备全断了屏幕上还写着
+  // 「7 个测点有数据」——那正是本条要消掉的虚高。过期的单独说，不然读者不知道人去哪了
+  const base = `${replay.currentFreshCount} 个测点有数据`
+  return replay.currentStaleCount ? `${base}（${replay.currentStaleCount} 个已过期）` : base
 })
+
+/** 当前这批帧的粒度，给用户一个「为什么 7 天才这么几个点」的答案 */
+const replayGranularityText = computed(
+  () => `按${GRANULARITY_TEXT[replay.granularity] || replay.granularity}聚合`,
+)
 
 const LEGEND = [
   { key: 'normal', label: '正常', color: '#35b37e' },
-  { key: 'over-threshold', label: '超限（≥3mm）', color: '#e6a23c' },
+  { key: 'over-threshold', label: '达到配置阈值', color: '#e6a23c' },
   { key: 'alarm', label: '告警中', color: '#f56c6c' },
   { key: 'suspect', label: '数据可疑', color: '#e6a23c' },
   { key: 'disappeared', label: '目标失联', color: '#8a94a6' },
+  { key: 'stale', label: '数据过期（值为最后一次读数）', color: '#a3acbb' },
   { key: 'no-data', label: '暂无数据', color: '#c0c4cc' },
 ]
 
 function openPopup(pointId) {
   popup.pointId = pointId
   popup.visible = true
+  const source = radarSourcesOf(pointId)[0]
+  if (source) selectRadar(source.radar.deviceId)
 }
 
 function closePopup() {
@@ -170,7 +250,8 @@ function focusPoint(point) {
 }
 
 function resetView() {
-  if (viewer) flyToPoints(viewer, store.points)
+  if (mountainScene) mountainScene.flyHome()
+  else if (viewer) flyToPoints(viewer, store.points)
 }
 
 /** 每帧把浮窗贴到测点的屏幕位置上；点转到背面或出屏就藏起来 */
@@ -195,8 +276,61 @@ async function loadData() {
   } else {
     await store.refreshLatest()
   }
-  if (viewer && store.points.length) {
+  if (viewer && store.points.length && !LOCAL_SCENE_ENABLED) {
     flyToPoints(viewer, store.points, { duration: 1.8 })
+  }
+}
+
+/**
+ * 按当前项目加载自己的数字孪生资产。generation 用于解决快速切换项目时的异步竞态：
+ * 后发请求获胜，迟到的旧场景立即销毁，绝不覆盖新项目。
+ */
+async function loadProjectScene(projectId) {
+  const generation = ++sceneLoadGeneration
+  sceneError.value = ''
+  sceneConfig.value = null
+  activeRadarId.value = null
+  mountainScene?.destroy()
+  mountainScene = null
+  window.__digitalTwinScene = null
+
+  if (!LOCAL_SCENE_ENABLED || !projectId || !viewer) {
+    mountainState.value = 'skipped'
+    if (viewer && store.pointsOfProject.length) flyToPoints(viewer, store.pointsOfProject)
+    return null
+  }
+
+  mountainState.value = 'loading'
+  try {
+    const config = await projectDigitalTwin(projectId)
+    if (generation !== sceneLoadGeneration) return null
+    if (!config?.enabled) {
+      mountainState.value = 'skipped'
+      if (store.pointsOfProject.length) flyToPoints(viewer, store.pointsOfProject)
+      return null
+    }
+    const scene = await createDigitalTwinScene(viewer, config)
+    if (generation !== sceneLoadGeneration) {
+      scene.destroy()
+      return null
+    }
+    mountainScene = scene
+    sceneConfig.value = config
+    if (config.radars?.length) selectRadar(config.radars[0].deviceId)
+    mountainState.value = 'ok'
+    pointLayer?.setLabelDistance(config.labelDistance)
+    heatLayer?.setMaxPoints(config.maxHeatPoints)
+    heatLayer?.sync(displayPoints.value, { visible: heatOn.value })
+    scene.flyHome({ duration: 1.8 })
+    window.__digitalTwinScene = scene
+    return scene
+  } catch (error) {
+    if (generation !== sceneLoadGeneration) return null
+    mountainState.value = 'failed'
+    sceneError.value = error?.message || String(error)
+    console.error('[cesium] 数字孪生场景加载失败：', error)
+    if (store.pointsOfProject.length) flyToPoints(viewer, store.pointsOfProject)
+    return null
   }
 }
 
@@ -243,56 +377,73 @@ watch(
 )
 
 onMounted(async () => {
-  viewer = createViewer(container.value)
-  pointLayer = createPointLayer(viewer)
-  heatLayer = createHeatmapLayer(viewer)
-  // 暴露到全局，便于在浏览器控制台排查（也方便后续做演示调试）
-  window.__viewer = viewer
-  window.__Cesium = Cesium
+  try {
+    viewer = createViewer(container.value)
+    removeRenderError = viewer.scene.renderError.addEventListener((_scene, error) => reportViewerError(error))
+    pointLayer = createPointLayer(viewer)
+    heatLayer = createHeatmapLayer(viewer)
+    // 暴露到全局，便于在浏览器控制台排查（也方便后续做演示调试）
+    window.__viewer = viewer
+    window.__Cesium = Cesium
 
-  clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
-  clickHandler.setInputAction((movement) => {
-    const picked = viewer.scene.pick(movement.position)
-    const pointId = pointLayer.pickId(picked)
-    if (pointId) {
-      openPopup(pointId)
-    } else {
-      closePopup()
-    }
-  }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+    clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
+    clickHandler.setInputAction((movement) => {
+      const picked = viewer.scene.pick(movement.position)
+      const pointId = pointLayer.pickId(picked)
+      if (pointId) {
+        openPopup(pointId)
+      } else {
+        const radarId = mountainScene?.pickRadarId(picked)
+        if (radarId != null) {
+          selectRadar(radarId)
+          closePopup()
+        } else {
+          closePopup()
+        }
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
-  viewer.scene.postRender.addEventListener(trackPopup)
-  removePostRender = () => viewer?.scene.postRender.removeEventListener(trackPopup)
+    viewer.scene.postRender.addEventListener(trackPopup)
+    removePostRender = () => viewer?.scene.postRender.removeEventListener(trackPopup)
 
-  // 实时推送的连接归 store（它能覆盖到本页这个顶层路由），这里只负责唤醒
-  realtime.start()
+    // 实时推送的连接归 store（它能覆盖到本页这个顶层路由），这里只负责唤醒
+    realtime.start()
 
-  // 先出数据、再升级地形/影像：任何一个环节慢，页面都已经有画面了
-  await loadData()
-  setupImagery(viewer).then((s) => (imageryState.value = s))
-  setupTerrain(viewer).then(async (s) => {
-    terrainState.value = s
-    if (s === 'ok') {
-      await plantMastsOnTerrain()
-    }
-  })
+    // 先出数据、再升级地形/影像：任何一个环节慢，页面都已经有画面了
+    await loadData()
+    if (disposed) return
+    await loadProjectScene(store.projectId)
+    if (disposed) return
+    setupImagery(viewer).then((s) => {
+      if (!disposed) imageryState.value = s
+    }).catch(reportViewerError)
+    setupTerrain(viewer).then(async (s) => {
+      if (disposed) return
+      terrainState.value = s
+      if (s === 'ok') {
+        await plantMastsOnTerrain()
+      }
+    }).catch(reportViewerError)
 
-  /*
-   * 3b：数据主路是 SSE（`stores/realtime.js` → `stores/monitor.js` 单一数据源），
-   * 这里只留**兜底轮询**，两种情况：
-   *   - 流断了 → 15s 一次补齐，界面照常"活着"（宁可旧一点，也不能停在那一刻）；
-   *   - 流正常 → 60s 才对一次账（每 4 跳一次），兜住推送覆盖不到的变化
-   *     （新建测点、漏事件）。比后端产出周期刷得更快没有意义，只会白刷接口。
-   */
-  let tick = 0
-  pollTimer = setInterval(() => {
-    tick += 1
-    if (!realtime.isLive) {
-      store.refreshLatest()
-    } else if (tick % 4 === 0) {
-      store.refreshLatest()
-    }
-  }, 15000)
+    /*
+     * 3b：数据主路是 SSE（`stores/realtime.js` → `stores/monitor.js` 单一数据源），
+     * 这里只留**兜底轮询**，两种情况：
+     *   - 流断了 → 15s 一次补齐，界面照常"活着"（宁可旧一点，也不能停在那一刻）；
+     *   - 流正常 → 60s 才对一次账（每 4 跳一次），兜住推送覆盖不到的变化
+     *     （新建测点、漏事件）。比后端产出周期刷得更快没有意义，只会白刷接口。
+     */
+    let tick = 0
+    pollTimer = setInterval(() => {
+      tick += 1
+      if (!realtime.isLive) {
+        store.refreshLatest()
+      } else if (tick % 4 === 0) {
+        store.refreshLatest()
+      }
+    }, 15000)
+  } catch (error) {
+    reportViewerError(error)
+  }
 })
 
 /** 地形就绪后，把 7 根立柱的起点换到真实地形面上 */
@@ -321,6 +472,13 @@ watch(
 
 watch(heatOn, (on) => heatLayer?.setVisible(on))
 
+watch(
+  () => store.projectId,
+  (projectId, previous) => {
+    if (viewer && projectId !== previous) loadProjectScene(projectId)
+  },
+)
+
 /*
  * 换主测项：3D 的颜色/标签会自动跟着变（displayPoints 依赖它），
  * 但回放的帧是按旧测项拉的，得重新取一遍——否则时间轴上摆着 A 测项的数据，
@@ -334,15 +492,22 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  disposed = true
+  sceneLoadGeneration += 1
   clearInterval(pollTimer)
   clearTimeout(bannerTimer)
   // 回放的定时器不在组件里，但得跟着页面停，否则它会一直推着索引走
   replay.dispose()
   removePostRender?.()
+  removeRenderError?.()
   clickHandler?.destroy()
   heatLayer?.destroy()
   pointLayer?.destroy()
+  mountainScene?.destroy()
+  mountainScene = null
   viewer?.destroy()
+  window.__viewer = null
+  window.__digitalTwinScene = null
   viewer = null
 })
 </script>
@@ -351,11 +516,19 @@ onBeforeUnmount(() => {
   <div class="screen">
     <div ref="container" class="globe" />
 
+    <section v-if="viewerError" class="hud viewer-error" role="alert">
+      <h2>三维视图未能正常运行</h2>
+      <p>{{ viewerError }}</p>
+      <p>可重新加载页面；若仍失败，请保留浏览器控制台中的第一条错误。</p>
+      <button class="btn" @click="reloadViewer">重新加载</button>
+      <button class="btn" @click="router.push('/home')">返回工作台</button>
+    </section>
+
     <!-- 顶栏 -->
     <header class="hud topbar">
       <div class="topbar-left">
         <span class="logo">UGMS</span>
-        <span class="title">三维形变监测大屏</span>
+        <span class="title">三维数字孪生监测大屏</span>
         <span class="project">{{ store.currentProject?.name || '—' }}</span>
         <!-- 项目切换：只影响读这份 store 的页面（就是本屏）——其余页面由后端按成员项目限范围 -->
         <label v-if="store.projects.length > 1" class="metric-pick">
@@ -395,10 +568,15 @@ onBeforeUnmount(() => {
       <div class="topbar-right">
         <span class="chip" :class="store.error ? 'err' : store.dataPointCount ? 'ok' : 'warn'">{{ dataStatus }}</span>
         <span class="chip" :class="realtime.isLive ? 'ok' : 'dim'">{{ realtime.statusText }}</span>
-        <span class="chip" :class="terrainState === 'ok' ? 'ok' : 'dim'">{{ TERRAIN_TEXT[terrainState] }}</span>
-        <span class="chip" :class="imageryState === 'ion' ? 'ok' : 'dim'">{{ IMAGERY_TEXT[imageryState] }}</span>
+        <span
+          class="chip"
+          :class="mountainState === 'ok' ? 'ok' : mountainState === 'failed' ? 'err' : 'dim'"
+          :title="sceneError || sceneDescription"
+        >{{ MOUNTAIN_TEXT[mountainState] }}</span>
+        <span v-if="!LOCAL_SCENE_ENABLED" class="chip" :class="terrainState === 'ok' ? 'ok' : 'dim'">{{ TERRAIN_TEXT[terrainState] }}</span>
+        <span class="chip" :class="['ion', 'offline'].includes(imageryState) ? 'ok' : 'dim'">{{ IMAGERY_TEXT[imageryState] }}</span>
         <!-- 没配 token → 明说，别让人对着「无地形/兜底底图」猜自己少了什么 -->
-        <span v-if="!ION_CONFIGURED" class="chip err" :title="TOKEN_HINT">未配 ion token</span>
+        <span v-if="!LOCAL_SCENE_ENABLED && !ION_CONFIGURED" class="chip err" :title="TOKEN_HINT">未配 ion token</span>
         <span class="chip dim">更新于 {{ fromNow(store.loadedAt) }}</span>
         <button class="btn" @click="refresh">刷新</button>
         <!-- 目标是 /home（总览），不是 /overview——后者没有注册路由，
@@ -423,9 +601,10 @@ onBeforeUnmount(() => {
     <!-- 左侧测点列表 -->
     <aside class="hud side">
       <div class="panel-title">测点（{{ points.length }}）</div>
+      <input v-model="pointSearch" class="side-search" placeholder="搜索点号或名称" />
       <ul class="point-list">
         <li
-          v-for="p in displayPoints"
+          v-for="p in sidePoints"
           :key="p.id"
           :class="{ active: popup.pointId === p.id }"
           @click="focusPoint(p)"
@@ -435,8 +614,34 @@ onBeforeUnmount(() => {
           <span class="value">{{ p.hasData ? `${formatSigned(p.value, 2)}${p.unit || ''}` : '—' }}</span>
         </li>
       </ul>
+      <div v-if="sidePoints.length < displayPoints.length && !pointSearch" class="list-hint">
+        列表仅显示前 {{ SIDE_LIST_LIMIT }} 个，搜索可定位其余测点
+      </div>
       <div class="panel-foot">
         <button class="btn wide" @click="resetView">回到全局视角</button>
+      </div>
+    </aside>
+
+    <!-- 雷达覆盖：选中一台后只显示该雷达到已标定目标的视线，避免规模场景出现千条连线。 -->
+    <aside v-if="radars.length" class="hud radar-side">
+      <div class="panel-title">雷达覆盖（{{ radars.length }}）</div>
+      <button
+        v-for="radar in radars"
+        :key="radar.deviceId"
+        class="radar-row"
+        :class="{ active: String(activeRadarId) === String(radar.deviceId) }"
+        @click="selectRadar(radar.deviceId)"
+      >
+        <span class="radar-status" :class="radar.status === 'ONLINE' ? 'online' : 'offline'" />
+        <span>
+          <strong>{{ radar.name || radar.code }}</strong>
+          <small>{{ radar.targets?.length || 0 }} 个已绑定目标</small>
+        </span>
+      </button>
+      <div v-if="activeRadar" class="radar-meta">
+        <span>量程 {{ formatNumber(activeRadar.detectionRangeM, 0) }}m</span>
+        <span>水平 ±{{ formatNumber(activeRadar.halfAngleDegrees, 0) }}°</span>
+        <span>垂直 ±{{ formatNumber(activeRadar.verticalHalfAngleDegrees, 0) }}°</span>
       </div>
     </aside>
 
@@ -447,6 +652,7 @@ onBeforeUnmount(() => {
         <span class="dot" :style="{ background: item.color }" />{{ item.label }}
       </div>
       <span class="legend-note">立柱高度为示意，非实测量值</span>
+      <span class="legend-note">场景：{{ sceneDescription }}</span>
       <span class="legend-note">热力图按主测项：{{ store.primaryMetric.name }}</span>
       <label class="heat-toggle">
         <input v-model="heatOn" type="checkbox" />
@@ -464,6 +670,19 @@ onBeforeUnmount(() => {
         <button class="btn" :disabled="replay.loading || !replay.total" @click="replay.playing ? replay.pause() : replay.play()">
           {{ replay.playing ? '⏸ 暂停' : '▶ 播放' }}
         </button>
+        <!--
+          回放窗口可选。以前是 7 天硬编码——想看今天上午那一段，也只能把 7 天全拉下来。
+          `setRange` 自己在「正在回放」时重拉，这里不用再补一次 load。
+        -->
+        <el-select
+          :model-value="replay.rangeHours"
+          size="small"
+          style="width: 118px"
+          :disabled="replay.loading"
+          @update:model-value="replay.setRange"
+        >
+          <el-option v-for="r in REPLAY_RANGES" :key="r.value" :label="r.label" :value="r.value" />
+        </el-select>
         <el-slider
           v-model="replayProgress"
           :min="0"
@@ -476,6 +695,11 @@ onBeforeUnmount(() => {
         <span class="stamp mk-mono">{{ formatTime(replay.time) }}</span>
         <span class="dim-text">{{ replay.index + 1 }} / {{ replay.total }}</span>
         <span class="dim-text">{{ store.metricMeta(replay.metricCode).name }}</span>
+        <!--
+          粒度必须说出来（第 18 条）：降采样之后「近 7 天」只剩 168 个点，
+          不标注的话用户的第一反应是「数据丢了吧」
+        -->
+        <span class="dim-text">{{ replayGranularityText }}</span>
         <span class="dim-text">{{ replayFrameInfo }}</span>
         <span v-if="replay.error" class="err-text">{{ replay.error }}</span>
       </template>
@@ -515,6 +739,23 @@ onBeforeUnmount(() => {
           <span>采集时间</span>
           <b>{{ formatTime(selected.collectTime) }}</b>
         </div>
+        <div v-for="source in selectedRadarSources" :key="source.target.bindingId" class="source-card">
+          <div class="kv">
+            <span>来源雷达</span>
+            <b>{{ source.radar.name || source.radar.code }}</b>
+          </div>
+          <div class="kv">
+            <span>标定目标</span>
+            <b>{{ source.target.targetCode || '待标定' }}</b>
+          </div>
+          <div class="kv">
+            <span>斜距 / 视线</span>
+            <b>
+              {{ formatNumber(source.target.slantRangeM, 1) }}m ·
+              {{ source.target.lineOfSight ? '无遮挡' : '被遮挡' }}
+            </b>
+          </div>
+        </div>
         <!-- 最新一张现场影像（验收第 6 条要求「详情**与 3D 大屏**」都能看）。
              用 A 的 MediaGallery：缩略图只显示一张，点开可翻该点全部影像（支持删除）；
              该点没有影像时整块不出现（hide-empty），不留空档。 -->
@@ -536,6 +777,19 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.hud.viewer-error {
+  position: absolute;
+  z-index: 100;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100% - 40px));
+  padding: 24px;
+  overflow-wrap: anywhere;
+}
+.viewer-error h2 { font-size: 18px; margin: 0 0 16px; }
+.viewer-error p { line-height: 1.7; }
+.viewer-error .btn { margin-right: 12px; }
 .screen {
   position: relative;
   width: 100%;
@@ -709,11 +963,100 @@ onBeforeUnmount(() => {
   padding: 12px;
 }
 
+.radar-side {
+  top: 68px;
+  right: 72px;
+  width: 238px;
+  padding: 12px;
+}
+
+.radar-row {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 6px;
+  color: #dbe7f5;
+  text-align: left;
+  cursor: pointer;
+  background: rgba(3, 13, 27, 0.56);
+  border: 1px solid rgba(90, 170, 255, 0.18);
+  border-radius: 6px;
+}
+
+.radar-row.active {
+  background: rgba(31, 111, 235, 0.28);
+  border-color: rgba(85, 230, 165, 0.55);
+}
+
+.radar-row strong,
+.radar-row small {
+  display: block;
+}
+
+.radar-row strong {
+  font-size: 12px;
+}
+
+.radar-row small {
+  margin-top: 2px;
+  font-size: 10px;
+  color: #8fa9c6;
+}
+
+.radar-status {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.radar-status.online {
+  background: #55e6a5;
+  box-shadow: 0 0 8px rgba(85, 230, 165, 0.75);
+}
+
+.radar-status.offline {
+  background: #8a94a6;
+}
+
+.radar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding-top: 5px;
+  font-size: 10px;
+  color: #8fa9c6;
+}
+
 .panel-title {
   margin-bottom: 10px;
   font-size: 12px;
   letter-spacing: 0.1em;
   color: #7fa6d0;
+}
+
+.side-search {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 9px;
+  margin-bottom: 8px;
+  color: #d9eaff;
+  outline: none;
+  background: rgba(3, 13, 27, 0.75);
+  border: 1px solid rgba(90, 170, 255, 0.25);
+  border-radius: 5px;
+}
+
+.side-search:focus {
+  border-color: rgba(90, 170, 255, 0.65);
+}
+
+.list-hint {
+  padding-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #718eac;
 }
 
 .point-list {
@@ -858,6 +1201,14 @@ onBeforeUnmount(() => {
 /* 主测项那一行加粗一点：弹窗里好几行测项，得一眼看出画面上的颜色是按哪个来的 */
 .kv.main b {
   color: #7fc4ff;
+}
+
+.source-card {
+  padding: 5px 7px;
+  margin-top: 6px;
+  background: rgba(85, 230, 165, 0.06);
+  border: 1px solid rgba(85, 230, 165, 0.18);
+  border-radius: 5px;
 }
 
 .kv.photos {

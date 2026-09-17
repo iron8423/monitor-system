@@ -35,15 +35,13 @@ source "$HERE/lib.sh"
 TOKEN=$(login)
 AUTH="Authorization: Bearer $TOKEN"
 
-# ts <分钟偏移>：相对**现在**的 ISO8601 带 +08:00 偏移（正数=未来，负数=过去）。
-#   走 python3 而不是 `date -d`：后者是 GNU 扩展，macOS 上写法完全不同，
-#   而 python3 已是本套件的硬依赖（data_of 就在用）。
-ts() {
-  python3 -c "
-import datetime, sys
-z = datetime.timezone(datetime.timedelta(hours=8))
-print((datetime.datetime.now(z) + datetime.timedelta(minutes=float(sys.argv[1]))).isoformat(timespec='seconds'))" "$1"
-}
+# ts 现在在 lib.sh 里（02 与 08 也要用它来造未来的 collectTime），本套件只传 0 与负数。
+#
+#   清单第 10 条之后，「正数 = 未来」在这里会误导：接入闸门会把超前 5 分钟以上的
+#   collectTime 拒收（COLLECT_TIME_IN_FUTURE），于是本套件若照旧传正偏移，
+#   延迟窗口那几条会**因为数据根本没进库**而变红，而不是因为判据错了。
+#   要验那道闸门请去 02 §⑩ 与 08 §⑦，别在这里加正偏移断言——
+#   重复只会把两个套件耦合起来。
 
 # ingest_q <messageId> <设备码> <quality> <collectTime> <defo_mm>
 #   receiveTime 刻意不传：让它等于后端自己的 now()，与扫描器取的 now() 同源。
@@ -331,7 +329,13 @@ check "上报缺 X-Ingest-Key -> 401" "401" "$(http_code -X POST "$BASE/ingest/m
   -d "{\"items\":[{\"messageId\":\"$RUN_ID-nokey\",\"deviceId\":\"$DEVQ\",\"pointCode\":\"$NP\",\"collectTime\":\"$(ts 0)\",\"metrics\":{\"defo_mm\":0.1}}]}")"
 
 # ---------- 回收 ----------
-# 先结警情再删设备（recycle_device 的职责）。本套件在 ④ 之后留着 2 条未解除的设备告警，
+# 先解绑：两台设备各绑了同一个临时测点（见夹具的 for 循环），而 `device_point` 没有软删列
+# ——删设备、删测点都不会动它，两条绑定会**永久**留在库里，指向两个都已逻辑删除的档案。
+# 解绑必须**在删设备之前**：`unbind` 内部先 `requireDevice`，设备一删它就 404 了。
+for d in "$DQID" "$DDID"; do
+  curl -s -o /dev/null -X DELETE "$BASE/devices/$d/points/$PID" -H "$AUTH"
+done
+# 再结警情，最后删设备（recycle_device 的职责）。本套件在 ④ 之后留着 2 条未解除的设备告警，
 # 不结掉就会变成指向已删设备的孤儿，在告警中心里排成一行 blank 待办。
 recycle_device "$DQID" "质量验收设备"
 recycle_device "$DDID" "延迟验收设备"

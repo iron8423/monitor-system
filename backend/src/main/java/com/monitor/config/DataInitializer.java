@@ -6,7 +6,9 @@ import com.monitor.auth.mapper.SysUserMapper;
 import com.monitor.common.constant.Role;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -23,18 +25,42 @@ import org.springframework.stereotype.Component;
  *
  * <p>{@code @Order(10)}：项目成员种子（{@link ProjectMemberInitializer}，{@code @Order(20)}）
  * 要按用户名查本类创建的账号，必须排在其后。</p>
+ *
+ * <h3>生产环境必须关掉</h3>
+ * <p>本类是<b>演示</b>设施：五个账号、统一密码。生产上它们是一组谁都知道口令的入口，
+ * 所以由 {@code monitor.demo-accounts.enabled} 控制，而 <b>{@code postgres} profile 里默认是
+ * {@code false}</b>（见 {@code application-postgres.yml}）——生产跑的就是那个 profile，
+ * 于是「生产不建演示账号」不依赖任何人记得去设环境变量。
+ * {@code matchIfMissing = true} 让默认（H2）profile 与全部验收套件的行为保持不变。</p>
+ *
+ * <p>dev 的 {@code docker-compose.yml} 走的也是 postgres profile，所以那里显式设了
+ * {@code MONITOR_DEMO_ACCOUNTS=true}：安全默认值归 profile，dev 的便利在编排文件里
+ * 豁免一次、且写明白。不这么办的话，一台全新的 dev 环境起来后一个账号都没有，
+ * 谁都登不进去，而 {@code 10-scope.sh} 还需要其中的 {@code outsider} 做隔离对照组。</p>
  */
 @Slf4j
 @Component
 @Order(10)
 @RequiredArgsConstructor
+@ConditionalOnProperty(prefix = "monitor.demo-accounts", name = "enabled",
+        havingValue = "true", matchIfMissing = true)
 @SuppressWarnings("null")
 public class DataInitializer implements CommandLineRunner {
 
-    public static final String DEFAULT_PASSWORD = "123456";
+    /**
+     * 演示账号的默认密码。用 {@code DEMO_ACCOUNT_PASSWORD} 覆盖，
+     * 或直接关掉整个初始化器（生产推荐后者）。
+     *
+     * <p>下面 {@code @Value} 里的默认值是拼进来的而不是重写一遍字面量——
+     * 常量与注解里的默认值必须同步，分两处写迟早会漂移。</p>
+     */
+    private static final String DEFAULT_PASSWORD = "123456";
 
     private final SysUserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
+
+    @Value("${monitor.demo-accounts.password:" + DEFAULT_PASSWORD + "}")
+    private String demoPassword;
 
     /**
      * 第 5 个账号 {@code outsider} 不是演示角色，是**数据隔离的对照组**：
@@ -89,12 +115,17 @@ public class DataInitializer implements CommandLineRunner {
         }
         SysUser u = new SysUser();
         u.setUsername(username);
-        u.setPassword(passwordEncoder.encode(DEFAULT_PASSWORD));
+        u.setPassword(passwordEncoder.encode(demoPassword));
         u.setDisplayName(displayName);
         u.setRole(role.name());
         u.setOrganizationId(1L);
         u.setEnabled(true);
         userMapper.insert(u);
-        log.info("已创建演示账号: {}/{}", username, DEFAULT_PASSWORD);
+        // 不打印口令：日志会进容器日志、日志采集、以及别人贴出来的排障片段。
+        log.info("已创建演示账号: {}", username);
+        if (DEFAULT_PASSWORD.equals(demoPassword)) {
+            log.warn("演示账号 {} 使用默认密码，生产环境请设置 monitor.demo-accounts.enabled=false"
+                    + "（postgres profile 已默认关闭），或至少用 DEMO_ACCOUNT_PASSWORD 覆盖", username);
+        }
     }
 }

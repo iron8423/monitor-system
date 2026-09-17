@@ -48,6 +48,37 @@ public final class AlarmConstants {
     public static final String REASON_DATA_QUALITY = "DATA_QUALITY";
     public static final String REASON_DATA_DELAY = "DATA_DELAY";
 
+    /**
+     * 未解除唯一键的**唯一**构造处（V14，见 {@code V14__alarm_open_key.sql}）。
+     *
+     * <p>四条开警情的路径（{@code AlarmEngine.trigger} / {@code DeviceAlarmMonitor.raise} /
+     * {@code DataQualityMonitor.raise}）与 V14 迁移必须拼出**逐字节相同**的键，
+     * 否则唯一索引形同虚设、存量收敛也认不出新行。所以只在这里定义一次。</p>
+     *
+     * <p>任一成分缺失就返回 null（与迁移里的 {@code ELSE NULL} 同一口径）：
+     * 拿不到测项的历史警情（{@code rule_id} 悬空）本来就不该参与唯一性，
+     * 拼成 {@code 'P:1001:null'} 会把一批互不相关的警情判成同一条。</p>
+     *
+     * <p><b>为什么键里是「测点 + 测项」而不是「测点 + 规则」</b>：升级功能依赖同一测项下
+     * 存在多条不同等级的规则，用规则做键会让同测项的两条规则各开一条警情——
+     * 正是「至多一条」要消灭的东西。测项是**副本**，规则可改可删，见
+     * {@code Alarm.metricCode} 的说明。</p>
+     */
+    public static String openKeyOfPoint(Long pointId, String metricCode) {
+        if (pointId == null || metricCode == null || metricCode.isEmpty()) {
+            return null;
+        }
+        return "P:" + pointId + ":" + metricCode;
+    }
+
+    /** 设备警情的未解除唯一键：设备 + **成因**（同一台设备可以同时欠着离线与数据质量两条）。 */
+    public static String openKeyOfDevice(Long deviceId, String reason) {
+        if (deviceId == null || reason == null || reason.isEmpty()) {
+            return null;
+        }
+        return "D:" + deviceId + ":" + reason;
+    }
+
     /** 系统自动动作（非人工处置）。 */
     public static final String ACTION_TRIGGER = "trigger";
     public static final String ACTION_RECOVER = "recover";

@@ -13,11 +13,11 @@ import java.util.List;
  * 接入请求体。契约 §2 的两种形态**都要收**：
  * <ol>
  *   <li>单条标准消息：{@code {"messageId":"...","deviceId":"...","pointCode":"...", ...}}</li>
- *   <li>批量：{@code {"items":[ IngestMessage, ... ]}}</li>
+ *   <li>批量/补报：{@code {"ingestMode":"BACKFILL","items":[ IngestMessage, ... ]}}</li>
  * </ol>
  *
- * <p>为什么要 {@link #from(JsonNode)} 而不是让 Jackson 直接绑本类：本类的字段只有
- * {@code items}，单条消息会被**静默**绑成 {@code items == null}，服务层于是原样返回
+ * <p>为什么要 {@link #from(JsonNode)} 而不是让 Jackson 直接绑本类：单条消息没有
+ * {@code items}，会被**静默**绑成 {@code items == null}，服务层于是原样返回
  * {@code accepted=0} —— HTTP 200、一个字都没入库，调用方完全看不出错。契约既然写了
  * 「单条标准消息或 items」，两条路就得真的成立；两者都不像时必须报 400，
  * 不能再有「什么都不做但返回成功」这种结果。</p>
@@ -26,6 +26,8 @@ import java.util.List;
  */
 @Data
 public class IngestRequest {
+    /** 默认保持既有实时上报行为；历史导入必须显式传 BACKFILL。 */
+    private IngestMode ingestMode = IngestMode.REALTIME;
     private List<IngestMessage> items;
 
     /**
@@ -47,6 +49,8 @@ public class IngestRequest {
             // 拒绝它只是让人多绕一步。
             req.setItems(convert(body));
         } else if (body.isObject()) {
+            JsonNode mode = body.get("ingestMode");
+            req.setIngestMode(IngestMode.parse(mode == null || mode.isNull() ? null : mode.asText()));
             JsonNode items = body.get("items");
             if (items != null && !items.isNull()) {
                 if (!items.isArray()) {

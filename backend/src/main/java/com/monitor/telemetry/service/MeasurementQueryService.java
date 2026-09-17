@@ -24,6 +24,9 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -58,16 +61,16 @@ public class MeasurementQueryService {
      * <p>「最新一行」的判据由 {@link MeasurementMapper#latestRowOf} 单点定义
      * （{@code collect_time DESC, id DESC}）——{@link ProjectSummaryService} 取最新形变时走同一个方法。
      * 此前两处各写各的排序，一处带 id 兜底一处不带，同刻两行时同一测点会给出两个值。</p>
+     *
+     * <p>上界取 {@code now()}：未来采集时间的行不能成为「当前值」（清单第 10 条），
+     * 理由与取值见 {@link MeasurementMapper#latestRowOf}。</p>
      */
     public PointLatestVO latest(Long pointId) {
         MonitorPoint p = requirePoint(pointId);
-        PointLatestVO vo = new PointLatestVO();
-        vo.setPointId(p.getId());
-        vo.setPointCode(p.getCode());
-
-        Measurement last = mapper.selectOne(mapper.latestRowOf(pointId, null).last("LIMIT 1"));
+        Measurement last = mapper.selectOne(
+                mapper.latestRowOf(pointId, null, LocalDateTime.now()).last("LIMIT 1"));
         if (last == null) {
-            return vo;   // 测点存在但暂无数据 -> latest / state 为 null
+            return emptyLatest(p);   // 测点存在但暂无数据 -> latest / state 为 null
         }
 
         // 一条消息拆 N 行（D2），同 message_id 的兄弟行才是同一时刻的完整测项集合
@@ -76,6 +79,56 @@ public class MeasurementQueryService {
                 .eq(Measurement::getMessageId, last.getMessageId())
                 .eq(last.getDeviceId() != null, Measurement::getDeviceId, last.getDeviceId()));
         rows.sort(Comparator.comparing(Measurement::getMetricCode, Comparator.nullsLast(Comparator.naturalOrder())));
+
+        return latestVO(p, last, rows);
+    }
+
+    /**
+     * 项目级批量最新值：1000 个测点只发一个 HTTP 请求、执行两条批量 SQL。
+     * 单点端点保留给详情页和兼容客户端使用。
+     */
+    public List<PointLatestVO> latestOfProject(Long projectId) {
+        dataScope.assertProjectVisible(projectId);
+        List<MonitorPoint> points = pointMapper.selectByProjectId(projectId);
+        if (points.isEmpty()) {
+            return List.of();
+        }
+        List<Long> pointIds = points.stream().map(MonitorPoint::getId).toList();
+        // 上界取 now()：这是大屏那条路径（一次 1000 点），未来时间的行一旦成为「当前值」，
+        // 界面会一直显示那个值直到有人刷新缓存——查询侧的兜底在这三个调用点里价值最高。
+        List<Measurement> lastRows = mapper.latestRowsOfPoints(pointIds, LocalDateTime.now());
+        Map<Long, Measurement> lastByPoint = new HashMap<>();
+        Set<String> messageIds = new HashSet<>();
+        for (Measurement row : lastRows) {
+            lastByPoint.put(row.getPointId(), row);
+            if (row.getMessageId() != null) messageIds.add(row.getMessageId());
+        }
+
+        Map<String, List<Measurement>> siblings = new HashMap<>();
+        if (!messageIds.isEmpty()) {
+            for (Measurement row : mapper.rowsByMessageIds(new ArrayList<>(messageIds))) {
+                siblings.computeIfAbsent(messageKey(row), ignored -> new ArrayList<>()).add(row);
+            }
+        }
+
+        List<PointLatestVO> result = new ArrayList<>(points.size());
+        for (MonitorPoint point : points) {
+            Measurement last = lastByPoint.get(point.getId());
+            if (last == null) {
+                result.add(emptyLatest(point));
+                continue;
+            }
+            List<Measurement> rows = new ArrayList<>(
+                    siblings.getOrDefault(messageKey(last), List.of(last)));
+            rows.sort(Comparator.comparing(Measurement::getMetricCode,
+                    Comparator.nullsLast(Comparator.naturalOrder())));
+            result.add(latestVO(point, last, rows));
+        }
+        return result;
+    }
+
+    private PointLatestVO latestVO(MonitorPoint p, Measurement last, List<Measurement> rows) {
+        PointLatestVO vo = emptyLatest(p);
 
         Map<String, Object> att = parseAttributes(last.getAttributes());
         Map<String, Object> latest = new LinkedHashMap<>();
@@ -90,6 +143,17 @@ public class MeasurementQueryService {
         vo.setLatest(latest);
         vo.setState(att.get("state") == null ? null : String.valueOf(att.get("state")));
         return vo;
+    }
+
+    private static PointLatestVO emptyLatest(MonitorPoint p) {
+        PointLatestVO vo = new PointLatestVO();
+        vo.setPointId(p.getId());
+        vo.setPointCode(p.getCode());
+        return vo;
+    }
+
+    private static String messageKey(Measurement row) {
+        return row.getPointId() + "|" + row.getDeviceId() + "|" + row.getMessageId();
     }
 
     /**

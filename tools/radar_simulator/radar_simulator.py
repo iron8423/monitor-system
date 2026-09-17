@@ -45,7 +45,20 @@ TZ = timezone(timedelta(hours=8))
 DEFAULT_URL = "http://127.0.0.1:8080/api/v1/ingest/measurements"
 DEFAULT_KEY = "dev-ingest-key"
 DEFAULT_DEVICE = "radar-001"
-# 种子 7 测点（V2__seed_data.sql）：灰库 3 + 边坡 4
+# V11 的两台雷达标定关系；显式 --device 时仍可覆盖（验收临时点使用该方式）。
+DEFAULT_DEVICE_BY_POINT = {
+    "P-HK02": "radar-001", "P-HK03": "radar-001",
+    "P-BP01": "radar-001", "P-BP02": "radar-001",
+    "P-HK01": "radar-002", "P-BP03": "radar-002", "P-BP04": "radar-002",
+}
+# angleDeg 是相对雷达航向的水平角，distanceM 是目标斜距；数值来自 coverage.json。
+DEFAULT_POSITION_BY_POINT = {
+    "P-HK02": (20.734, 157.160), "P-HK03": (18.735, 110.139),
+    "P-BP01": (2.071, 86.026), "P-BP02": (-20.120, 98.701),
+    "P-HK01": (-14.945, 186.200), "P-BP03": (29.740, 50.076),
+    "P-BP04": (-29.530, 32.086),
+}
+# 种子 7 测点：山脊 3 + 滑坡体 4
 DEFAULT_POINTS = ["P-HK01", "P-HK02", "P-HK03", "P-BP01", "P-BP02", "P-BP03", "P-BP04"]
 # 默认规则是 defo_mm 双向 ±3mm（gte +3.0 / lte -3.0），V4 另有 gte +5.0 升到 alarm 档
 WARN_LEVEL = 3.0
@@ -94,6 +107,7 @@ class PointSim:
 
     def build(self, device, clock, defo, rate, quality=None, state="normal"):
         self.sequence += 1
+        position = DEFAULT_POSITION_BY_POINT.get(self.code)
         msg = {
             "schemaVersion": "1.0",
             "messageId": str(uuid.uuid4()),
@@ -102,8 +116,10 @@ class PointSim:
             "collectTime": clock.isoformat(timespec="milliseconds"),
             "sequence": self.sequence,
             "metrics": {"defo_mm": round(defo, 4), "rate_mm_d": rate},
-            "position": {"angleDeg": round(self.rng.uniform(40, 60), 1),
-                         "distanceM": round(self.rng.uniform(15, 30), 1)},
+            "position": {
+                "angleDeg": position[0] if position else round(self.rng.uniform(-20, 20), 1),
+                "distanceM": position[1] if position else round(self.rng.uniform(15, 30), 1),
+            },
             "signal": round(self.rng.uniform(0.7, 1.0), 3),
             "state": state,
         }
@@ -113,9 +129,9 @@ class PointSim:
         return msg
 
 
-def post(url, key, items, timeout):
+def post(url, key, items, timeout, ingest_mode):
     """发一批消息，返回 ingest 的 data 段（accepted/rejected/duplicates/results）。"""
-    body = json.dumps({"items": items}, ensure_ascii=False).encode("utf-8")
+    body = json.dumps({"ingestMode": ingest_mode, "items": items}, ensure_ascii=False).encode("utf-8")
     req = Request(url, data=body, method="POST", headers={
         "Content-Type": "application/json; charset=utf-8",
         "X-Ingest-Key": key,
@@ -137,7 +153,8 @@ def main():
     ap = argparse.ArgumentParser(description="雷达数据模拟器（对齐 message-contract）")
     ap.add_argument("--url", default=DEFAULT_URL, help="ingest 端点")
     ap.add_argument("--key", default=DEFAULT_KEY, help="X-Ingest-Key（env MONITOR_INGEST_KEY）")
-    ap.add_argument("--device", default=DEFAULT_DEVICE, help="设备码（须在设备档案存在）")
+    ap.add_argument("--device", default=None,
+                    help="强制全部测点使用同一设备；不填则按 V11 两台雷达标定关系自动选择")
     ap.add_argument("--points", default=",".join(DEFAULT_POINTS),
                     help="逗号分隔的测点业务编码")
     ap.add_argument("--interval", type=float, default=5.0, help="每轮间隔秒数")
@@ -145,8 +162,13 @@ def main():
     ap.add_argument("--once", action="store_true", help="只跑一轮（等同 --count 1 --interval 0）")
     ap.add_argument("--step-minutes", type=float, default=30.0,
                     help="每轮代表多少「模拟时间」（写入 collectTime，并用于形变积分）")
+    ap.add_argument("--clock-anchor", choices=("start", "end"), default="end",
+                    help="模拟时钟锚在哪一头：end（默认）= 最后一轮落在「现在」，"
+                         "整段序列都在过去；start = 第一轮落在「现在」，之后逐轮走向未来")
     ap.add_argument("--backdate-days", type=float, default=0.0,
                     help="模拟时钟比当前时间往前拨几天；演示历史曲线时用")
+    ap.add_argument("--ingest-mode", choices=("AUTO", "REALTIME", "BACKFILL"), default="AUTO",
+                    help="接入模式；AUTO 在 --backdate-days>0 时用 BACKFILL，否则 REALTIME")
     ap.add_argument("--seed", type=int, default=None, help="随机种子（便于复现）")
     ap.add_argument("--timeout", type=float, default=10.0, help="单次请求超时秒数")
     ap.add_argument("--dry-run", action="store_true", help="只打印不发送")
@@ -176,6 +198,11 @@ def main():
     if not codes:
         print("没有可用的测点码", file=sys.stderr)
         return 2
+    unknown_device_points = [code for code in codes if not args.device and code not in DEFAULT_DEVICE_BY_POINT]
+    if unknown_device_points:
+        print("以下测点没有默认雷达映射，请同时指定 --device：%s"
+              % ",".join(unknown_device_points), file=sys.stderr)
+        return 2
     if args.inject_overlimit and args.overlimit_point not in codes:
         # 注入点不在点集里等于没注入——这是最容易犯的静默错误，直接报错
         print("--overlimit-point %s 不在 --points 里，超限注入不会生效"
@@ -186,9 +213,13 @@ def main():
     sims = {c: PointSim(c, rng) for c in codes}
     steps = [float(x) for x in args.overlimit_steps.split(",") if x.strip()]
 
+    devices = sorted({args.device or DEFAULT_DEVICE_BY_POINT[code] for code in codes})
+    ingest_mode = ("BACKFILL" if args.backdate_days > 0 else "REALTIME") \
+        if args.ingest_mode == "AUTO" else args.ingest_mode
     print("模拟器启动：%d 个测点 / 设备 %s / 间隔 %ss%s"
-          % (len(codes), args.device, args.interval, "（dry-run，不发送）" if args.dry_run else ""))
+          % (len(codes), ",".join(devices), args.interval, "（dry-run，不发送）" if args.dry_run else ""))
     print("端点：%s" % args.url)
+    print("接入模式：%s" % ingest_mode)
     if args.inject_overlimit:
         print("注入超限：%s 阶梯 %s，每档 %d 轮%s"
               % (args.overlimit_point, steps, args.overlimit_hold,
@@ -204,13 +235,32 @@ def main():
     print()
 
     step_days = args.step_minutes / 1440.0
-    # 模拟时钟：默认从「当前」起步，每轮走 --step-minutes；--backdate-days 把它往前拨，
-    # 这样跑出来的是一段历史曲线而不是一排未来时间戳。
+    # 模拟时钟。--clock-anchor 决定「现在」落在序列的哪一头：
+    #
+    #   end（默认）：clock = now - (count - round) * step，于是**最后一轮恰好是现在**，
+    #                整段序列都在过去。这正是「跑出来的是一段历史曲线而不是一排未来
+    #                时间戳」那句话该有的样子——旧行为（锚在 start）会让
+    #                `--count 3 --step-minutes 60` 一直喷到 now+120min，而后端的
+    #                COLLECT_TIME_IN_FUTURE 闸门会把它整批拒收（清单第 10 条）。
+    #   start：       clock = now，之后逐轮走向未来。**保留它是因为故意的未来时间戳
+    #                仍然有用**——验收套件要造一条未来的 collectTime 来验那道闸门。
+    #
+    # 不用 --backdate-days 来实现这个：backdate_days > 0 会把 --ingest-mode AUTO 翻成
+    # BACKFILL，那会静默掉心跳/SSE/告警这条通路（见下面 ingest_mode 的推导）。
     clock = datetime.now(TZ) - timedelta(days=args.backdate_days)
-    print("模拟时钟：%s 起，每轮 +%g 分钟" % (clock.isoformat(timespec="seconds"), args.step_minutes))
+    if args.clock_anchor == "end" and args.count > 0:
+        clock -= timedelta(minutes=args.step_minutes * (args.count - 1))
+    elif args.clock_anchor == "end":
+        # count == 0 是无限跑，没有「最后一轮」可锚。旧行为在这里是「以 360 倍实时速率
+        # 向未来逃逸」——一个真问题（跑一小时后 collectTime 已经在两天后，触发接入闸门）。
+        # 改为每轮把时钟钳回不超过 now：跑得越久，写入的越接近实时。
+        pass
+    print("模拟时钟：%s 起，每轮 +%g 分钟（锚点 %s）"
+          % (clock.isoformat(timespec="seconds"), args.step_minutes, args.clock_anchor))
 
     total = {"accepted": 0, "rejected": 0, "duplicates": 0}
     round_no = 0
+    clamped_once = False
     try:
         while args.count == 0 or round_no < args.count:
             round_no += 1
@@ -223,17 +273,18 @@ def main():
             items = []
             for code in codes:
                 sim = sims[code]
+                device = args.device or DEFAULT_DEVICE_BY_POINT[code]
                 if args.inject_overlimit and code == args.overlimit_point:
                     if args.recover_after and round_no > args.recover_after:
                         defo, rate = sim.force(args.recover_value)
                     else:
                         defo, rate = sim.force(overlimit_value(round_no - 1, steps, args.overlimit_hold))
                     # 质量闸门：SUSPECT 的超限值不参与告警判定（message-contract §3）
-                    items.append(sim.build(args.device, clock, defo, rate,
+                    items.append(sim.build(device, clock, defo, rate,
                                            quality="SUSPECT" if args.inject_suspect else None,
                                            state="suspicious" if args.inject_suspect else "normal"))
                 else:
-                    items.append(sim.message(args.device, clock, step_days=step_days))
+                    items.append(sim.message(device, clock, step_days=step_days))
 
             stamp = datetime.now(TZ).strftime("%H:%M:%S")
             head = "[%s] 第 %d 轮：%d 条" % (stamp, round_no, len(items))
@@ -251,7 +302,7 @@ def main():
                 try:
                     # 同轮重发一次：messageId 不变 -> 幂等应全部判 DUPLICATE
                     batch = items + (items if args.inject_duplicate else [])
-                    data = post(args.url, args.key, batch, args.timeout)
+                    data = post(args.url, args.key, batch, args.timeout, ingest_mode)
                     for k in total:
                         total[k] += data.get(k, 0)
                     print("%s -> accepted=%d rejected=%d duplicates=%d"
@@ -259,8 +310,11 @@ def main():
                              data.get("rejected", 0), data.get("duplicates", 0)))
                     for r in data.get("results", []):
                         if r.get("status") != "OK":
-                            print("    %s %s %s" % (r.get("pointCode"), r.get("status"),
-                                                    r.get("quality") or ""))
+                            # reason 一并打出来：拒收原因（COLLECT_TIME_IN_FUTURE /
+                            # POSITION_CALIBRATION_MISMATCH / UNKNOWN_POINT…）是排查时
+                            # 唯一有用的信息，藏在响应体里等于没有。
+                            print("    %s %s %s %s" % (r.get("pointCode"), r.get("status"),
+                                                       r.get("quality") or "", r.get("reason") or ""))
                 except HTTPError as e:
                     print("%s -> HTTP %s：%s" % (head, e.code, e.read().decode("utf-8", "replace")[:200]),
                           file=sys.stderr)
@@ -271,6 +325,17 @@ def main():
                     return 1
 
             clock += timedelta(minutes=args.step_minutes)
+            if args.clock_anchor == "end":
+                # count == 0（无限跑）时没有「最后一轮」可锚，时钟会一路走向未来。
+                # 钳回 now：跑得越久，写入的越接近实时，而不是越跑越超前。
+                # count > 0 时最后一轮本来就恰好是 now，这里是恒等操作。
+                now = datetime.now(TZ)
+                if clock > now:
+                    clock = now
+                    if not clamped_once:
+                        clamped_once = True
+                        print("提示：无限跑模式下模拟时钟已追平当前时间并保持实时；"
+                              "要造历史曲线请用 --backdate-days")
             if args.count == 0 or round_no < args.count:
                 time.sleep(args.interval)
     except KeyboardInterrupt:

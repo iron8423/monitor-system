@@ -25,7 +25,10 @@ ms=json.load(sys.stdin)['data']
 print(len([m for m in ms if m['pointId']==1]))")"
 
 section "③ 设备档案（在线判定归 A，契约 §5）"
-check "设备数" "1" "$(curl -s "$BASE/devices" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
+# 2026-09-16：V11（双雷达精细山体）加入南侧雷达 radar-002 后，这个数 1 -> 2。
+# 与 ② 同理：变的不是「看得到」，而是种子的规模。改前这条一直红（`--fresh` 是空库，
+# 种子只有迁移写入，所以 H2 上必然得到 2），只是全仓没人跑过整套验收。
+check "设备数" "2" "$(curl -s "$BASE/devices" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
 DS=$(curl -s "$BASE/devices/1/status" -H "$AUTH" | python3 -c "
 import sys,json; d=json.load(sys.stdin)['data']
 print(d['status'], d['online'], d['code'])")

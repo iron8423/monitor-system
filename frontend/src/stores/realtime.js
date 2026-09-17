@@ -30,11 +30,18 @@ let retryTimer = null
 let retryDelay = 1000
 let retryAttempts = 0
 let lifecycleBound = false
+let measurementTimer = null
+let measurementBuffer = []
 
 /** 重连退避上限：再久也该让用户看到「一直在重试」而不是无限静默 */
 const RETRY_MAX_MS = 30000
 /** 连续失败到这个次数就停手，交回轮询兜底（避免 token 失效时无限重连刷日志） */
 const RETRY_GIVE_UP = 8
+/**
+ * 雷达通常会在同一采样时刻集中上报数百/上千个点。把 50ms 内的测值合成一次
+ * Pinia 提交，避免每条 SSE 都触发一轮 1000 点 Cesium 同步和 Vue 列表重算。
+ */
+const MEASUREMENT_BATCH_MS = 50
 
 const nowIso = () => new Date().toISOString()
 
@@ -104,16 +111,21 @@ export const useRealtimeStore = defineStore('realtime', {
         const data = parse(event)
         if (!data) return
         this.lastEventAt = nowIso()
-        // 认领成功才计数：SSE 推的是全库，不属于当前项目的点会被数据源丢掉，
-        // 那是正常的，不该算进「本页收到了多少条」
-        if (monitor.applyMeasurement(data)) {
-          this.measurementCount += 1
+        measurementBuffer.push(data)
+        if (measurementTimer === null) {
+          measurementTimer = setTimeout(() => {
+            measurementTimer = null
+            this.flushMeasurements()
+          }, MEASUREMENT_BATCH_MS)
         }
       })
 
       es.addEventListener('alarm', (event) => {
         const data = parse(event)
         if (!data) return
+        // 服务端先发 measurement 再发 alarm。告警到达时先刷掉同批测值，保证页面上的
+        // 数值先变化、颜色随后进入告警态，维持事件因果顺序。
+        this.flushMeasurements()
         this.lastEventAt = nowIso()
         if (monitor.applyAlarm(data)) {
           this.alarmCount += 1
@@ -146,7 +158,26 @@ export const useRealtimeStore = defineStore('realtime', {
         source.close()
         source = null
       }
+      if (measurementTimer !== null) {
+        clearTimeout(measurementTimer)
+        measurementTimer = null
+      }
+      measurementBuffer = []
       if (this.status !== 'idle') this.status = 'idle'
+    },
+
+    /** 把一小批 SSE 测值一次并进快照；也供自检在无真实定时器环境中显式触发。 */
+    flushMeasurements() {
+      if (measurementTimer !== null) {
+        clearTimeout(measurementTimer)
+        measurementTimer = null
+      }
+      if (!measurementBuffer.length) return 0
+      const batch = measurementBuffer
+      measurementBuffer = []
+      const accepted = useMonitorStore().applyMeasurements(batch)
+      this.measurementCount += accepted
+      return accepted
     },
 
     /** 登出：断连接 + 清计数（数据侧的告警态由调用方一并用 clearAlarms 清） */

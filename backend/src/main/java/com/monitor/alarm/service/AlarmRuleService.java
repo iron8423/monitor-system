@@ -75,6 +75,15 @@ public class AlarmRuleService {
         return withCode(rule);
     }
 
+    /**
+     * 更新规则（整条替换，未传的字段按 {@link #apply} 的默认值处理）。
+     *
+     * <p><b>改 {@code metricCode} / {@code pointId} 不会连带改已开警情</b>，这是刻意的：
+     * 警情上的 {@code metric_code} 是「当时为什么开」的快照，规则改了不该把历史重新解说一遍
+     * （同 {@code Alarm.alarmReason} 的口径）。后果是那条警情继续占着**原**测项的未解除键位，
+     * 要有人处置它才会释放；同时它仍会被引擎按原测项找到，后续重建的规则可以接手升级。
+     * 详见 {@link #delete} 与 {@code AlarmEngine.findOpen}。</p>
+     */
     public AlarmRuleVO update(Long id, AlarmRuleRequest req) {
         AlarmRule rule = require(id);
         validate(req);
@@ -83,6 +92,23 @@ public class AlarmRuleService {
         return withCode(rule);
     }
 
+    /**
+     * 删除规则（**物理删除**，无软删标记）。
+     *
+     * <p>允许删除一条名下有未解除警情的规则，但要知道后果、且这个后果是**刻意接受**的：
+     * 那条警情会一直挂在「未解除」上，直到有人处置它（{@code resolve}/{@code misreport}）。
+     * 期间它会一直占着 {@code (测点, 测项)} 的未解除唯一键，所以该测项不会再开新警情——
+     * <b>这不是 bug，正是「同一测点同一测项至多一条未解除警情」这条不变式的直接推论</b>：
+     * 那里确实欠着一条没人处理的警情，再开一条只会让运维看到两条。</p>
+     *
+     * <p>为什么不做「删除时自动关掉它的警情」：那会**静默抹掉一条真实发生过的越限记录**，
+     * 而删除规则的动因往往是「规则配错了」，不是「这个测点不再越限了」。宁可留一条要人处理的
+     * 警情，也不要自动改写历史。同理也不在这里拦截——删除是正当操作，把处置责任交回给人。</p>
+     *
+     * <p>V14 起引擎按 {@code (point_id, metric_code)} 找未解除警情（不再按 rule_id），
+     * 所以删掉规则不会让那条警情从引擎视野里消失、变成谁都看不见却一直占位的僵尸，
+     * 后续重建同名测项的规则仍能接手升级它。见 {@code AlarmEngine.findOpen} 的说明。</p>
+     */
     public void delete(Long id) {
         require(id);
         ruleMapper.deleteById(id);

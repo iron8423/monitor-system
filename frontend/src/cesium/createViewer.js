@@ -3,6 +3,7 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 
 const TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN || ''
 const TERRAIN_MODE = import.meta.env.VITE_TERRAIN_MODE || 'ion'
+const SCENE_MODE = import.meta.env.VITE_SCENE_MODE || 'mountain'
 
 /**
  * 是否配了 Cesium ion token —— 给界面用（大屏顶栏那条「未配 token」的提示）。
@@ -14,8 +15,9 @@ const TERRAIN_MODE = import.meta.env.VITE_TERRAIN_MODE || 'ion'
  */
 export const ION_CONFIGURED = Boolean(TOKEN)
 export const ION_TERRAIN_MODE = TERRAIN_MODE
+export const LOCAL_SCENE_ENABLED = SCENE_MODE === 'mountain'
 
-/** 离线兜底用的深色底图（实测这台机器可达；Cesium 官方影像走 ion，需要 token） */
+/** 全球模式的远程兜底底图；默认 mountain 模式不会请求它。 */
 const FALLBACK_IMAGERY = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
 
 /**
@@ -65,6 +67,9 @@ export function createViewer(container) {
  * @returns {Promise<'ok'|'skipped'|'failed'>}
  */
 export async function setupTerrain(viewer) {
+  if (LOCAL_SCENE_ENABLED) {
+    return 'skipped'
+  }
   if (TERRAIN_MODE !== 'ion' || !TOKEN) {
     return 'skipped'
   }
@@ -83,9 +88,14 @@ export async function setupTerrain(viewer) {
 
 /**
  * 异步加载影像底图：优先 Cesium ion（卫星影像），失败退回深色底图。
- * @returns {Promise<'ion'|'fallback'|'failed'>}
+ * @returns {Promise<'ion'|'offline'|'fallback'|'failed'>}
  */
 export async function setupImagery(viewer) {
+  // 山地演示默认不发任何外部请求：椭球底色 + 本地 GLB 足够构成完整画面。
+  // 若要切回原来的全球底图，可显式设置 VITE_SCENE_MODE=globe。
+  if (LOCAL_SCENE_ENABLED) {
+    return 'offline'
+  }
   if (TOKEN) {
     try {
       const provider = await Cesium.IonImageryProvider.fromAssetId(2)

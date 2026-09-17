@@ -75,6 +75,27 @@ except Exception:
 "
 }
 
+# ts <分钟偏移>：相对**现在**的 ISO8601 带 +08:00 偏移（正数 = 未来，负数 = 过去，0 = 此刻）。
+#
+#   走 python3 而不是 `date -d`：后者是 GNU 扩展，macOS 上写法完全不同，
+#   而 python3 已是本库的硬依赖（data_of / code_of 都在用）。
+#
+#   两边都有人用，别把它「简化」成正数：
+#     - 09-data-quality.sh 只用 0 与负数（造过去的数据延迟窗口）；
+#     - 02-ingest-idempotency.sh 与 08-simulator.sh **刻意用正数**去验接入时间闸门
+#       （collectTime 超前 5 分钟以上应被拒收 COLLECT_TIME_IN_FUTURE）。
+#   所以「正偏移会不会被后端拒收」在这两个套件里是**被测对象**，不是意外。
+#
+#   时间口径：显式带 +08:00 偏移，Times.parse 会归一到 Asia/Shanghai；
+#   而后端的「现在」来自 JVM 默认时区（镜像里是 Asia/Shanghai）。两边同源，
+#   于是套件不依赖跑它的机器在哪个时区。
+ts() {
+  python3 -c "
+import datetime, sys
+z = datetime.timezone(datetime.timedelta(hours=8))
+print((datetime.datetime.now(z) + datetime.timedelta(minutes=float(sys.argv[1]))).isoformat(timespec='seconds'))" "$1"
+}
+
 # login_as <用户名> [口令] -> 打印该账号的 JWT（登录失败打印空串，不退出）。
 # 角色相关的用例要用非管理员账号（operator / analyst / maintainer），见 V2 种子数据。
 login_as() {
@@ -167,9 +188,13 @@ print(' '.join(str(r['id']) for r in rs if r['status'] not in ('RESOLVED', 'FALS
 #   点一删那些 `DEVICE` 类警情就成了孤儿：列表里还在排队，`deviceCode` 却解析成 null，
 #   告警中心会多出一行「空白设备」的待办。
 #
-#   为什么 07 套件没用它也没留孤儿：那套件的设备告警在 ③ 被**恢复上报**正常解除掉了，
-#   走到删除时已经没有未解除警情。但那是那一条用例的巧合，不是通用保证——
-#   凡是「造出设备告警又不还原」的套件都得走这里（09-data-quality.sh 就是）。
+#   07 与 09 都走这里。07 曾经用裸 DELETE，理由是「那套件的设备告警在 ③ 被恢复上报正常
+#   解除掉了，走到删除时已经没有未解除警情」——那只是**正常路径**的巧合：③ 一旦红了，
+#   未解除的 DEVICE 警情就会连同设备一起变成孤儿。凡「造出设备告警又不还原」的套件都得走这里。
+#
+#   本函数**不解绑**（`device_point` 由调用方自己 `DELETE /devices/{id}/points/{pointId}`）：
+#   解绑必须在删设备**之前**（`unbind` 先 `requireDevice`，设备一删就 404），而本函数的第一件事
+#   就是结警情——那一步要在绑定还在的时候做，顺序不能颠倒。收回责任留给调用方。
 recycle_device() {
   local did="$1" note="${2:-临时设备}"
   [ -n "$did" ] || return 0

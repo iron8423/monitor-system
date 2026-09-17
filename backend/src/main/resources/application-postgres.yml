@@ -17,3 +17,16 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+
+# 演示账号初始化（DataInitializer）在 postgres profile 下默认关闭。
+#
+# 为什么把 false 放在这里、而不是靠部署方去设环境变量：生产跑的就是 postgres profile，
+# 于是「生产不建五个统一口令的账号」是一个默认成立的事实，而不是一条要记得执行的步骤。
+# 现场确实需要演示时用 MONITOR_DEMO_ACCOUNTS=true 显式打开。
+#
+# 注意本 profile 不止生产在用：dev 的 docker-compose.yml 也走 postgres，所以那里显式设了
+# MONITOR_DEMO_ACCOUNTS=true（否则全新 dev 卷起来后一个账号都没有，谁都登不进去，
+# 而 10-scope.sh 还需要其中的 outsider 做隔离对照组）。安全默认值在这里，dev 的豁免在编排文件里。
+monitor:
+  demo-accounts:
+    enabled: ${MONITOR_DEMO_ACCOUNTS:false}

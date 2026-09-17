@@ -127,6 +127,10 @@ public class DeviceAlarmMonitor {
         a.setAlarmType(AlarmConstants.TYPE_DEVICE);
         a.setDeviceId(d.getId());
         a.setAlarmReason(AlarmConstants.REASON_OFFLINE);
+        // 未解除唯一键（V14）：'D:<deviceId>:OFFLINE'。成因必须进键——同一台设备
+        // 可以同时欠着「已经掉线」与「数据不可信」（见 DataQualityMonitor），
+        // 只带 deviceId 的键会让两个监视器互相把对方挡在唯一索引外面。
+        a.setOpenKey(AlarmConstants.openKeyOfDevice(d.getId(), AlarmConstants.REASON_OFFLINE));
         a.setAlarmLevel(OFFLINE_LEVEL);
         a.setStatus(AlarmConstants.PENDING);
         a.setTriggeredAt(LocalDateTime.now());
@@ -142,9 +146,19 @@ public class DeviceAlarmMonitor {
     }
 
     private void clear(Alarm a, Device d) {
+        LocalDateTime now = LocalDateTime.now();
+        // 关闭必须走 CAS：① 必须把 open_key 置回 NULL（updateById 跳过 null 字段，写不出去，
+        // 那条警情会永久占住键位，该设备从此再也开不出离线警情）；
+        // ② 前置条件是刚读到的状态——人工处置（AlarmService.act）与本扫描没有互斥，
+        // 覆盖写会把处置人的结果抹掉，时间线里却留着两条。
+        int rows = alarmMapper.closeAlarm(a.getId(), a.getStatus(), AlarmConstants.RESOLVED, now, now);
+        if (rows == 0) {
+            log.info("设备离线告警解除跳过（状态已被改变）alarmId={} 期望 {}", a.getId(), a.getStatus());
+            return;
+        }
         a.setStatus(AlarmConstants.RESOLVED);
-        a.setResolvedAt(LocalDateTime.now());
-        alarmMapper.updateById(a);
+        a.setResolvedAt(now);
+        a.setOpenKey(null);
 
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_RECOVER,
                 String.format("设备 %s 已恢复上报，系统自动解除", d.getCode())));

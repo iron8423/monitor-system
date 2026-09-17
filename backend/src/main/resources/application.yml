@@ -3,7 +3,14 @@ spring:
     name: monitor-backend
   # 阶段 1：H2 内存库（零配置，两端一致）；阶段 2 切 application-postgres.yml
   datasource:
-    url: jdbc:h2:mem:monitor;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    # LOCK_TIMEOUT=10000 不是调优，是为了让 H2 与 PostgreSQL 的**并发行为一致**。
+    # H2 默认行锁等待只有 ~2000ms，到点抛 JdbcSQLTimeoutException(50200)，Spring 转成
+    # CannotAcquireLockException；而 PostgreSQL 是等前一个事务提交后按新版本重新判定
+    # WHERE，返回 0 行（CAS 失败）。加大到 10s 后，H2 也会等到对方提交、按新版本判定：
+    # 我们的 CAS 与「未解除唯一键」(V14) 在本地就能测出与生产相同的结果。
+    # 不加这一条的话，本地唯一观察得到的现象是「锁超时」，而真正的语义（0 行 / 23505）
+    # 只在生产出现——那正是无法在本地复现的并发 bug 的温床。
+    url: jdbc:h2:mem:monitor;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;LOCK_TIMEOUT=10000
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
@@ -69,3 +76,13 @@ monitor:
   # dev 默认值已与 B 统一为 dev-ingest-key（B 上报脚本默认同此值，见 B 答复 2026-09-09）；
   # 联调/生产用环境变量 MONITOR_INGEST_KEY 覆盖此默认值（与 B 协商一致的密钥）
   ingest-key: ${MONITOR_INGEST_KEY:dev-ingest-key}
+  ingest:
+    # 开发默认兼容旧演示消息；生产编排会通过环境变量强制打开标准消息校验。
+    strict-contract: ${INGEST_STRICT_CONTRACT:false}
+    # 允许 1000 点同刻一次上报，并为异常超大请求设置内存/SQL 参数上限。
+    max-batch-size: ${INGEST_MAX_BATCH_SIZE:2000}
+    # 时钟偏差容忍（秒），见 IngestTimePolicy：采集时间超前平台时间超过它即拒收
+    # （COLLECT_TIME_IN_FUTURE），接收时间超前超过它则钳到当前。300 秒与
+    # DeviceStatusPolicy.OFFLINE_MINUTES 同量级，且远大于任何合理的网关缓冲。
+    max-collect-ahead-seconds: ${INGEST_MAX_COLLECT_AHEAD_SECONDS:300}
+    max-receive-ahead-seconds: ${INGEST_MAX_RECEIVE_AHEAD_SECONDS:300}

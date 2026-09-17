@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import * as api from '@/api/monitor'
@@ -8,6 +8,7 @@ import MediaGallery from '@/components/MediaGallery.vue'
 import MediaUploader from '@/components/MediaUploader.vue'
 import SeriesChart from '@/components/SeriesChart.vue'
 import { useThresholds } from '@/composables/useThresholds'
+import { createRequestGuard } from '@/utils/requestGuard'
 
 /**
  * 测点详情（阶段 2 + 阶段 5 的影像）。验收第 6 条的原文是
@@ -137,16 +138,32 @@ const loadedTabs = ref({})
 const pointAlarms = ref([])
 const alarmsLoading = ref(false)
 
+/**
+ * 取数守卫（清单第 17 条：快速切换测点时，迟到的旧响应不许写回）。
+ *
+ * **告警与曲线各一个**：这是两次互不相干的取数，共用一个守卫会互相顶掉——
+ * 切到告警页签再点下一个测点，第二次 `loadAlarms` 会让曲线那次 `loadDetail` 的
+ * 代号失效，曲线的响应就被丢弃了。守卫的粒度必须与「一次独立取数」对齐。
+ */
+const alarmsGuard = createRequestGuard()
+
 async function loadAlarms() {
-  if (!selectedId.value) return
+  // 参数**快照**：`await` 之后 `selectedId.value` 可能已经换人了
+  const pointId = selectedId.value
+  if (!pointId) return
+  const token = alarmsGuard.next()
   alarmsLoading.value = true
   try {
-    const page = await api.listAlarms({ pointId: selectedId.value, pageNum: 1, pageSize: 50 })
+    const page = await api.listAlarms({ pointId, pageNum: 1, pageSize: 50 })
+    if (!alarmsGuard.isCurrent(token)) return // 迟到了：这是上一个点的警情，不许落到新点名下
     pointAlarms.value = page?.records || []
   } catch {
+    // 旧请求的失败同样不许把新测点的警情清空
+    if (!alarmsGuard.isCurrent(token)) return
     pointAlarms.value = []
   } finally {
-    alarmsLoading.value = false
+    // 旧请求的 finally 提前关掉**在途**新请求的 loading，用户看到的是「加载完了但什么也没有」
+    if (alarmsGuard.isCurrent(token)) alarmsLoading.value = false
   }
 }
 
@@ -189,27 +206,51 @@ function syncMetricCode() {
   }
 }
 
+const detailGuard = createRequestGuard()
+
 async function loadDetail() {
-  if (!selectedId.value) return
+  // 四项参数全部**快照**：`await` 之后这些 ref 都可能已经变了，
+  // 那时「请求」与「它属于哪一代」就对不上——这是「串数据」的另一半，
+  // 只挡写回不挡参数，仍会出现「B 点的图配 A 点的标题」
+  const pointId = selectedId.value
+  if (!pointId) return
+  const code = metricCode.value
+  const gran = granularity.value
   const from = new Date(Date.now() - rangeHours.value * 3600 * 1000).toISOString()
+
+  const token = detailGuard.next()
   loading.value = true
   try {
     const [l, s] = await Promise.all([
-      api.pointLatest(selectedId.value).catch(() => null),
-      api.pointSeries(selectedId.value, {
-        metricCode: metricCode.value,
-        granularity: granularity.value,
-        from,
-      }),
+      api.pointLatest(pointId).catch(() => null),
+      api.pointSeries(pointId, { metricCode: code, granularity: gran, from }),
     ])
+    if (!detailGuard.isCurrent(token)) return // 迟到的旧响应：一个字都不许写
     latest.value = l
     series.value = s
   } catch {
+    if (!detailGuard.isCurrent(token)) return // 旧请求的失败不许把新测点的数据清空
     latest.value = null
     series.value = null
   } finally {
-    loading.value = false
+    if (detailGuard.isCurrent(token)) loading.value = false
   }
+}
+
+/**
+ * 换「选择键」（点 / 测项 / 粒度 / 窗口）时先清空上一个点的结果。
+ *
+ * 不清的话，从发请求到新响应落地之间：标题、点号已经换成 B，表格和图还是 A 的
+ * ——这正是第 17 条在界面上最容易被看见的样子。
+ *
+ * **手动刷新（模板里的「刷新」按钮直接调 `loadDetail`）不走这里**：同参重试没有
+ * 「上一个点」，清了只会让图白闪一下。两者因此分成两个入口，而不是给 `loadDetail`
+ * 加参数——`watch` 的回调与 `@click` 都会把事件对象/新旧值当第一个实参塞进来。
+ */
+function reloadForSelection() {
+  latest.value = null
+  series.value = null
+  loadDetail()
 }
 
 async function loadChain() {
@@ -229,15 +270,23 @@ onMounted(() => {
   loadMetrics()
 })
 
+onBeforeUnmount(() => {
+  // 卸载后到达的响应没有组件可写了，但它仍会写进 ref 并可能触发 Vue 警告
+  detailGuard.invalidate()
+  alarmsGuard.invalidate()
+})
+
 watch(selectedId, syncMetricCode)
 
 // 换测点时，已经打开过的影像/告警页签必须重新拉——否则会出现
 // 「切到 B 测点，页签里还是 A 的照片和警情」这种最容易在演示现场被问住的错
 watch(selectedId, () => {
-  if (loadedTabs.value.alarms) loadAlarms()
+  if (!loadedTabs.value.alarms) return
+  pointAlarms.value = [] // 切点瞬间先清：不要让 A 点的警情挂在新点号下面等响应
+  loadAlarms()
 })
 
-watch([selectedId, metricCode, granularity, rangeHours], loadDetail)
+watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
 </script>
 
 <template>

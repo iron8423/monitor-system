@@ -11,13 +11,14 @@ import { resolvePointVisual } from '@/constants/status'
  * —— 演示场景里「几个晕圈按其值大小和颜色叠出来」既诚实又够看。真正的插值场等
  * 有面状采样数据（或测点上百）再说。
  *
- * 落地方式：`ellipse` + `heightReference: CLAMP_TO_GROUND`（贴地形，不做成浮空面），
+ * 落地方式：`ellipse` 使用测点档案高程。山体是独立 GLB，Cesium 的
+ * `CLAMP_TO_GROUND` 只能贴椭球/terrain，不能贴 GLB，所以这里不能再用地形钳制。
  * 材质是一张画好的径向渐变贴图（按颜色缓存，别每帧重画）。
  */
 
 /** 晕圈半径（米）：基础 + 按 |值| 线性放大，封顶免得一个大值糊满全屏 */
-const RADIUS_MIN = 260
-const RADIUS_MAX = 1400
+const RADIUS_MIN = 12
+const RADIUS_MAX = 42
 
 /**
  * 每个测项「每 1 个单位放大多少米」。
@@ -28,10 +29,10 @@ const RADIUS_MAX = 1400
  * 这里换成读档案即可（`heatScaleOf` 是唯一入口）。
  */
 const RADIUS_PER_UNIT = {
-  defo_mm: 80,
-  rate_mm_d: 20,
+  defo_mm: 5,
+  rate_mm_d: 2,
 }
-const DEFAULT_RADIUS_PER_UNIT = 40
+const DEFAULT_RADIUS_PER_UNIT = 3
 
 export function heatScaleOf(metricCode) {
   return RADIUS_PER_UNIT[metricCode] ?? DEFAULT_RADIUS_PER_UNIT
@@ -75,27 +76,29 @@ export function heatRadiusOf(value, metricCode) {
   return Math.min(RADIUS_MAX, RADIUS_MIN + v * heatScaleOf(metricCode))
 }
 
-export function createHeatmapLayer(viewer) {
+export function createHeatmapLayer(viewer, { maxPoints = 200 } = {}) {
   /** pointId -> entity */
   const handles = new Map()
 
   function draw(item) {
     const lon = Number(item.longitude)
     const lat = Number(item.latitude)
+    const ground = Number(item.altitude) || 0
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null
     const radius = heatRadiusOf(item.value, item.metricCode)
     if (!radius) return null
 
     const visual = resolvePointVisual(item)
+    // 长、短半轴复用同一个属性：半径缩小时只更新一次，避免 Cesium 在两次
+    // 顺序赋值之间看到“新长轴 < 旧短轴”的非法中间状态。
+    const radiusProperty = new Cesium.ConstantProperty(radius)
     const entity = viewer.entities.add({
       id: `heat-${item.id}`,
-      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, ground + 0.45),
       ellipse: {
-        semiMajorAxis: radius,
-        semiMinorAxis: radius,
-        // 贴地形：不写 height + CLAMP_TO_GROUND，坡地上才不会一半埋进地里
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        classificationType: Cesium.ClassificationType.TERRAIN,
+        semiMajorAxis: radiusProperty,
+        semiMinorAxis: radiusProperty,
+        height: ground + 0.45,
         material: new Cesium.ImageMaterialProperty({
           image: gradientTexture(visual.color, 0.5),
           transparent: true,
@@ -104,7 +107,7 @@ export function createHeatmapLayer(viewer) {
       properties: { pointId: item.id, kind: 'heat' },
     })
     entity.show = false
-    return { entity, visual: visual.key, radius }
+    return { entity, visual: visual.key, radius, radiusProperty }
   }
 
   function paint(handle, item) {
@@ -115,8 +118,7 @@ export function createHeatmapLayer(viewer) {
       return
     }
     handle.entity.show = true
-    handle.entity.ellipse.semiMajorAxis = radius
-    handle.entity.ellipse.semiMinorAxis = radius
+    handle.radiusProperty.setValue(radius)
     handle.entity.ellipse.material = new Cesium.ImageMaterialProperty({
       image: gradientTexture(visual.color, 0.5),
       transparent: true,
@@ -131,9 +133,26 @@ export function createHeatmapLayer(viewer) {
      * 拾取要穿透这层：热力实体也带 pointId，点上去应当当普通测点处理 —— 见 pickId 的过滤。
      */
     sync(items, { visible = true } = {}) {
+      // 大规模项目只绘制绝对值最大的 N 个有效点。热力圈是辅助表达，不能让
+      // 1000 个半透明椭圆拖垮主测点与告警渲染；N 由项目数字孪生配置控制。
+      const selected = new Set(
+        [...(items || [])]
+          .filter((item) => heatRadiusOf(item.value, item.metricCode) > 0)
+          .sort((a, b) => Math.abs(Number(b.value)) - Math.abs(Number(a.value)))
+          .slice(0, Math.max(0, maxPoints))
+          .map((item) => item.id),
+      )
       const seen = new Set()
       for (const item of items || []) {
         seen.add(item.id)
+        if (!selected.has(item.id)) {
+          const skipped = handles.get(item.id)
+          if (skipped) {
+            viewer.entities.remove(skipped.entity)
+            handles.delete(item.id)
+          }
+          continue
+        }
         const existing = handles.get(item.id)
         if (existing) {
           existing.item = item
@@ -159,6 +178,12 @@ export function createHeatmapLayer(viewer) {
       for (const handle of handles.values()) {
         handle.entity.show = visible && heatRadiusOf(handle.item?.value, handle.item?.metricCode) > 0
       }
+    },
+
+    /** 按项目调整热力实体预算；下一次 sync 时立即收敛到新上限。 */
+    setMaxPoints(limit) {
+      const value = Number(limit)
+      if (Number.isFinite(value) && value >= 0) maxPoints = Math.floor(value)
     },
 
     destroy() {

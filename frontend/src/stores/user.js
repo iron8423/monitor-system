@@ -37,9 +37,10 @@ export const useUserStore = defineStore('user', {
 
     async logout() {
       try {
+        // 先让服务端作废令牌，再清本地——顺序反了就等于没调。
         await logoutApi()
       } catch {
-        // 无状态 JWT：服务端失败也不影响本地登出
+        // 服务端不可达时本地照常登出：界面必须先退出，令牌是否已作废由服务端负责。
       }
       this.token = ''
       this.user = null

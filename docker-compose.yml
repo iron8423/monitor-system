@@ -59,6 +59,25 @@ services:
       # 演示之外（真联调/上线）必须通过 .env 覆盖
       JWT_SECRET: ${JWT_SECRET:-monitor-system-demo-secret-key-please-change-in-prod-0123456789}
       MONITOR_INGEST_KEY: ${MONITOR_INGEST_KEY:-dev-ingest-key}
+      # 生产编排默认拒绝错误版本、未知测项、未绑定设备/点以及非法质量枚举。
+      INGEST_STRICT_CONTRACT: ${INGEST_STRICT_CONTRACT:-true}
+      INGEST_MAX_BATCH_SIZE: ${INGEST_MAX_BATCH_SIZE:-2000}
+      # 时钟偏差容忍（秒），两个默认值都写成 300 ——与 application.yml 一致。
+      #
+      # 刻意**不**复制紧邻上面那行 INGEST_STRICT_CONTRACT 的「app 默认 false、compose 默认 true」
+      # 不对称：strict-contract 是安全姿态，dev 松、prod 紧是有意的；而时钟容差是物理常量，
+      # 让 dev 与 prod 不同只会导致 dev 永远测不到 prod 的行为。照抄邻居是这里最大的诱惑。
+      INGEST_MAX_COLLECT_AHEAD_SECONDS: ${INGEST_MAX_COLLECT_AHEAD_SECONDS:-300}
+      INGEST_MAX_RECEIVE_AHEAD_SECONDS: ${INGEST_MAX_RECEIVE_AHEAD_SECONDS:-300}
+      # 演示账号在本编排里**显式打开**。
+      #
+      # 为什么必须显式写：本编排用的也是 postgres profile，而该 profile 现在默认
+      # `monitor.demo-accounts.enabled=false`（生产不建演示账号的安全默认值，见
+      # application-postgres.yml）。不写这一行，一台全新的 dev 环境起来后一个账号都没有，
+      # 谁都登不进去；而 10-scope.sh 还需要其中的 outsider 做数据隔离对照组。
+      #
+      # 也就是说：安全默认值归 postgres profile，dev 的便利在这里显式豁免一次。
+      MONITOR_DEMO_ACCOUNTS: ${MONITOR_DEMO_ACCOUNTS:-true}
       UPLOAD_DIR: /app/data/media
     volumes:
       # 上传的无人机影像同样落卷：否则后端一重启，测点上的图就全丢了
@@ -78,6 +97,8 @@ services:
     build:
       context: ./frontend
       args:
+        # 默认加载仓库内的低多边形山地 GLB，不请求 ion、地形或在线影像。
+        VITE_SCENE_MODE: ${VITE_SCENE_MODE:-mountain}
         # Cesium ion token 是**构建期**内联进产物的，不是运行时读的——
         # 改它必须 `docker compose build frontend` 重建镜像，只 restart 不会生效。
         # 留空则大屏走「无地形兜底底图」的降级路径（不白屏，功能正常，只是没地形）。
@@ -88,6 +109,9 @@ services:
         # 等后端能应答 health 再起：nginx 自己不怕后端晚起，但这样
         # 「up 完就能用」成立，不必先刷出几个 502 再等
         condition: service_healthy
+    volumes:
+      # 运行期只读挂载：替换/增加 GLB 或 3D Tiles 不必重新构建前端镜像。
+      - ${DIGITAL_TWIN_ASSET_DIR:-./frontend/public/models}:/usr/share/nginx/html/models:ro
     ports:
       - "${FRONTEND_PORT:-80}:80"
     healthcheck:

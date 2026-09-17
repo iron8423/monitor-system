@@ -10,16 +10,45 @@ import {
   listProjects,
   listScenes,
   pointLatest,
+  projectPointsLatest,
   projectSummary,
 } from '@/api/monitor'
+import { alarmRankOf } from '@/constants/status'
 import { TERMINAL_STATUSES } from '@/utils/labels'
 import { warnThresholdOf } from '@/utils/thresholds'
+import { getToken } from '@/utils/token'
 
 /** 主测项的默认选择：形变是本项目的第一个场景，档案里没有它就退回排序最靠前的测项 */
 const DEFAULT_PRIMARY_METRIC = 'defo_mm'
 
 /** latest 里这几项不是测项值，不能当测项读（contract §3） */
-const NON_METRIC_KEYS = new Set(['collectTime', 'receiveTime', 'quality', 'signal', 'position', 'state'])
+const NON_METRIC_KEYS = new Set(['collectTime', 'receiveTime', 'quality', 'signal', 'position', 'state', 'deviceId', 'messageId', 'sequence', 'schemaVersion'])
+
+// 请求序号属于当前 store 实例；不在多个页面/测试实例之间共用。
+const requests = new WeakMap()
+function requestState(store) {
+  if (!requests.has(store)) requests.set(store, { snapshot: 0, latest: 0 })
+  return requests.get(store)
+}
+
+function collectMillis(latest) {
+  if (typeof latest?.collectTime !== 'string' || !latest.collectTime.trim()) return NaN
+  return Date.parse(latest.collectTime)
+}
+
+/**
+ * 最新值是一条观测，而不是不同时间测项的拼盘。
+ * 旧时间永不覆盖；无版本号的同时间 SSE 由先到值暂时占位，再由服务器快照对账。
+ * 同时间快照仅在请求期间本地未更新时采用，避免在途 HTTP 覆盖刚到的 SSE。
+ */
+function preferSnapshot(current, incoming, atRequestStart) {
+  const incomingTime = collectMillis(incoming?.latest)
+  const currentTime = collectMillis(current?.latest)
+  if (!Number.isFinite(incomingTime)) return current || { ...incoming, latest: null, state: null }
+  if (!Number.isFinite(currentTime) || incomingTime > currentTime) return incoming
+  if (incomingTime === currentTime && current === atRequestStart) return incoming
+  return current
+}
 
 /** 从测项档案里挑一个可用的主测项；当前值仍有效就保持不变 */
 function pickPrimaryMetric(rows, current) {
@@ -39,14 +68,25 @@ function metricValuesOf(latest) {
   return out
 }
 
-/** 把警情列表折成「测点 → 未解除警情」的映射；终态与设备告警不进这张表。 */
+/**
+ * 把警情列表折成「未解除警情表」，**按 `alarmId` 键**。
+ *
+ * 为什么不能按 `pointId` 键：一个测点可以同时有多条未解除警情（不同测项、不同规则）。
+ * 按 pointId 只存一条时，后到的那条覆盖先到的，而**解除其中任意一条**都会把这个点整个删掉
+ * ——另一条还没解除的警情颜色跟着消失。「这个点显示成什么颜色」由 `openAlarmsByPoint`
+ * 汇总（取最高等级），不在写入侧做这种有损压缩。
+ *
+ * 终态与设备告警不进这张表：终态已经结束；设备告警没有 pointId，不参与测点着色，
+ * 它只进 `recentAlarms`（大屏横幅要说得出「哪台设备离线了」）。
+ */
 function toAlarmMap(records) {
   const map = {}
   for (const a of records || []) {
-    if (!a?.pointId) continue
+    if (!a?.id || !a.pointId) continue
     if (TERMINAL_STATUSES.includes(a.status)) continue
-    map[a.pointId] = {
+    map[a.id] = {
       alarmId: a.id,
+      pointId: a.pointId,
       level: a.level,
       status: a.status,
       at: a.triggeredAt,
@@ -104,9 +144,7 @@ export const useMonitorStore = defineStore('monitor', {
     /**
      * 当前用户**可见**的设备 id（GET /devices，A 的项目隔离已把范围限到成员项目）。
      *
-     * 用途只有一个：SSE 目前**不按订阅者过滤**（A 的 09-14 日志 §120 记为已知未修），
-     * 推来的是全库事件。大屏那条告警横幅如果不判可见性，就会出现「别的项目的告警」
-     * 挂在屏幕上——项目隔离在界面上被 SSE 绕过去了。
+     * 后端已按订阅者过滤 SSE，前端仍用可见设备列表约束界面状态。
      */
     deviceIds: [],
 
@@ -169,9 +207,37 @@ export const useMonitorStore = defineStore('monitor', {
       return state.scenes.find((s) => s.id === object.sceneId)?.name || '—'
     },
 
+    /**
+     * 「测点 → 该点等级最高的未解除警情」，由 `activeAlarms` 汇总而来。
+     *
+     * `activeAlarms` 是**按 alarmId** 存的全集（同一点可以有多条），这里做一次聚合，
+     * 于是着色只需要问「这个点有没有警情、其中最高是什么等级」。
+     * 等级相同时取触发时间较晚的那条，只是为了让结果确定——否则同一份数据可能因为
+     * 遍历顺序不同给出两个答案。
+     */
+    openAlarmsByPoint(state) {
+      const byPoint = {}
+      for (const alarm of Object.values(state.activeAlarms)) {
+        if (alarm.pointId == null) continue
+        const current = byPoint[alarm.pointId]
+        if (!current) {
+          byPoint[alarm.pointId] = alarm
+          continue
+        }
+        const rank = alarmRankOf(alarm.level)
+        const currentRank = alarmRankOf(current.level)
+        if (rank > currentRank
+          || (rank === currentRank && String(alarm.at || '') > String(current.at || ''))) {
+          byPoint[alarm.pointId] = alarm
+        }
+      }
+      return byPoint
+    },
+
     /** 测点 + 最新值 + 场景名，拍平成视图直接能用的结构 */
     enrichedPoints(state) {
       const code = state.primaryMetricCode
+      const alarms = this.openAlarmsByPoint
       return this.pointsOfProject.map((point) => {
         const vo = state.latestMap[point.id]
         const latest = vo?.latest || null
@@ -202,10 +268,11 @@ export const useMonitorStore = defineStore('monitor', {
           signal: latest?.signal ?? null,
           state: vo?.state || null,
           // 告警优先级最高（resolvePointVisual 的第一档），
-          // 3D 那圈脉冲环就是靠这两个字段转起来的
-          hasAlarm: Boolean(state.activeAlarms[point.id]),
-          alarmLevel: state.activeAlarms[point.id]?.level || null,
-          alarmStatus: state.activeAlarms[point.id]?.status || null,
+          // 3D 那圈脉冲环就是靠这两个字段转起来的。
+          // 同一测点多条未解除警情时，这里给的是**等级最高**的那条。
+          hasAlarm: Boolean(alarms[point.id]),
+          alarmLevel: alarms[point.id]?.level || null,
+          alarmStatus: alarms[point.id]?.status || null,
         }
       })
     },
@@ -218,12 +285,20 @@ export const useMonitorStore = defineStore('monitor', {
   actions: {
     /** 首屏快照：档案 + 概览 + 每个测点的最新值（并发取，个别失败不影响整体） */
     async loadSnapshot() {
+      const state = requestState(this)
+      const requestId = ++state.snapshot
+      const token = getToken()
+      let projectId = this.projectId
+      const active = () => state.snapshot === requestId
+        && this.projectId === projectId && getToken() === token
       this.loading = true
       this.error = null
       this.noProjectReason = ''
       try {
         if (!this.projects.length) {
-          this.projects = await listProjects()
+          const projects = await listProjects()
+          if (!active()) return
+          this.projects = projects
         }
         /*
          * 项目隔离（A 的 09-14 批）：`/projects` 只返回「我是成员」的项目。
@@ -239,16 +314,18 @@ export const useMonitorStore = defineStore('monitor', {
         }
         if (!this.projectId) {
           this.projectId = this.projects[0]?.id ?? null
+          projectId = this.projectId
         }
 
         const [scenes, objects, points, summary, alarms] = await Promise.all([
           listScenes(),
           listObjects(),
           listPoints(),
-          this.projectId ? projectSummary(this.projectId) : Promise.resolve(null),
+          projectId ? projectSummary(projectId) : Promise.resolve(null),
           // 警情是「非首屏必需」的：失败不该把整个快照判成失败，故单独 catch
           listAlarms({ pageNum: 1, pageSize: 200 }).catch(() => null),
         ])
+        if (!active()) return
         this.scenes = scenes
         this.objects = objects
         this.points = points
@@ -266,36 +343,71 @@ export const useMonitorStore = defineStore('monitor', {
           listAlarmRules().catch(() => []),
           listDevices().catch(() => []),
         ])
+        if (!active()) return
         this.metrics = metrics || []
         this.rules = rules || []
         this.deviceIds = (devices || []).map((d) => d.id)
         this.primaryMetricCode = pickPrimaryMetric(this.metrics, this.primaryMetricCode)
 
         await this.refreshLatest()
-        this.loadedAt = new Date().toISOString()
       } catch (e) {
         // 必须把失败**记下来**，不能只置 loading=false 就走。
         // loadedAt 仍然是空串，而视图那条 `!loadedAt → '加载中…'` 会**永远**成立——
         // 于是「请求失败」被显示成「还在加载」，一个不会自己结束的假象。
-        this.error = e?.message || '数据加载失败'
+        if (active()) this.error = e?.message || '数据加载失败'
       } finally {
-        this.loading = false
+        if (active()) this.loading = false
       }
     },
 
     /** 只刷最新值（大屏定时刷新、或 SSE 断线后补齐时用） */
     async refreshLatest() {
-      // 只刷**当前项目可见**的测点：别的项目的点既不在画面上，也没有理由占请求
-      const visible = this.pointsOfProject
-      const results = await Promise.allSettled(visible.map((p) => pointLatest(p.id)))
-      const map = { ...this.latestMap }
-      results.forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          map[visible[index].id] = result.value
+      const state = requestState(this)
+      const requestId = ++state.latest
+      const projectId = this.projectId
+      const token = getToken()
+      const active = () => state.latest === requestId
+        && this.projectId === projectId && getToken() === token
+      const visible = [...this.pointsOfProject]
+      const atRequestStart = { ...this.latestMap }
+      if (!visible.length) {
+        this.latestMap = {}
+        this.loadedAt = new Date().toISOString()
+        return
+      }
+      let rows
+      let partial = false
+      try {
+        rows = await projectPointsLatest(projectId)
+        if (!Array.isArray(rows)) throw new Error('最新值接口返回格式错误')
+      } catch (error) {
+        if (!active()) return
+        // 仅旧服务确实没有批量接口时兼容单点；网络/鉴权/500 错误不能放大成 N 个请求。
+        if (![404, 405].includes(error?.response?.status ?? error?.status)) {
+          this.error = error?.message || '最新值刷新失败'
+          return
         }
-      })
+        const results = await Promise.allSettled(visible.map((p) => pointLatest(p.id)))
+        rows = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
+        partial = results.some((result) => result.status === 'rejected')
+        console.warn('[monitor] 批量最新值接口不可用，已退回单点查询：', error?.message || error)
+      }
+      if (!active()) return
+      // 必须在 await 之后读取当前状态：请求期间可能已经收到更新的 SSE。
+      const visibleIds = new Set(visible.map((p) => String(p.id)))
+      const map = Object.fromEntries(Object.entries(this.latestMap)
+        .filter(([id]) => visibleIds.has(String(id))))
+      const received = new Set()
+      for (const row of rows || []) {
+        if (!row || !visibleIds.has(String(row.pointId))) continue
+        const id = row.pointId
+        received.add(String(id))
+        map[id] = preferSnapshot(map[id], row, atRequestStart[id])
+      }
+      partial ||= received.size < visibleIds.size
       this.latestMap = map
-      this.loadedAt = new Date().toISOString()
+      this.error = partial ? '部分测点刷新失败，已保留现有数据，请稍后重试' : null
+      if (!partial) this.loadedAt = new Date().toISOString()
     },
 
     /**
@@ -304,26 +416,48 @@ export const useMonitorStore = defineStore('monitor', {
      * 为什么要落回这一份：大屏、侧栏、弹窗、曲线都从 `latestMap` 取数，
      * 推送若各页面各存一份，同一个时刻会出现「3D 上已经跳了、列表里还是旧值」。
      *
-     * 不认识的 pointId 直接忽略——SSE 推的是全库，本项目之外的测点不该进快照。
+     * 只接受当前项目档案中的测点；首屏 HTTP 尚未返回时也可接收首条有效 SSE。
      * @returns {boolean} 是否真的并进了一份数据（调用方据此计数）
      */
     applyMeasurement(evt) {
-      const id = evt?.pointId
-      if (!id || !this.latestMap[id]) return false
-      const { pointId, pointCode, ...rest } = evt
-      const prev = this.latestMap[id]
-      this.latestMap = {
-        ...this.latestMap,
-        [id]: {
-          ...prev,
-          pointId: prev.pointId ?? pointId,
-          pointCode: prev.pointCode ?? pointCode,
-          // 保留 prev.latest 里的 signal/position 等推送里没有的字段
-          latest: { ...(prev.latest || {}), ...rest },
-        },
+      return this.applyMeasurements([evt]) === 1
+    },
+
+    /**
+     * 批量并入 SSE 测值。1000 点同刻到达时只复制一次 latestMap，只触发一次视图重算。
+     * @returns {number} 真正属于当前快照的事件数
+     */
+    applyMeasurements(events) {
+      let next = null
+      let accepted = 0
+      const visible = new Map(this.pointsOfProject.map((p) => [String(p.id), p]))
+      for (const evt of events || []) {
+        const point = visible.get(String(evt?.pointId))
+        if (!point) continue
+        const id = point.id
+        const current = (next || this.latestMap)[id]
+        const incomingTime = collectMillis(evt)
+        const currentTime = collectMillis(current?.latest)
+        if (!Number.isFinite(incomingTime)) continue
+        if (Number.isFinite(currentTime) && incomingTime <= currentTime) continue
+        const { pointId, pointCode, ...rest } = evt
+        if (next === null) next = { ...this.latestMap }
+        next[id] = {
+          ...current,
+          pointId: id,
+          pointCode: point.code ?? pointCode,
+          // 当前后端没有推送全部附加字段，缺失值先显示未知，随后由 HTTP 对账补齐。
+          // 不沿用上一时刻的速率、质量或目标状态冒充本次观测。
+          latest: { quality: null, signal: null, position: null, ...rest },
+          state: evt.state ?? null,
+        }
+        accepted += 1
       }
-      this.loadedAt = new Date().toISOString()
-      return true
+      if (next !== null) {
+        this.latestMap = next
+        this.loadedAt = new Date().toISOString()
+      }
+      return accepted
     },
 
     /**
@@ -338,11 +472,9 @@ export const useMonitorStore = defineStore('monitor', {
       if (!evt) return false
 
       /*
-       * 项目隔离：SSE 不按订阅者过滤（A 的日志 §120），所以这里必须自己把「看不到的」
-       * 挡在门外，否则别的项目的告警会以横幅形式挂在大屏上。
+       * 后端按订阅者过滤，前端再按当前画面约束告警状态。
        *   - 测点告警：只在**已加载的可见测点**里认（latestMap 就是可见测点的集合）；
        *   - 设备告警：只认**可见设备**（deviceIds 来自 /devices，A 已按成员项目过滤）。
-       * 服务端按订阅者过滤才是根治，那是 A 侧的待办；前端这一层是当下不再外溢的保证。
        */
       if (evt.alarmType === 'POINT') {
         if (evt.pointId == null || !this.latestMap[evt.pointId]) return false
@@ -350,15 +482,19 @@ export const useMonitorStore = defineStore('monitor', {
         if (evt.deviceId == null || !this.deviceIds.includes(evt.deviceId)) return false
       }
 
-      const id = evt.pointId
+      // 按 **alarmId** 记账。此前按 pointId 存单条，于是同一点的另一条未解除警情
+      // 会被后到的那条覆盖，而解除其中任意一条又把这个点整条删掉——另一条还没解除，
+      // 颜色却没了。着色要的「最高等级」由 openAlarmsByPoint 汇总，不在这里压缩。
+      // 没有 id 的事件无法记账，但仍照常进 recentAlarms。
       const closed = TERMINAL_STATUSES.includes(evt.status)
-      if (id) {
+      if (evt.alarmType === 'POINT' && evt.id != null) {
         const next = { ...this.activeAlarms }
         if (closed) {
-          delete next[id]
+          delete next[evt.id]
         } else {
-          next[id] = {
+          next[evt.id] = {
             alarmId: evt.id,
+            pointId: evt.pointId,
             level: evt.level,
             status: evt.status,
             at: evt.triggeredAt,
@@ -401,6 +537,7 @@ export const useMonitorStore = defineStore('monitor', {
       if (!id || id === this.projectId) return
       if (!this.projects.some((p) => p.id === id)) return
       this.projectId = id
+      requestState(this).latest += 1
       this.summary = null
       // 清掉上一个项目的最新值：它同时是「SSE 事件可见性」的判据（见 applyAlarm），
       // 留着就会出现「切走之后还认得出旧项目的点」。

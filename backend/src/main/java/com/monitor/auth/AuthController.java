@@ -29,9 +29,15 @@ public class AuthController {
         return Result.ok(authService.login(request));
     }
 
+    /**
+     * 登出：作废该用户此前签发的全部令牌，不只是让客户端丢掉。
+     *
+     * <p>此前这里是空的（「无状态 JWT，客户端丢弃即可」）——那意味着一个拿到令牌的人，
+     * 在令牌到期前无论如何都踢不掉。现在按用户递增令牌版本，登出即全端下线。</p>
+     */
     @PostMapping("/logout")
-    public Result<Void> logout() {
-        // 无状态 JWT：服务端无会话，客户端丢弃 token 即可
+    public Result<Void> logout(@AuthenticationPrincipal SecurityUser currentUser) {
+        authService.logout(currentUser);
         return Result.ok();
     }
 

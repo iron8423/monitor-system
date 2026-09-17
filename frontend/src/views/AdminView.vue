@@ -96,6 +96,8 @@ const TABS = [
       { key: 'type', label: '测点类型', type: 'select', options: ['POINT_DEFORMATION'], required: true },
       { key: 'longitude', label: '经度', type: 'number' },
       { key: 'latitude', label: '纬度', type: 'number' },
+      // 测点自己的高程（这个点在空间里的位置）。**不是**雷达基座几何——
+      // 那 7 个字段（朝向/俯仰/量程/半视场角/天线高度/基座高程）属于设备，在下面「设备」页签
       { key: 'altitude', label: '高程（m）', type: 'number' },
       { key: 'enabled', label: '启用', type: 'switch', default: true },
     ],
@@ -123,6 +125,18 @@ const TABS = [
       { key: 'serialNo', label: '序列号' },
       { key: 'longitude', label: '经度', type: 'number' },
       { key: 'latitude', label: '纬度', type: 'number' },
+      // ---- 雷达安装几何。字段名与 asset/entity/Device.java 逐字一致，**别改名** ----
+      // 这 7 个决定「雷达能不能看到某个目标」（`RadarCoveragePolicy`），也就是标定的
+      // 空间判据。改动其中任何一个都会让已有标定失效（后端置 INVALID，
+      // 见清单第 09 条）——改之前先想清楚要不要重标。留空不发 null，
+      // `updateById` 跳过 null，所以只改名称时这里空着不会把已有几何清掉。
+      { key: 'altitude', label: '基座高程（m）', type: 'number' },
+      { key: 'headingDegrees', label: '朝向角（°）', type: 'number' },
+      { key: 'pitchDegrees', label: '俯仰角（°）', type: 'number' },
+      { key: 'detectionRangeM', label: '探测量程（m）', type: 'number' },
+      { key: 'halfAngleDegrees', label: '水平半视场角（°）', type: 'number' },
+      { key: 'verticalHalfAngleDegrees', label: '垂直半视场角（°）', type: 'number' },
+      { key: 'antennaHeightM', label: '天线离地高度（m）', type: 'number' },
       {
         key: 'status',
         label: '状态标注',

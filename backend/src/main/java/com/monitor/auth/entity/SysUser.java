@@ -32,6 +32,14 @@ public class SysUser {
 
     private Boolean enabled;
 
+    /**
+     * 令牌版本：JWT 里带签发时的值，鉴权时与这里比对，不等即视为已失效。
+     *
+     * <p>递增它就作废该用户此前签发的全部令牌（停用/降权/改密/登出）。不外泄给前端
+     * ——{@code UserVO.from} 不含本字段。</p>
+     */
+    private Integer tokenVersion;
+
     private Integer deleted;
 
     @TableField(fill = FieldFill.INSERT)

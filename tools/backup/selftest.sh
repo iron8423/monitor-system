@@ -7,21 +7,22 @@
 # 验收第 8 条的原话是「**恢复后**查得到历史/告警/附件」——所以这里不能只验「命令没报错」，
 # 要真的把库改坏、再用备份救回来，然后逐样查一遍。做法：
 #   ① 先往演示库挂一张真附件（附件在卷里，不在库里，是这条验收单独的一半）
-#   ② 记下基线：用 API 数出来的 measurement / alarm / media 条数 + 一条具体的告警 id
+#   ② 记下基线：measurement / alarm 条数与一条具体的告警 id（走 psql 直连库数全库 / 取行）+
+#      测点 1 的附件条数（走 API，按测点列）
 #   ③ 备份（库 + 附件卷）
 #   ④ **破坏**：直接进 PG 灌一条假项目、删掉那条真实告警、删掉附件文件
 #      —— 走 psql 不走 API：API 会带业务校验和逻辑删除，破坏得不够彻底
 #   ⑤ 恢复
 #   ⑥ 逐样查回来：假项目没了、被删的告警回来了、条数回到基线、附件还能读出图
 #
-# 与其它套件的分工：01–09 跑在 H2 空库上、不碰 docker；这一条必须跑在 compose 的
+# 与其它套件的分工：其余套件都跑在 H2 空库上、不碰 docker；这一条必须跑在 compose 的
 # PostgreSQL 上（备份恢复是 PG 的事），所以不并进 run-all.sh，单独跑。
 # 依赖 compose 起着，且**会改动演示库**（最后恢复回备份那一刻的状态）。
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 
-# 复用验收套件的公共库：登录、断言、计数口径都与 01–09 一致，不另起一套
+# 复用验收套件的公共库：登录、断言、计数口径都与其它套件一致，不另起一套
 source "$HERE/../acceptance/lib.sh"
 
 BACKUP_SH="$HERE/pg-backup.sh"
@@ -59,7 +60,7 @@ rs=json.load(sys.stdin)['data']
 print([m['note'] for m in rs])")"
 check "附件内容可读（恢复前基线）" "200" "$(http_code "$BASE/media/$MEDIA_ID/content?token=$TOK")"
 
-section "② 记基线（用 API 数，不用 SQL —— 口径与其它套件一致）"
+section "② 记基线（附件数走 API 按测点列，与 06 套件口径一致；measurement / alarm 条数与取样告警 id 直接 psql 连库数——measurement 没有全库计数的接口口径，series 是按测点返回的）"
 # 附件数按测点列，不按全库：这个卷里可能还有别的套件留下的图，全库数会随它们漂移
 N_MEDIA=$(curl -s "$BASE/points/1/media" -H "$AUTH" | python3 -c "
 import sys,json;print(len(json.load(sys.stdin)['data']))")

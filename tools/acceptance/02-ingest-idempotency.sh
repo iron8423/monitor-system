@@ -115,6 +115,117 @@ check "拒收的那几条没有落库" "$BAD_BEFORE" \
   "$(curl -s "$BASE/points/$PID/series?metricCode=defo_mm" -H "$AUTH" \
      | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")"
 
+# ---- ⑩ 的第二半（清单第 10 条）：未来时间戳 ----
+#
+# 与上面同族，但**必须断言 reason 而不只是计数**：只数 rejected 的话，
+# 「未来时间」与「格式非法」两种原因不可区分，这一节等于没验。
+#
+# 拒收未来的 collectTime 是为了不让它成为「当前值」：latestRowOf 按 collect_time DESC 排，
+# 一条 2099 的行会无条件胜出，把 /points/{id}/latest、项目快照与 maxDeformation 永久钉住。
+# 注意**不**测「未来时间会不会解除延迟告警」——那条读起来更吓人，但站不住：
+# DataQualityPolicy.ratio 的分母是窗口内全部行，任何不算延迟的行都同样稀释它，未来时间
+# 在延迟判据上没有独有的杀伤力。
+#
+# 边界两侧各留 2 秒余量：`ts` 生成时刻与后端 batchNow 之间隔着一次 curl 往返，
+# 卡在整 299/301 秒上会让结论取决于机器快慢。
+#
+# **本节独占一个测点**（同 08 ② 的做法，理由不同）：下面有两条断言要**收下**超前的时间戳
+# （+1min 与 +298s），而「收下」就是真的落库。本套件 ⑪ 断言 $POINT 的 latest 取同 collect_time
+# 里后写的那条 —— 那两条行的 collect_time 落在 2026-08-27 之后，会无条件成为 latest，
+# 于是 ⑪ 实得 1.0 而不是 2.22（第一次跑就是这么红的）。
+# 靠「反正会被拒收」蒙不过去：被拒的两条不写库，被收的三条写。
+FP="P-FUT-$RUN_ID"
+FPID=$(curl -s -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
+       -d "{\"objectId\":1,\"code\":\"$FP\",\"name\":\"时间闸门验收临时测点\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
+       | data_of "['id']")
+info "本节独占临时测点 $FP -> pointId=$FPID"
+CT_AHEAD2H=$(ts 120)
+F2=$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
+     -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-fut2h\",\"deviceId\":\"radar-001\",\"pointCode\":\"$FP\",\"collectTime\":\"$CT_AHEAD2H\",\"metrics\":{\"defo_mm\":1.0}}]}")
+check "collectTime=now+2h -> rejected=1" "1" "$(printf '%s' "$F2" | data_of "['rejected']")"
+check "collectTime=now+2h -> accepted=0" "0" "$(printf '%s' "$F2" | data_of "['accepted']")"
+check "拒收原因码是 COLLECT_TIME_IN_FUTURE" "COLLECT_TIME_IN_FUTURE" \
+  "$(printf '%s' "$F2" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['results'][0]['reason'])")"
+
+# 反过拟合：没有这一条，一个「拒绝任何未来时间」的实现（容差写成 0）也能全绿。
+# 真实设备时钟快几秒是常态，全都拒掉等于把好数据也丢了。
+CT_SOON=$(ts 1)
+F1=$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
+     -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-fut1m\",\"deviceId\":\"radar-001\",\"pointCode\":\"$FP\",\"collectTime\":\"$CT_SOON\",\"metrics\":{\"defo_mm\":1.0}}]}")
+check "collectTime=now+1min（容差内）-> accepted=1" "1" "$(printf '%s' "$F1" | data_of "['accepted']")"
+
+# 容差两侧：默认 300 秒（monitor.ingest.max-collect-ahead-seconds）
+CT_298=$(ts 4.9667)   # 298 秒
+CT_302=$(ts 5.0333)   # 302 秒
+check "collectTime=now+298s（容差内）-> accepted=1" "1" \
+  "$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
+     -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-fut298\",\"deviceId\":\"radar-001\",\"pointCode\":\"$FP\",\"collectTime\":\"$CT_298\",\"metrics\":{\"defo_mm\":1.0}}]}" \
+     | data_of "['accepted']")"
+check "collectTime=now+302s（超容差）-> rejected=1" "1" \
+  "$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
+     -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-fut302\",\"deviceId\":\"radar-001\",\"pointCode\":\"$FP\",\"collectTime\":\"$CT_302\",\"metrics\":{\"defo_mm\":1.0}}]}" \
+     | data_of "['rejected']")"
+
+# ---- 未来 receiveTime：**钳制**，不是拒收 ----
+#
+# 这才是清单第 10 条里真正要紧的一半：设备在线判据读的是 lastReportTime
+# （DeviceStatusPolicy 判 lastReportTime.isAfter(now-5min)），一个未来的值**永远满足**它，
+# 那台设备从此再也不会离线。清单把「影响在线状态」归给 collectTime，是错的。
+#
+# 钳制而不是拒收：receiveTime 是**平台自己的字段**（契约里写明「平台接收时间」，
+# 且是唯一允许缺省取当前时间的字段）。为一个头部字段写错就丢掉一条真实测量，
+# 丢掉的是平台本身就是权威的那份数据。
+#
+# **必须用临时设备**：未钳制的实现会给设备留下 2 小时后的 last_report_time，
+# 而雷达是种子设备——那会污染同一次 --fresh 里后续所有套件的在线判定
+# （正是 README 警告的跨套件残留）。临时设备随套件回收。
+RT_DEV="dev-rt-$RUN_ID"
+RT_DID=$(curl -s -X POST "$BASE/devices" -H "$AUTH" -H "$JSON" \
+         -d "{\"code\":\"$RT_DEV\",\"name\":\"未来接收时间验收设备\",\"type\":\"MILLIMETER_WAVE_RADAR\",\"battery\":90.0,\"status\":\"ONLINE\"}" \
+         | data_of "['id']")
+# 请求前先记下平台此刻的时间：后面只能靠「不大于它」来观测钳制有没有生效。
+# 直接断言「等于 now+2h 之外的值」是测不出来的——钳制把值改成了后端自己的 now()，
+# 而那个 now() 我们事前无从知道。
+BEFORE_RT=$(ts 0)
+RT=$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
+     -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-rt\",\"deviceId\":\"$RT_DEV\",\"pointCode\":\"$FP\",\"collectTime\":\"$(ts -1)\",\"receiveTime\":\"$(ts 120)\",\"metrics\":{\"defo_mm\":3.3}}]}")
+check "未来 receiveTime 的消息照样收下（钳制不拒收）" "1" "$(printf '%s' "$RT" | data_of "['accepted']")"
+# 钳的是 receiveTime，**不能顺手把 collectTime 也改了**：collectTime 是设备侧的事实，
+# 改它等于替设备编时间，而上面整节⑩刚说过那是禁止的。
+# 观测方式：按 collectTime 附近开个窗口查 series，认 3.3 这个独有值。
+# （+08:00 里的加号必须转义成 %2B，否则会被后端当成空格）
+FROM_RT=$(printf '%s' "$(ts -2)" | sed 's/+/%2B/')
+TO_RT=$(printf '%s' "$(ts 0)" | sed 's/+/%2B/')
+check "行按原 collectTime 落库（钳制只动 receiveTime）" "3.3" \
+  "$(curl -s "$BASE/points/$FPID/series?from=$FROM_RT&to=$TO_RT&metricCode=defo_mm" -H "$AUTH" \
+     | python3 -c "
+import sys,json
+vs=[p['v'] for p in json.load(sys.stdin)['data']['points'] if p['v']==3.3]
+print(vs[0] if vs else '<未找到>')")"
+LAST_RT=$(curl -s "$BASE/devices/$RT_DID/status" -H "$AUTH" | data_of "['lastReportTime']")
+AFTER_RT=$(ts 0)
+info "设备心跳 lastReportTime=$LAST_RT（请求前平台时间 $BEFORE_RT，请求后 $AFTER_RT）"
+# 不钳制的话这里是 now+2h，必然 > BEFORE_RT。用 python 比时间串而不是字符串比大小：
+# 两者的秒精度可能不同（iso(timespec) 一侧带不带 'Z'/'+08:00' 取决于序列化路径）。
+#
+# **余量取 60s 而不是 1s**（2026-09-17 实测教训）：钳的是后端处理这条请求时的 now()，
+# 而 BEFORE_RT 是本脚本在请求之前取的、且 `ts` 把秒以下截掉了。两者之差 = 预读那一秒的
+# 尾数（0～1s）+ 往返与调度时延，**可以超过 1 秒**——首次写这条断言时留 1s 余量，
+# 单跑是绿的，三套件并排跑（机器在换页）那次实得 11:45:01.062 vs 11:45:00.000，
+# 超了 62 毫秒而转红。要测的失败模式偏差是 **2 小时**，60s 窗口有 120 倍余量。
+# 反过来也断言一个下界（"≈当前"而不是"不在未来"）：只卡上界的话，
+# 把 receiveTime 钳到一个很早的值（或压根没写）同样能绿，而那不是"钳到当前"。
+check "心跳没有被钉到两小时后（已被钳到当前）" "True" \
+  "$(python3 -c "
+import sys, datetime
+last, before, after = sys.argv[1], sys.argv[2], sys.argv[3]
+def p(s):
+    return datetime.datetime.fromisoformat(s.replace('Z','+00:00'))
+tol = datetime.timedelta(seconds=60)
+print(p(before) - tol <= p(last) <= p(after) + tol)" "$LAST_RT" "$BEFORE_RT" "$AFTER_RT")"
+recycle_device "$RT_DID" "未来接收时间临时设备"
+recycle_point "$FPID" "时间闸门临时测点"
+
 section "⑪ latest 次排序键：同一 collect_time 有两条时，取后写库的那条"
 # 只按 collect_time 排序的话取到哪行由数据库返回顺序决定，「最新值」不可复现，
 # 兄弟测项也会跟着那一行的 messageId 走。用 id 兜底后：后写的一定覆盖先写的。

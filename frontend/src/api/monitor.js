@@ -37,6 +37,19 @@ export function projectSummary(projectId) {
   return http.get(`/v1/projects/${projectId}/summary`)
 }
 
+/**
+ * GET /api/v1/projects/{projectId}/points/latest → PointLatestVO[]。
+ * 大屏按项目一次取齐，避免 1000 个测点产生 1000 个 HTTP 请求。
+ */
+export function projectPointsLatest(projectId) {
+  return http.get(`/v1/projects/${projectId}/points/latest`)
+}
+
+/** 每个项目独立的数字孪生资产、地理配准、性能预算与雷达姿态。 */
+export function projectDigitalTwin(projectId) {
+  return http.get(`/v1/projects/${projectId}/digital-twin`)
+}
+
 /** GET /api/v1/projects → Project[]（裸数组） */
 export function listProjects() {
   return http.get('/v1/projects')
@@ -128,9 +141,30 @@ export function bindDevicePoint(deviceId, pointId) {
   return http.post(`/v1/devices/${deviceId}/points/${pointId}`)
 }
 
+/** PUT 标定关系；只有通过量程/水平/垂直视场校验后才会成为 ACTIVE。 */
+export function calibrateDevicePoint(deviceId, pointId, payload) {
+  return http.put(`/v1/devices/${deviceId}/points/${pointId}/calibration`, payload)
+}
+
 /** DELETE /api/v1/devices/{id}/points/{pointId} → 空。**幂等**：没绑过也返回 200，不是 404。角色 ADMIN/MAINTAINER */
 export function unbindDevicePoint(deviceId, pointId) {
   return http.delete(`/v1/devices/${deviceId}/points/${pointId}`)
+}
+
+/**
+ * DELETE /api/v1/devices/{id}/points/{pointId}/calibration → DevicePoint。
+ * **停用标定**：保留绑定关系与标定参数，只把状态置为 INVALID。角色 ADMIN/MAINTAINER，幂等。
+ *
+ * 注意它与上面 `unbindDevicePoint` 只差一段路径、破坏性却完全相反——那个是**硬删行**
+ * （device_point 无软删列），azimuth/slantRange/lineOfSight 一起丢。别按错。
+ *
+ * `reason` 走白名单（MANUAL/DEVICE_RELOCATED/TARGET_REMOVED/MAINTENANCE/SUSPECTED_DRIFT），
+ * 传别的会 400；不传即 MANUAL。
+ */
+export function invalidateDevicePointCalibration(deviceId, pointId, reason) {
+  return http.delete(`/v1/devices/${deviceId}/points/${pointId}/calibration`, {
+    params: reason ? { reason } : {},
+  })
 }
 
 /**

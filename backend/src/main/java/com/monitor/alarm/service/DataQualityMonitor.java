@@ -139,6 +139,10 @@ public class DataQualityMonitor {
         a.setAlarmType(AlarmConstants.TYPE_DEVICE);
         a.setDeviceId(d.getId());
         a.setAlarmReason(reason);
+        // 未解除唯一键（V14）：'D:<deviceId>:<reason>'。成因必须进键——
+        // 一台设备可以同时欠着「数据不可信」与「已经掉线」，用只带 deviceId 的键会让
+        // 后开的那条撞上唯一索引，两个成因里永远只有一个能存在。
+        a.setOpenKey(AlarmConstants.openKeyOfDevice(d.getId(), reason));
         a.setAlarmLevel(LEVEL);
         a.setStatus(AlarmConstants.PENDING);
         a.setTriggeredAt(now);
@@ -171,9 +175,19 @@ public class DataQualityMonitor {
     }
 
     private void clear(Alarm a, Device d, String reason) {
+        LocalDateTime now = LocalDateTime.now();
+        // 关闭必须走 CAS：① 必须把 open_key 置回 NULL（updateById 跳过 null 字段，写不出去，
+        // 那条警情会永久占住键位，该设备该成因**从此再也开不出警情**）；
+        // ② 前置条件是刚读到的状态——人工处置（AlarmService.act）与本扫描没有互斥，
+        // 覆盖写会把处置人的结果抹掉，时间线里却留着两条。
+        int rows = alarmMapper.closeAlarm(a.getId(), a.getStatus(), AlarmConstants.RESOLVED, now, now);
+        if (rows == 0) {
+            log.info("数据可信度告警解除跳过（状态已被改变）alarmId={} 期望 {}", a.getId(), a.getStatus());
+            return;
+        }
         a.setStatus(AlarmConstants.RESOLVED);
-        a.setResolvedAt(LocalDateTime.now());
-        alarmMapper.updateById(a);
+        a.setResolvedAt(now);
+        a.setOpenKey(null);
 
         actionMapper.insert(action(a.getId(), AlarmConstants.ACTION_RECOVER, String.format(
                 "设备 %s 最近 %d 分钟的数据已恢复正常，系统自动解除",

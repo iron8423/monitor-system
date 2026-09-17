@@ -6,7 +6,11 @@ export function login(payload) {
   return http.post('/v1/auth/login', payload, { silent: true })
 }
 
-/** POST /api/v1/auth/logout（无状态 JWT，服务端不做会话销毁） */
+/**
+ * POST /api/v1/auth/logout
+ * 服务端会把该用户的令牌版本 +1，作废此前签发的**全部**令牌（含其它端）。
+ * 必须在清本地 token **之前**调用：请求要带上那张需要被作废的令牌。
+ */
 export function logout() {
   return http.post('/v1/auth/logout', null, { silent: true })
 }

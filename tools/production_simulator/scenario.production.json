@@ -1,0 +1,44 @@
+{
+  "datasetName": "production-baseline-10x1000",
+  "seed": 20260915,
+  "projectId": 900,
+  "projectCode": "PRJ-SIM-PROD",
+  "deviceCount": 10,
+  "pointsPerDevice": 100,
+  "rounds": 150,
+  "sampleIntervalSeconds": 5,
+  "anchor": {
+    "longitude": 113.0508,
+    "latitude": 23.7208,
+    "height": 2.0
+  },
+  "asset": {
+    "type": "GLB",
+    "coordinateMode": "ENU",
+    "url": "/models/mountain-demo/mountain-demo.glb",
+    "version": "mountain-demo-2.0.0",
+    "sha256": "0e2872fcd851b416b64b240e9bb20a84536a6cdd3c397198c7c3777b48ba5139"
+  },
+  "thresholds": {
+    "warningMm": 3.0,
+    "alarmMm": 5.0,
+    "recoveryMm": 1.0
+  },
+  "anomalies": {
+    "gradualDrift": { "points": 20, "fromRound": 10, "toRound": 120, "targetMm": 4.2 },
+    "suddenStep": { "points": 5, "atRound": 25, "valueMm": 5.6, "recoverRound": 100 },
+    "accelerating": { "points": 10, "fromRound": 20, "targetMm": -5.8 },
+    "oscillation": { "points": 10, "fromRound": 15, "amplitudeMm": 3.6 },
+    "spike": { "points": 5, "atRound": 60, "valueMm": 7.0 },
+    "suspectQuality": { "points": 10, "fromRound": 30, "toRound": 70 },
+    "faultQuality": { "points": 5, "fromRound": 35, "toRound": 65 },
+    "lowSignal": { "points": 10, "fromRound": 30, "toRound": 65 },
+    "targetDisappeared": { "points": 5, "fromRound": 45, "toRound": 85 },
+    "pointOutage": { "points": 5, "fromRound": 30, "toRound": 100 },
+    "deviceOutage": { "device": 10, "fromRound": 20, "toRound": 100 },
+    "delayedUpload": { "device": 8, "fromRound": 30, "toRound": 80, "delayMinutes": 12 },
+    "duplicates": { "points": 20, "rounds": [20, 50, 80, 110] },
+    "outOfOrder": { "device": 7, "rounds": [55, 56] },
+    "baselineReset": { "points": 5, "atRound": 90 }
+  }
+}

@@ -40,6 +40,23 @@ public class Alarm {
     /** 设备警情的成因（V7）：OFFLINE / DATA_QUALITY / DATA_DELAY；测点警情为 null。 */
     private String alarmReason;
     private Long ruleId;
+    /**
+     * 触发时所属规则的测项**副本**（V14 起落库）。
+     * <p>为什么要在警情上再存一份：未解除唯一性要的是「测点 + **测项**」，而此前测项只能靠
+     * {@code ruleId} 间接表达（{@code findOpen} 传的就是「该测项的规则集」）。升级功能
+     * （V4 的种子规则）恰恰依赖同一测项下有多条规则，所以不能对 {@code (pointId, ruleId)}
+     * 建唯一键。落库而不读时推导：规则可以被改、可以被删，警情记录的是**当时**为什么开。</p>
+     */
+    private String metricCode;
+    /**
+     * 未解除唯一键（V14，见 {@code V14__alarm_open_key.sql}）：未解除时为
+     * {@code 'P:<pointId>:<metricCode>'}（测点警情）或 {@code 'D:<deviceId>:<reason>'}（设备警情），
+     * 进入终态时置回 null。
+     * <p><b>不要用 {@code updateById} 关闭警情</b>：MyBatis-Plus 跳过 null 字段，写不出
+     * {@code open_key = NULL}，那条警情会永久占住键位，把该测点该测项后续所有警情挡在门外。
+     * 关闭统一走 {@code AlarmMapper.closeAlarm}。</p>
+     */
+    private String openKey;
     private String alarmLevel;
     private String status;
     /** 触发时的测项值（快照）。 */

@@ -46,6 +46,10 @@ import sys,json;print(json.load(sys.stdin)['data']['timeline'][0]['operator'])")
 
 section "③ 处置链 confirm -> dispatch -> research -> resolve（验收第 4 条留痕）"
 # 动作->状态映射由 A 于 2026-09-10 定案（契约只列枚举、未写映射，见 AlarmConstants）
+#
+# 请求体里的 "operator":"验收员" 是**诱饵**：署名必须取登录身份，不能由调用方自报
+# （否则任何人都能以别人的名义处置并留痕）。处置人一律从 token 解析，见 AlarmService#act。
+# 这里刻意继续发送它，把「请求体被忽略」变成一条回归断言——真被采信时下面两条会红。
 for pair in "confirm:CONFIRMED" "dispatch:PROCESSING" "research:OBSERVING" "resolve:RESOLVED"; do
   act="${pair%%:*}"; want="${pair##*:}"
   got=$(curl -s -X POST "$BASE/alarms/$AID/actions" -H "$AUTH" -H "$JSON" \
@@ -56,8 +60,10 @@ done
 TL=$(curl -s "$BASE/alarms/$AID" -H "$AUTH" | python3 -c "
 import sys,json;print(len(json.load(sys.stdin)['data']['timeline']))")
 check "时间线留痕 5 条（触发 + 4 次处置）" "5" "$TL"
-check "处置人写入时间线" "验收员" "$(curl -s "$BASE/alarms/$AID" -H "$AUTH" | python3 -c "
-import sys,json;print(json.load(sys.stdin)['data']['timeline'][-1]['operator'])")"
+OPERATORS=$(curl -s "$BASE/alarms/$AID" -H "$AUTH" | python3 -c "
+import sys,json;print('|'.join(r['operator'] for r in json.load(sys.stdin)['data']['timeline'][1:]))")
+check "处置人取登录身份（请求体里的 operator 被忽略）" "$ADMIN_USER|$ADMIN_USER|$ADMIN_USER|$ADMIN_USER" "$OPERATORS"
+check "处置人不得出现请求体里的冒名值" "0" "$(printf '%s' "$OPERATORS" | grep -c '验收员')"
 
 section "④ 终态后再处置 / 非法动作 应被拒"
 check "已解除后再 confirm -> 400" "400" "$(http_code -X POST "$BASE/alarms/$AID/actions" -H "$AUTH" -H "$JSON" -d '{"action":"confirm"}')"

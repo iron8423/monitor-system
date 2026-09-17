@@ -21,7 +21,7 @@
 > |---|---|---|
 > | §2-D5 | 规则类型 `THRESHOLD/RATE/CHANGE` 均为合法取值 | **只收 `THRESHOLD`**；传 `RATE`/`CHANGE` → 400（`AlarmRuleService`）。速率类告警请对 `rate_mm_d` 建 `THRESHOLD` 规则 |
 > | §2-D6 | 默认规则 `defo_mm THRESHOLD gte 10 / 恢复 5` | **三条**：`gte +3.0/恢复+1.0`、`lte −3.0/恢复−1.0`（均 warning）、`gte +5.0/恢复+2.0`（alarm，V4 补）。原 `gte 10` 因真实数据范围仅约 −3.6~+3.3mm 而**永不触发** |
-> | §2-D2 | 「**不需要改表**」 | 已到 **V3**（`alarm` 加 `alarm_type`/`device_id`、放开 `point_id NOT NULL`）与 **V4**（升级档规则） |
+> | §2-D2 | 「**不需要改表**」 | 已到 **V14**：V3（`alarm` 加 `alarm_type`/`device_id`、放开 `point_id NOT NULL`）、V4（升级档规则）、V12（`measurement.ingest_mode`，补报与实时分离）、**V14（`alarm.metric_code` 副本 + `open_key` 可空唯一索引，见下）**。表结构一律以 `backend/src/main/resources/db/migration/` 为准 |
 > | §1 归属行 | 数据/告警/实时/媒体 = B | B 已转前端，这些模块**由 A 就地补齐**并验收（1–8 套件） |
 >
 > 另有两处**本文未覆盖**、后续才定的口径：`collectTime` 必填且必须可解析、非法即整条 `REJECTED`（见 `B侧接口契约_M0.md §2`）；全仓时间输出统一带 `+08:00`（`JacksonTimeConfig`）。

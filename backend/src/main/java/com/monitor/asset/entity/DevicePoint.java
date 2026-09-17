@@ -6,6 +6,9 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import com.monitor.common.base.Identifiable;
 import lombok.Data;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
 /**
  * 设备-测点绑定（硬删除，无软删除字段）。
  */
@@ -18,4 +21,31 @@ public class DevicePoint implements Identifiable {
 
     private Long deviceId;
     private Long pointId;
+    private String targetCode;
+    private BigDecimal azimuthDegrees;
+    private BigDecimal elevationDegrees;
+    private BigDecimal slantRangeM;
+    private BigDecimal reflectorHeightM;
+    private Boolean lineOfSight;
+    private BigDecimal minimumClearanceM;
+    private String calibrationStatus;
+    private LocalDateTime calibratedAt;
+    private LocalDateTime validFrom;
+    private LocalDateTime validTo;
+    private String calibrationNote;
+
+    /**
+     * 失效痕迹（V15，清单第 09 条）。三者由**同一条**集合式 UPDATE 写入同一个时间戳，
+     * 所以这一组三元组本身就是一次失效事件的记录，可以按时间/操作者查询。
+     *
+     * <p>与 {@code calibrationNote} 的分工：那一列记的是「这条标定当初是**怎么标出来的**」，
+     * 是原始标定的唯一记录，**不要在失效时往里追加文字**——那等于毁掉标定依据。
+     * 失效是事后事件，记在这里。</p>
+     *
+     * <p>{@code invalidatedReason} 存短代码（{@code DEVICE_POSE_CHANGED} /
+     * {@code POINT_MOVED} / 人工停用时的白名单值），不是散文：它要能被 grep、被前端当枚举渲染。</p>
+     */
+    private LocalDateTime invalidatedAt;
+    private String invalidatedReason;
+    private String invalidatedBy;
 }

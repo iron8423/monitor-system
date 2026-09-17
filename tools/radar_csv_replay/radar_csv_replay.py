@@ -31,7 +31,9 @@ from urllib.error import URLError, HTTPError
 DEFAULT_ROOT = r"C:\Users\ASUS\Desktop\实习\点形变雷达系统\web_存档"
 DEFAULT_EP = "http://127.0.0.1:8080/api/v1/ingest/measurements"
 DEFAULT_INGEST_KEY = "dev-ingest-key"
-DEFAULT_POINT_MAP = "1:P-HK01,2:P-HK02,3:P-HK03,4:P-BP01,5:P-BP02"
+# V11 起 radar-001 只覆盖北侧可见目标。南侧的 P-HK01/P-BP03/P-BP04
+# 必须由 radar-002 上报，不能为了兼容旧演示映射绕过物理覆盖关系。
+DEFAULT_POINT_MAP = "1:P-HK02,2:P-HK03,3:P-BP01,4:P-BP02"
 FOLDER_RE = re.compile(r"^目标信号强度-(\d{8})$")
 TARGET_RE = re.compile(r"^Target(\d+)")
 
@@ -217,6 +219,8 @@ def main():
     ap.add_argument("--point-map", default=DEFAULT_POINT_MAP, help="雷达目标->档案点号映射，如 1:P-HK01,2:P-HK02")
     ap.add_argument("--ingest-key", default=None, help="X-Ingest-Key 值；默认读环境变量 MONITOR_INGEST_KEY，否则占位 dev-ingest-key")
     ap.add_argument("--include-unmonitored", action="store_true", help="把监测=0、无累积形变的空数据行也回放（默认只放有变形值的监测行）")
+    ap.add_argument("--ingest-mode", choices=("REALTIME", "BACKFILL"), default="BACKFILL",
+                    help="接入模式；CSV 历史导入默认 BACKFILL，不影响当前告警、在线状态和 SSE")
     ap.add_argument("--inject-overlimit", action="store_true", help="把部分 defo 放大，制造超限")
     ap.add_argument("--over-target", type=float, default=4.0, help="注入超限的目标值(mm)，默认 4.0（对齐 ±3 触发）")
     ap.add_argument("--inject-outage", action="store_true", help="掐掉中间一段时间，模拟断连/离线")
@@ -278,7 +282,8 @@ def main():
             count += 1
             if args.send:
                 # B1 的 IngestRequest 只接受批量 { "items": [ ...] }；每条消息包一层
-                code, resp = post(args.endpoint, {"items": [m]}, ingest_key)
+                code, resp = post(args.endpoint,
+                                  {"ingestMode": args.ingest_mode, "items": [m]}, ingest_key)
                 if code not in (200, 201, 202):
                     print(f"    [x] HTTP {code} {m['pointCode']} {m['collectTime']} -> {resp[:120]}")
                 elif count % 20 == 0:

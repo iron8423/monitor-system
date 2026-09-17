@@ -1,0 +1,159 @@
+{
+  "datasetName": "production-baseline-10x1000",
+  "seed": 20260915,
+  "scale": {
+    "devices": 10,
+    "points": 1000,
+    "rounds": 150,
+    "sampleIntervalSeconds": 5,
+    "messagesIncludingDuplicates": 141625,
+    "exactDuplicateMessages": 80
+  },
+  "anomalyPointCodes": {
+    "gradualDrift": [
+      "SIM-D01-P093",
+      "SIM-D01-P095",
+      "SIM-D02-P058",
+      "SIM-D03-P067",
+      "SIM-D04-P043",
+      "SIM-D04-P064",
+      "SIM-D04-P092",
+      "SIM-D04-P093",
+      "SIM-D05-P015",
+      "SIM-D06-P017",
+      "SIM-D06-P019",
+      "SIM-D06-P037",
+      "SIM-D06-P059",
+      "SIM-D06-P062",
+      "SIM-D09-P010",
+      "SIM-D09-P039",
+      "SIM-D09-P042",
+      "SIM-D09-P070",
+      "SIM-D09-P075",
+      "SIM-D09-P088"
+    ],
+    "suddenStep": [
+      "SIM-D01-P018",
+      "SIM-D01-P052",
+      "SIM-D02-P061",
+      "SIM-D04-P082",
+      "SIM-D05-P016"
+    ],
+    "accelerating": [
+      "SIM-D01-P077",
+      "SIM-D02-P074",
+      "SIM-D03-P005",
+      "SIM-D04-P069",
+      "SIM-D05-P054",
+      "SIM-D06-P073",
+      "SIM-D06-P078",
+      "SIM-D09-P022",
+      "SIM-D09-P046",
+      "SIM-D09-P068"
+    ],
+    "oscillation": [
+      "SIM-D01-P062",
+      "SIM-D03-P045",
+      "SIM-D03-P098",
+      "SIM-D04-P099",
+      "SIM-D05-P025",
+      "SIM-D05-P032",
+      "SIM-D05-P053",
+      "SIM-D05-P055",
+      "SIM-D05-P096",
+      "SIM-D06-P091"
+    ],
+    "spike": [
+      "SIM-D01-P001",
+      "SIM-D03-P051",
+      "SIM-D03-P078",
+      "SIM-D04-P072",
+      "SIM-D06-P038"
+    ],
+    "suspectQuality": [
+      "SIM-D01-P059",
+      "SIM-D01-P064",
+      "SIM-D01-P065",
+      "SIM-D02-P049",
+      "SIM-D03-P053",
+      "SIM-D04-P015",
+      "SIM-D04-P027",
+      "SIM-D05-P022",
+      "SIM-D06-P052",
+      "SIM-D06-P068"
+    ],
+    "faultQuality": [
+      "SIM-D01-P003",
+      "SIM-D01-P012",
+      "SIM-D01-P024",
+      "SIM-D01-P097",
+      "SIM-D03-P010"
+    ],
+    "lowSignal": [
+      "SIM-D01-P048",
+      "SIM-D01-P087",
+      "SIM-D01-P100",
+      "SIM-D04-P053",
+      "SIM-D05-P077",
+      "SIM-D05-P088",
+      "SIM-D06-P021",
+      "SIM-D06-P087",
+      "SIM-D09-P012",
+      "SIM-D09-P018"
+    ],
+    "targetDisappeared": [
+      "SIM-D02-P009",
+      "SIM-D04-P037",
+      "SIM-D05-P027",
+      "SIM-D06-P082",
+      "SIM-D09-P090"
+    ],
+    "pointOutage": [
+      "SIM-D01-P041",
+      "SIM-D01-P053",
+      "SIM-D03-P055",
+      "SIM-D09-P051",
+      "SIM-D09-P081"
+    ],
+    "baselineReset": [
+      "SIM-D02-P014",
+      "SIM-D04-P028",
+      "SIM-D05-P084",
+      "SIM-D06-P004",
+      "SIM-D06-P046"
+    ],
+    "duplicates": [
+      "SIM-D01-P001",
+      "SIM-D01-P002",
+      "SIM-D01-P003",
+      "SIM-D01-P004",
+      "SIM-D01-P005",
+      "SIM-D01-P006",
+      "SIM-D01-P007",
+      "SIM-D01-P008",
+      "SIM-D01-P009",
+      "SIM-D01-P010",
+      "SIM-D01-P011",
+      "SIM-D01-P012",
+      "SIM-D01-P013",
+      "SIM-D01-P014",
+      "SIM-D01-P015",
+      "SIM-D01-P016",
+      "SIM-D01-P017",
+      "SIM-D01-P018",
+      "SIM-D01-P019",
+      "SIM-D01-P020"
+    ]
+  },
+  "expected": {
+    "duplicates": "相同 deviceId + messageId 必须计为 DUPLICATE，不能新增 measurement 或警情",
+    "qualityGate": "SUSPECT/FAULT 超限值落库但不参与测值阈值告警",
+    "threshold": "VALID 的 defo_mm 越过 ±3mm 产生 warning，越过 ±5mm 就地升级为 alarm",
+    "recovery": "回到恢复阈值内后自动 RESOLVED",
+    "outOfOrder": "迟到的旧 collectTime 可落库，但不得覆盖 latest 的新时间点",
+    "delayedUpload": "实时墙钟回放时，设备 08 可触发 DATA_DELAY 质量告警",
+    "deviceOutage": "原速墙钟回放时设备 10 静默 405 秒，必须触发 OFFLINE，恢复上报后自动解除",
+    "pointOutage": "当前版本没有测点级中断告警；测试应把它记录为已知缺口而不是假通过",
+    "baselineReset": "当前版本未建立基准重置事件模型；应人工核对曲线连续性并登记缺口"
+  }
+}

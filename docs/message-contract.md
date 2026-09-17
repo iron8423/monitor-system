@@ -7,6 +7,19 @@
 
 ## 1. 单点标准消息（POST /api/v1/ingest/measurements）
 
+实时单条消息可以直接提交；批量或历史补报使用请求信封：
+
+```json
+{
+  "ingestMode": "BACKFILL",
+  "items": [ /* 标准消息 */ ]
+}
+```
+
+`ingestMode` 只允许 `REALTIME`、`BACKFILL`，缺省为 `REALTIME`。同一批消息只能使用一种模式。
+`REALTIME` 落库后会更新设备最近上报时间、发送 SSE 并评估当前告警；`BACKFILL` 仅落库供历史查询，
+不得改变在线状态、实时画面或触发/升级/解除当前告警。CSV 历史回放必须明确使用 `BACKFILL`。
+
 ```json
 {
   "schemaVersion": "1.0",
@@ -43,6 +56,20 @@
 | `position` | `angleDeg` 角度 / `distanceM` 距离 |
 | `signal` | 信号强度 0~1 |
 | `state` | `normal` / `disappeared` / `suspicious` |
+
+### 雷达与测点归属
+
+`deviceId` 与 `pointCode` 不是两个独立的合法值：二者必须命中一条当前有效的雷达目标标定关系。
+生产严格模式要求该关系为 `ACTIVE`、视线无遮挡（LOS），且处于有效期内。仅在设备页执行“绑定测点”
+会得到 `PENDING` 关系，完成目标号、方位角、俯仰角、斜距和视线标定后才能接收生产测值。
+
+- 没有绑定：`REJECTED / DEVICE_POINT_NOT_BOUND`
+- 已绑定但未激活、被遮挡或过期：`REJECTED / DEVICE_POINT_NOT_CALIBRATED`
+- 报文角度/距离明显偏离标定：`REJECTED / POSITION_CALIBRATION_MISMATCH`
+
+其中 `position.angleDeg` 定义为目标相对雷达航向中心线的水平角（左负右正，度），
+`position.distanceM` 为目标斜距（米）。生产校验容差为角度 2°、距离 `max(2m, 3%)`；厂商坐标含义
+不同时，转换器必须先完成坐标转换，不能原样套字段名。
 
 ## 2. 幂等
 
@@ -81,3 +108,4 @@
 - **D3**：`position/signal/state` 存入 `measurement.attributes`(JSON ≤1024)。
 - **D7**：`POST /api/v1/ingest/**` 免 JWT，校验请求头 `X-Ingest-Key: <key>`（key 读 `MONITOR_INGEST_KEY`，dev 默认 `dev-ingest-key`）。
 - **D8**：`GET /api/v1/stream?token=<JWT>`（SSE）。
+- **D9**：`measurement.ingest_mode` 保留接入用途；数据质量“最近数据”只统计 `REALTIME`。

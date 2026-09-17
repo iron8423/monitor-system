@@ -22,6 +22,14 @@ public class Device extends BaseEntity {
     private String serialNo;
     private BigDecimal longitude;
     private BigDecimal latitude;
+    /** 数字孪生姿态：WGS84 高程、朝向/俯仰和覆盖参数。 */
+    private BigDecimal altitude;
+    private BigDecimal headingDegrees;
+    private BigDecimal pitchDegrees;
+    private BigDecimal detectionRangeM;
+    private BigDecimal halfAngleDegrees;
+    private BigDecimal antennaHeightM;
+    private BigDecimal verticalHalfAngleDegrees;
     /** 显式状态（FAULT 优先），在线/离线由 lastReportTime 推导 */
     private String status;
     private BigDecimal battery;

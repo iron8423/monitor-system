@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
 
 import { useUserStore } from '@/stores/user'
 
@@ -132,6 +133,23 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+// 更新部署后，已打开的页面可能仍引用被替换的旧分包。
+// 不自动循环刷新；让用户明确选择重新加载原目标地址，并保留原始错误供排查。
+let navigationErrorVisible = false
+router.onError((error, to) => {
+  console.error('[router] 页面加载失败', to?.fullPath, error)
+  if (navigationErrorVisible) return
+  navigationErrorVisible = true
+  const target = router.resolve(to?.fullPath || '/home').href
+  ElMessageBox.confirm(
+    '目标页面未能加载，可能是系统更新后页面资源已更换，或网络连接中断。请重新加载；若仍失败，请记录浏览器控制台中的第一条错误。',
+    '页面加载失败',
+    { confirmButtonText: '重新加载目标页面', cancelButtonText: '暂不重试', type: 'error', closeOnClickModal: false },
+  ).then(() => window.location.assign(target))
+    .catch(() => {})
+    .finally(() => { navigationErrorVisible = false })
 })
 
 // 路由名写错不是「静默 404」而是**抛异常**（matcher 取不到 name 直接 throw），

@@ -18,7 +18,9 @@ WORKDIR /build
 # 另外三个 VITE_*（API 前缀、应用标题、后端 origin）代码里都有正确兜底，不必传。
 ARG VITE_CESIUM_ION_TOKEN=
 ARG VITE_TERRAIN_MODE=ion
-ENV VITE_CESIUM_ION_TOKEN=$VITE_CESIUM_ION_TOKEN \
+ARG VITE_SCENE_MODE=mountain
+ENV VITE_SCENE_MODE=$VITE_SCENE_MODE \
+    VITE_CESIUM_ION_TOKEN=$VITE_CESIUM_ION_TOKEN \
     VITE_TERRAIN_MODE=$VITE_TERRAIN_MODE
 
 # scripts/ 要跟 package.json 一起先拷进来：npm ci 结束时会跑 postinstall

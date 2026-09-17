@@ -1,0 +1,74 @@
+{
+  "P0_第2批_历史补报与实时告警分离_替换与验证说明.md": {
+    "bytes": 6600,
+    "sha256": "3006b488a971154bfdea997b6aca457f506f4ca9dce6b97c4f0abe044a7854d4"
+  },
+  "backend/README_B1.md": {
+    "bytes": 2821,
+    "sha256": "26e951b68be6050db063ac6aaea7600baa744986f66e2799473848b0cea5258d"
+  },
+  "backend/src/main/java/com/monitor/telemetry/dto/IngestMode.java": {
+    "bytes": 615,
+    "sha256": "aa71a9d1b0850be8aea567f7b96cc1f7d5058ff18b356146bb8e2a7d39f29b2c"
+  },
+  "backend/src/main/java/com/monitor/telemetry/dto/IngestRequest.java": {
+    "bytes": 5021,
+    "sha256": "94ad49431bd8570e215f5b22f74e212ff6e2331989305baf50f944744cfa6ad7"
+  },
+  "backend/src/main/java/com/monitor/telemetry/dto/IngestResult.java": {
+    "bytes": 805,
+    "sha256": "c07edd051a471d6822020222ee4338dd1c39daffa96a9ff1cecf30e3a21ebf63"
+  },
+  "backend/src/main/java/com/monitor/telemetry/entity/Measurement.java": {
+    "bytes": 1197,
+    "sha256": "5a5c2014504920a8473f80dcf1a9432ff1a645cffff8201ede931caf89f8336c"
+  },
+  "backend/src/main/java/com/monitor/telemetry/mapper/MeasurementMapper.java": {
+    "bytes": 5591,
+    "sha256": "bcaf19714c32fe40245e29030bd30ceaf413ce63b43d88202c1e8bff518b93ab"
+  },
+  "backend/src/main/java/com/monitor/telemetry/service/IngestService.java": {
+    "bytes": 19728,
+    "sha256": "ce5b583f714328e21a4b71cb89771798bf4d2abd9b1d060187c306b976b96a13"
+  },
+  "backend/src/main/resources/db/migration/V12__measurement_ingest_mode.sql": {
+    "bytes": 453,
+    "sha256": "201997497d6a3d53acab6cba7424b76fd41a0360d5795d5d2b75a03ed37e3013"
+  },
+  "backend/src/test/java/com/monitor/telemetry/dto/IngestRequestTest.java": {
+    "bytes": 1337,
+    "sha256": "3b0230b69a4f72b7641554de3a56c874bf71dab09b51234ffa2525fd086a4c54"
+  },
+  "backend/src/test/java/com/monitor/telemetry/service/IngestServiceModeTest.java": {
+    "bytes": 5298,
+    "sha256": "4fca3b79f6279e7a6199b4c452dfc9e7df5d9ced2c00ee2c0604dd83c8c77e32"
+  },
+  "docs/message-contract.md": {
+    "bytes": 5038,
+    "sha256": "620cad55d24f3f27f5061358a8139c45c0295855e402c4f735a55e671e4fd550"
+  },
+  "tools/production_simulator/README.md": {
+    "bytes": 5269,
+    "sha256": "175c004a2f07afcdc406ba166eac27c1112a076389ce1933cb08963d1eec6729"
+  },
+  "tools/production_simulator/production_simulator.py": {
+    "bytes": 33848,
+    "sha256": "ede3ebcf8039468f41046f30fd90c4b000ff8c851c7499e4f73d500b90bc5926"
+  },
+  "tools/radar_csv_replay/README.md": {
+    "bytes": 4743,
+    "sha256": "346fb780ea63e3fd78e4f3c820f838b9defcb745df8651ae5257ea8d64b26076"
+  },
+  "tools/radar_csv_replay/radar_csv_replay.py": {
+    "bytes": 13289,
+    "sha256": "8c64c6f213df08ee96e3470c0ae6aaf1e3798a64211ea236bf46398d3cd3f4e6"
+  },
+  "tools/radar_simulator/README.md": {
+    "bytes": 7822,
+    "sha256": "1edbc5987c918d5d4864af7c7cab83edeeb1d0f6e4a6ce042e857538a572841d"
+  },
+  "tools/radar_simulator/radar_simulator.py": {
+    "bytes": 17057,
+    "sha256": "086a4c19dc103c27fb26c3008a1afb2e29cdeabd4946106c23dabcc0f249deca"
+  }
+}

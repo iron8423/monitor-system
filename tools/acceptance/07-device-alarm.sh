@@ -104,10 +104,12 @@ section "② 设备告警复用同一套处置管线（同一张表、同一个�
 check "出现在全局警情列表里" "True" "$(curl -s "$BASE/alarms?pageSize=200" -H "$AUTH" | python3 -c "
 import sys,json
 print(any(r['id']==$AID for r in json.load(sys.stdin)['data']['records']))")"
+# 请求体里的 "operator":"验收员" 是**诱饵**（同 04-alarm.sh）：署名取登录身份，不由调用方自报。
 check "confirm -> CONFIRMED" "CONFIRMED" \
   "$(curl -s -X POST "$BASE/alarms/$AID/actions" -H "$AUTH" -H "$JSON" \
      -d '{"action":"confirm","comment":"值班确认设备离线","operator":"验收员"}' | data_of "['status']")"
-check "处置留痕操作人" "验收员" "$(curl -s "$BASE/alarms/$AID" -H "$AUTH" | python3 -c "
+check "处置留痕操作人取登录身份（请求体里的 operator 被忽略）" "$ADMIN_USER" \
+  "$(curl -s "$BASE/alarms/$AID" -H "$AUTH" | python3 -c "
 import sys,json;print(json.load(sys.stdin)['data']['timeline'][-1]['operator'])")"
 # CONFIRMED 不是终态，「在办」仍要计入——顺带证明纳入设备告警不是无脑全算
 check "确认后仍在办（CONFIRMED 未解除）" "1" "$(alert_count)"
@@ -145,9 +147,18 @@ rs=json.load(sys.stdin)['data']['records']
 print(len(rs) > 0 and all(r['deviceId']==$DID for r in rs))")"
 check "警情列表无 JWT -> 401" "401" "$(http_code "$BASE/alarms")"
 
+# 先解绑：`device_point` 没有软删列，删设备/删测点都不会动它，那条绑定会**永久**留在库里，
+# 指向两个都已逻辑删除的档案——`GET /devices/{id}/points` 的可见性检查只看设备，
+# 于是对一个 `GET /devices/{id}` 已经 404 的设备号，这个端点照样回 200 并吐出一条幽灵绑定。
+# 解绑必须**在删设备之前**：`unbind` 内部先 `requireDevice`，设备一删它就 404 了。
+# 只解 $DID——$DID2 从头到尾没有绑定（见上方夹具）。
+curl -s -o /dev/null -X DELETE "$BASE/devices/$DID/points/$PID" -H "$AUTH"
+
+# 走 recycle_device 而不是裸 DELETE：③ 是「恢复上报 → 自动解除」，一旦那一步红了，
+# 这台设备上就留着未解除的 DEVICE 警情，裸删设备会让它变成一条指向已删设备的孤儿
+# ——告警中心里排出一行 blank 待办。正常路径下 recycle_device 查无未解除警情，是空操作。
 for d in "$DID" "$DID2"; do
-  DEL=$(http_code -X DELETE "$BASE/devices/$d" -H "$AUTH")
-  [ "$DEL" = "200" ] && info "已回收临时设备 $d" || info "临时设备 $d 未回收（HTTP $DEL），可忽略"
+  recycle_device "$d" "临时设备 $d"
 done
 # 项目链从叶子往上删（同 03-query.sh）。删测点是逻辑删除，measurement 随之对所有查询不可见。
 # 测点必须走 recycle_point：这套件本身就会在这台临时设备上造出设备告警，

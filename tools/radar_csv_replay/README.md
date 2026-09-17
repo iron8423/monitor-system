@@ -21,8 +21,8 @@ python radar_csv_replay.py --date 20260827 --send --speed 5 --max-events 200
 # 快点回放：每秒 5 条
 python radar_csv_replay.py --date 20260827 --send --speed 5
 
-# 注入“超限” → 触发告警
-python radar_csv_replay.py --date 20260827 --send --inject-overlimit
+# 注入“超限”并测试当前告警（只有明确 REALTIME 才会触发）
+python radar_csv_replay.py --date 20260827 --send --inject-overlimit --ingest-mode REALTIME
 
 # 注入“断连” → 模拟设备离线（掐掉中间一段时间）
 python radar_csv_replay.py --date 20260827 --send --inject-outage
@@ -42,9 +42,11 @@ python radar_csv_replay.py --date 20260827 --send --inject-duplicate
 | `--send` | 关 | 真正 POST；不加只打印 |
 | `--speed` | 1 | 每秒条数 |
 | `--max-events` | 不限 | 最多条数 |
-| `--device` | `radar-001` | 设备 ID |
+| `--device` | `radar-001` | 设备 ID；目标必须已经标定给该设备 |
+| `--point-map` | `1:P-HK02,2:P-HK03,3:P-BP01,4:P-BP02` | 雷达目标号到平台测点号的显式映射 |
 | `--point-prefix` | `TARGET-` | 测点编码前缀（Target1→TARGET-1） |
 | `--include-unmonitored` | 关 | 把监测=0、无变形值的行也回放（默认只放有变形值的监测行） |
+| `--ingest-mode` | `BACKFILL` | 历史导入只落库；仅实时演练时显式改为 `REALTIME` |
 | `--inject-overlimit` / `--inject-outage` / `--inject-duplicate` | 关 | 分别注入超限 / 断连 / 重复，用于测告警、离线、幂等 |
 
 ## 字段映射（CSV → 标准消息）
@@ -61,6 +63,12 @@ python radar_csv_replay.py --date 20260827 --send --inject-duplicate
 | （推算） | `metrics.rate_mm_d` | 由相邻两条 defo/时间差算速率 |
 
 > `messageId` 用确定性 `uuid5(deviceId|pointCode|collectTime|sequence)` 生成，保证同一条数据 id 稳定，方便系统幂等去重。
+
+默认 `BACKFILL` 不会更新设备在线时间、推送 SSE 或改变当前告警。把历史 CSV 当实时演练数据时，需先确认时间和场景适用，
+再显式传 `--ingest-mode REALTIME`。
+
+V11 起，北侧 `radar-001` 默认只映射四个可见目标；南侧数据需另启一次回放并使用
+`--device radar-002 --point-map ...`。正式接入时必须用现场目标标定表替换示例映射。
 
 ## 状态
 - 已适配 UTF-8(BOM) 的中文表头。

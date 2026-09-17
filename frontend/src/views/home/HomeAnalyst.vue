@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import * as api from '@/api/monitor'
@@ -8,6 +8,7 @@ import SeriesChart from '@/components/SeriesChart.vue'
 import StatTiles from '@/components/StatTiles.vue'
 import { usePolling } from '@/composables/usePolling'
 import { useThresholds } from '@/composables/useThresholds'
+import { createRequestGuard } from '@/utils/requestGuard'
 
 /**
  * 研判工作台（研判员）。需求 §3 给研判员的定位是「看曲线/照片/现场，判断真假」——
@@ -47,24 +48,39 @@ const seriesLoading = ref(false)
  */
 const { thresholds } = useThresholds('defo_mm', computed(() => selected.value?.pointId))
 
+/** 曲线取数守卫（清单第 17 条：连点队列快速换选中，迟到的旧曲线不许落到新警情下面） */
+const seriesGuard = createRequestGuard()
+
 async function pick(row) {
+  // **先自增代号**：换选中就是换了一代，此前所有在途请求当场作废。
+  // 必须放在下面那个 `return` 之前——选中一条没有 pointId 的设备告警时，
+  // 上一个点的曲线请求可能还在飞，不作废它就会画在这条设备告警下面
+  const token = seriesGuard.next()
   selected.value = row
   series.value = null
   // 设备告警没有 pointId，画不了曲线；这里不报错，让右栏的空态去解释
-  if (!row?.pointId) return
+  if (!row?.pointId) {
+    // 上一次的 finally 已被守卫挡掉，这里不收尾 loading 会一直转圈
+    seriesLoading.value = false
+    return
+  }
 
+  // 参数快照：await 之后 selected 可能已经换人了
+  const pointId = row.pointId
   seriesLoading.value = true
   try {
-    series.value = await api.pointSeries(row.pointId, {
-      metricCode: 'defo_mm',
-      granularity: 'raw',
-    })
+    const s = await api.pointSeries(pointId, { metricCode: 'defo_mm', granularity: 'raw' })
+    if (!seriesGuard.isCurrent(token)) return
+    series.value = s
   } catch {
+    if (!seriesGuard.isCurrent(token)) return
     series.value = null
   } finally {
-    seriesLoading.value = false
+    if (seriesGuard.isCurrent(token)) seriesLoading.value = false
   }
 }
+
+onBeforeUnmount(seriesGuard.invalidate)
 
 async function load() {
   loading.value = true

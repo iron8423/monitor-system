@@ -23,6 +23,9 @@ else BASE="${BASE:-http://localhost:8080/api/v1}"; fi
 
 LOG=$(mktemp)
 BG_PID=""
+# 只有本脚本**真的起过**后端才会置 1。见 cleanup 的注释：trap 在任何出口都会跑，
+# 包括「端口被占、拒绝启动」那条路径。
+STARTED=0
 
 if [ -t 1 ]; then C_RED=$'\033[31m'; C_GRN=$'\033[32m'; C_YEL=$'\033[33m'; C_DIM=$'\033[2m'; C_OFF=$'\033[0m'
 else C_RED=; C_GRN=; C_YEL=; C_DIM=; C_OFF=; fi
@@ -39,7 +42,17 @@ stop_backend() {
   done
   printf '%s端口 %s 在 10s 内未释放，手工确认残留进程%s\n' "$C_YEL" "$PORT" "$C_OFF" >&2
 }
-cleanup() { [ "$FRESH" = 1 ] && stop_backend; rm -f "$LOG"; }
+# 只在**本脚本真的起过后端**时才收。此前这里写的是 `[ "$FRESH" = 1 ]`，而 trap 在
+# **任何**出口都会跑——包括上面那条「端口已被占用，换 FRESH_PORT 再试」的拒绝路径。
+# 于是发生了一件事（2026-09-17 实测复现）：一次被拒绝的 `--fresh` 退出时照样跑
+# `pkill -f "server.port=$PORT"`，**把占用该端口的那个后端杀掉了**——正是它刚刚拒绝去打扰的进程。
+# 当时的表现是另一份并排跑的验收在 02 中途开始全数 HTTP 000，看起来像代码崩了，其实是被同类杀掉。
+#
+# 更要紧的是 `pkill -f` 是**全命令行正则匹配**，不限本脚本的进程树：任何命令行里含这个串的
+# 进程都会中招。实测把它写在 `bash -c` 里跑，它把**执行它的那个 shell** 也一起杀了
+# （`bash -c '... --server.port=18998 ...'` 的命令行自带这个串）。
+# 所以这条 pkill 只能在「我们已经起过后端、且准备收掉自己那一个」的语境下用。
+cleanup() { [ "$STARTED" = 1 ] && stop_backend; rm -f "$LOG"; }
 trap cleanup EXIT
 
 if [ "$FRESH" = 1 ]; then
@@ -62,6 +75,7 @@ if [ "$FRESH" = 1 ]; then
   ( cd "$ROOT/backend" && exec setsid ./mvnw $MVNW_OPTS spring-boot:run \
       -Dspring-boot.run.arguments="--server.port=$PORT --monitor.device-offline.sweep-ms=2000 --monitor.data-quality.sweep-ms=2000" ) > "$LOG" 2>&1 &
   BG_PID=$!
+  STARTED=1     # 从这里往后才允许 cleanup 去收进程（见 stop_backend 上方的注释）
 
   printf '等待就绪'
   READY=0
@@ -87,14 +101,33 @@ fi
 
 printf '\n%s验收目标：%s%s\n' "$C_DIM" "$BASE" "$C_OFF"
 
-# 10-scope 放最后：它要断言「admin 与李敏看到的条数之差 == 项目 2 的规模」，
-# 虽然用的是差值（不依赖其它套件是否回收干净），但排在最后能少一层噪声。
-SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh 08-simulator.sh 09-data-quality.sh 10-scope.sh)
+# 10-scope 排在最后一段，11/12 那两个造并发的套件排在它之后：
+#   10 要断言「admin 与李敏看到的条数之差 == 项目 2 的规模」，虽然用的是差值
+#   （不依赖其它套件是否回收干净），但排在最后能少一层噪声；
+#   11-concurrency 与 12-ingest-concurrency 是两个**造真并发**的套件（都用后台 curl + wait），
+#   各自会新建测点并回收，把它们排在数组末尾（12 是末位，其后没有任何套件），
+#   可以保证不会有后来者被它们留下的临时数据影响。
+# 注意 11 依赖后端运行在本地：它刻意用后台 curl + wait 造并发，与 BASE 指向哪里无关，
+# 但并发度 6 是照 Hikari 默认池 10 定的（见该套件文件头），换池大小要重估。
+#
+# 13-calibration 排在 10-scope **之前**（数组实序：… 08 → 09 → 13 → 10-scope → 11 → 12，
+# 后三者垫底）：它建临时设备/测点并回收，属于「造数」类，与 11/12 同属
+# 「会留下临时数据」的一类；但落位与它们**相反**——造并发的两个排在最后，
+# 造数的那个排在数据隔离套件之前。
+#
+# **这个数组是显式的，不是 glob**：新增套件文件不写进来就是**静默永不执行**——
+# 汇总里少一个套件、少几十条断言，而输出看不出任何异常。
+SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh 08-simulator.sh 09-data-quality.sh 13-calibration.sh 10-scope.sh 11-concurrency.sh 12-ingest-concurrency.sh)
 TOTAL_PASS=0; TOTAL_FAIL=0; FAILED_SUITES=()
+
+# 后端日志路径：--fresh 时是本脚本自己起的那个进程的输出，可以让套件去 grep 证据行；
+# 非 fresh（跑在别人已经起好的后端上）时没有日志可给，套件会退化成打印提示。
+BACKEND_LOG=""
+[ "$FRESH" = 1 ] && BACKEND_LOG="$LOG"
 
 for s in "${SUITES[@]}"; do
   printf '\n%s======== %s ========%s\n' "$C_DIM" "$s" "$C_OFF"
-  OUT=$(BASE="$BASE" bash "$HERE/$s" 2>&1)
+  OUT=$(BASE="$BASE" BACKEND_LOG="$BACKEND_LOG" bash "$HERE/$s" 2>&1)
   echo "$OUT" | grep -v '^#RESULT'
   RES=$(echo "$OUT" | grep '^#RESULT' | tail -1)
   p=$(echo "$RES" | sed -n 's/.*pass=\([0-9]*\).*/\1/p'); p=${p:-0}

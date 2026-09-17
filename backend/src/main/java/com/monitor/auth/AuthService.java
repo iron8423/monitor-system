@@ -30,8 +30,29 @@ public class AuthService {
         Authentication auth = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword()));
         SecurityUser su = (SecurityUser) auth.getPrincipal();
-        String token = jwtUtil.generateToken(su.getId(), su.getUsername(), su.getRole());
-        return new LoginResponse(token, toVO(su.getUser()));
+        SysUser user = su.getUser();
+        String token = jwtUtil.generateToken(su.getId(), su.getUsername(), su.getRole(),
+                tokenVersionOf(user));
+        return new LoginResponse(token, toVO(user));
+    }
+
+    /**
+     * 登出：作废该用户此前签发的<b>全部</b>令牌（令牌版本 +1）。
+     *
+     * <p><b>为什么是「全部」而不是「这一个」</b>：无状态 JWT 里没有 {@code jti} 这类单令牌标识，
+     * 服务端拿到的只是一个字符串，无法指认「就是这一张」。要精确到单令牌就得引入黑名单或
+     * 每令牌一行记录——那是另一套设计，不是这条能顺带做掉的。所以这里给出的是
+     * 「登出即全端下线」，语义诚实：宁可多失效几处，也不要一个看起来能单独登出、
+     * 实际什么都没做的接口（那正是此前那个空实现的毛病）。</p>
+     *
+     * <p>改密同理：任何「口令变了」的路径都应当调 {@link SysUserMapper#bumpTokenVersion}，
+     * 否则旧口令签发的令牌仍然可用。</p>
+     */
+    public void logout(SecurityUser currentUser) {
+        if (currentUser == null || currentUser.getId() == null) {
+            return;
+        }
+        userMapper.bumpTokenVersion(currentUser.getId());
     }
 
     public UserVO me(SecurityUser currentUser) {
@@ -40,6 +61,11 @@ public class AuthService {
             throw new BizException(404, "用户不存在");
         }
         return toVO(user);
+    }
+
+    /** 令牌版本缺省按 0：V13 之前建的行在迁移时被填成 0，理论上不会为 null。 */
+    private static int tokenVersionOf(SysUser user) {
+        return user.getTokenVersion() == null ? 0 : user.getTokenVersion();
     }
 
     private UserVO toVO(SysUser user) {

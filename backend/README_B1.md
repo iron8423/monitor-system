@@ -17,6 +17,8 @@ com.monitor.telemetry
 
 - **幂等**：`device_id + message_id`，重复整条去重（返回 DUPLICATE，不重复写、不重复报警）。
 - **落库**：一条含 N 测项（defo_mm/rate_mm_d）→ 拆 N 行 `measurement`，共用 `message_id`。
+- **接入模式**：缺省 `REALTIME`；历史导入使用请求信封 `{"ingestMode":"BACKFILL","items":[...]}`。
+  `BACKFILL` 只落库，不更新设备在线时间、不发送 SSE、不触发/升级/解除当前告警。
 - **attributes**：`position/signal/state` 序列化进 `measurement.attributes`（JSON，超 1024 截断）。
 - **质量**：`quality` 缺省按 信号<0.3→SUSPECT / state=suspicious→SUSPECT / 数值非法→FAULT / 否则 VALID。
 - **响应**：`accepted`（=落库行数）、`rejected`、`duplicates`、`results[{pointCode,collectTime,status,quality}]`。
