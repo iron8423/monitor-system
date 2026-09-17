@@ -1,236 +1,181 @@
-# monitor-system · 通用监测管理系统
+# monitor-system · 通用多传感监测管理系统
 
-通用多传感监测管理系统 Demo（V0.1 最小闭环）。数据源 = 毫米波点形变雷达；落地清远电厂灰库 / 库区边坡。
+给客户用的**通用多传感监测管理系统**（V0.1 演示闭环）：现场传感数据统一接进来 → 3D 数字孪生大屏标出监测点 → 实时/历史曲线 → 超限自动告警 → 确认 / 研判 / 处置 / 解除全程留痕。
+首批数据源 = **毫米波点形变雷达**；落地清远电厂"天地一体化"监测预警系统，首个真实场景 = 灰库 / 库区边坡点形变监测。
 
-> 需求基线：`docs/通用多传感监测管理系统_需求分析与开发指引_v1.0.md`
-> 分工与里程碑：`docs/双人分工实施方案v2.md`（最终版；历史稿见 `docs/archive/`）
-> 消息契约：`docs/message-contract.md`（M0 冻结 · 唯一事实源）
+通用性体现在**数据模型、接入契约、模块边界**三处：换场景、加传感器不动主框架，不改前端代码。
 
-## 目录
+> 需求基线：[`docs/通用多传感监测管理系统_需求分析与开发指引_v1.0.md`](docs/通用多传感监测管理系统_需求分析与开发指引_v1.0.md)（唯一开发基线）
+> 数据接入契约：[`docs/message-contract.md`](docs/message-contract.md)（M0 冻结 · 唯一事实源）
+> 接口契约：[`docs/B侧接口契约_M0.md`](docs/B侧接口契约_M0.md)
+> 进展沿革（历史决策、证据与各处「更正」）：[`docs/项目进展沿革_20260917.md`](docs/项目进展沿革_20260917.md)
+> 未完成事项：[`docs/monitor-system_系统完善与改进清单.md`](docs/monitor-system_系统完善与改进清单.md)（50 条现状对账）· [`docs/后续阶段工作清单_A_v1.md`](docs/后续阶段工作清单_A_v1.md)
+
+## 快速开始
+
+三种形态按需选一种；三者跑的是同一份代码，差别只在数据库、鉴权严格度和前端由谁托管。
+
+| 形态 | 数据库 | 命令 | 前端入口 |
+|---|---|---|---|
+| 本地 Maven（零配置） | H2 内存库，重启即清空 | `cd backend && ./mvnw spring-boot:run` | `cd frontend && npm install && npm run dev` → <http://localhost:5173> |
+| Docker Compose · dev | PostgreSQL 16（具名卷持久化） | `docker compose up -d` | <http://localhost>（`FRONTEND_PORT` 可改） |
+| Docker Compose · 生产 | PostgreSQL 16 + 强制严格契约 | `docker compose --env-file .env.production -f docker-compose.production.yml up -d --build` | `FRONTEND_PORT`（默认 80，示例用 8088） |
+
+```bash
+# 1) 本地最省事（H2 内存库）
+cd backend && ./mvnw spring-boot:run          # Windows: mvnw.cmd spring-boot:run
+# 健康检查 http://localhost:8080/api/v1/health · 接口文档 http://localhost:8080/swagger-ui.html
+
+# 2) dev 编排（db + backend + frontend 三个服务，含 PostgreSQL）
+cp .env.example .env                          # 端口/密码/密钥都在这里；.env 不入库
+docker compose up -d && docker compose ps     # 三个服务都该是 healthy
+docker compose down                           # 停；数据留在具名卷里
+docker compose down -v                        # 连数据一起删（只有清干净重来才用）
+
+# 3) 生产编排（严格契约 + 真实密钥 + 不建演示账号）
+cp .env.production.example .env.production    # 必须替换 PG_PASSWORD / JWT_SECRET / MONITOR_INGEST_KEY
+docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
+```
+
+两个形态差异要知道：**dev 编排默认开演示账号并默认 `INGEST_STRICT_CONTRACT=true`**（`application.yml` 里 app 默认是 `false`，dev compose 显式打开）；**生产编排不带演示账号**（`MONITOR_DEMO_ACCOUNTS` 默认 `false`），所以生产实例上跑验收套件要先显式打开账号或改用 `--fresh`。
+首次 `docker compose up` 很慢（要拉 maven 基础镜像并把依赖下一遍，本机实测约 20 分钟）；之后只改 Java 代码重构建是几十秒。
+
+## 演示账号与角色
+
+四个演示角色（H2 / dev compose 形态由 `DataInitializer` 建，密码统一 `123456`），登录后按角色自动进入各自的工作台：
+
+| 账号 | 显示名 | 角色 | 落地页 | 主要用途 |
+|---|---|---|---|---|
+| `admin` | 陈立 | 系统管理员 | `/home/admin` | 档案与权限、审计、全量数据 |
+| `operator` | 李敏 | 值班员 | `/home/operator` | 待确认警情队列 |
+| `analyst` | 王越 | 研判员 | `/home/analyst` | 待研判队列 + 该测点曲线 |
+| `maintainer` | 赵安 | 运维员 | `/home/maintainer` | 设备异常表 + 待处置队列 |
+
+另有第 5 个账号 `outsider`（**不进登录页**，不属于任何项目），它是"可见范围为空"这条权限边界的对照样本：六个页面上都是空态，不是白屏、不卡加载中、导航菜单仍在。
+角色不只是界面显隐——处置动作的角色边界由后端 `AlarmConstants.ROLE_ACTIONS` 强制（越权 403），前端藏按钮不是权限。
+
+## 架构与技术栈
 
 ```
 monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system，A/B 共用）
-├── .gitattributes / .gitignore / README.md
-├── docs/                       需求/方案/接口契约/每日日志/归档
-│   ├── daily/                  每日工作日志 YYYY-MM-DD-A/B.md
-│   ├── message-contract.md     雷达标准消息契约
-│   ├── M0_接口冻结_致B_v1.md     M0 冻结口径与回执
-│   └── archive/                需求历史稿（只读）
-├── backend/                    Spring Boot 3 + Java 21 + MyBatis-Plus + Flyway
+├── docs/                       需求基线 / 契约 / 方案 / 每日日志 / 归档
+├── backend/                    Spring Boot 3.5 + Java 21 + MyBatis-Plus + Flyway
 │   └── com.monitor/
-│       ├── common·auth·organization·project·asset·audit   A 底座（A0–A4，已验收）
+│       ├── common·auth·organization·project·asset·audit   底座（RBAC、档案、审计）
 │       ├── telemetry           ingest 接入 / 查询（latest·series）/ 项目概览 / SSE 推流
-│       ├── alarm               告警规则·状态机·等级升级·设备离线告警
-│       ├── media               影像挂点（上传/读取）
+│       ├── alarm               告警规则·状态机·等级升级·设备离线/质量/延迟告警
+│       ├── media               影像挂点（上传 / 读取 / 逻辑删除）
+│       ├── scope               项目数据范围隔离（DataScopeService）
 │       └── config·controller   安全·时区·MyBatis 配置与健康检查
-├── frontend/                   Vue3 + Vite + Element Plus + ECharts + Cesium（3D 大屏已落地，见其 README）
+├── frontend/                   Vue 3 + Vite + Element Plus + ECharts + CesiumJS（见 frontend/README.md）
 └── tools/
-    ├── radar_csv_replay/       真雷达 CSV 回放适配器（Python，B 侧）
-    ├── radar_simulator/        雷达数据模拟器（Python，无外部依赖，验收链第一环）
-    └── acceptance/             后端验收套件（A 侧，§9 验收脚本可跑部分）
+    ├── radar_simulator/        雷达数据模拟器（无外部依赖，验收链第一环）
+    ├── radar_csv_replay/       真雷达 CSV 回放适配器（改写为 BACKFILL 模式）
+    ├── production_simulator/   生产规模造数（10 雷达 / 1000 目标）+ 数据集校验
+    ├── mountain_asset/         离线山地 GLB 模型生成脚本
+    ├── acceptance/             后端验收套件（13 套件）
+    ├── backup/                 备份 / 恢复 / 自测（含影像卷）
+    └── operations/             PostgreSQL 备份恢复脚本（运维口径）
 ```
 
-## 启动方式一：Docker Compose（含 PostgreSQL，推荐）
+| 层 | 选型 |
+|---|---|
+| 后端 | Spring Boot 3.5.16 · Java 21 · MyBatis-Plus 3.5.17 · Flyway（V1–V16）· JJWT · springdoc-openapi |
+| 数据库 | PostgreSQL 16（部署）/ H2 2.3（本地与验收 `--fresh`） |
+| 前端 | Vue 3.5 · Vite 6 · Pinia · Element Plus · ECharts 6 · CesiumJS 1.145 |
+| 鉴权 | JWT（`Authorization: Bearer`）；例外两处：ingest 用 `X-Ingest-Key` 头，SSE 与影像内容用 `?token=` |
+
+## 数据接入契约（要点）
+
+完整字段与边界见 [`docs/message-contract.md`](docs/message-contract.md)，落地实现见 `com.monitor.telemetry`。
+
+- **标准单点消息**：`schemaVersion / messageId / deviceId / pointCode / collectTime / receiveTime / sequence / metrics / quality / position / signal / state`；每条消息含 2 个测项（`defo_mm` 累计形变 mm、`rate_mm_d` 速率 mm/d），落库按测项拆行。
+- **幂等键 = `device_id + message_id`**，重复整条去重（返回 `DUPLICATE`，不重复写、不重复报警）；一条重复不该拖垮同批其它合法消息。
+- **接入模式**：`REALTIME`（默认，落库后更新设备心跳、推 SSE、评估告警）与 `BACKFILL`（历史回补，只落库，不改在线状态、不推流、不触发/解除当前警情）。
+- **质量与时序闸门**：`quality` 四态（RAW/VALID/SUSPECT/FAULT）；`collectTime` 超前 5 分钟以上拒收（`COLLECT_TIME_IN_FUTURE`），未来的 `receiveTime` 被钳制而不是拒收。
+- **严格契约模式**（`INGEST_STRICT_CONTRACT`）：额外要求 `schemaVersion=1.0`、非空 `sequence`、设备与测点已绑定、标定 `isProductionReady` 且未过期/未遮挡；生产编排强制开，dev compose 默认开，本地 H2 默认关。
+
+## 已落地能力
+
+- **监测预警闭环**：ingest 校验/去重 → 落库 → 规则触发（含等级升级）→ 警情生成 → 确认/研判/派发/处置/解除留痕 → 数值回落自动恢复。并发不变式有专用套件（同测点并发上报只开 1 条警情；并发处置恰好 1 个 200、其余 4xx 且含 409）。
+- **设备侧三类告警**：离线、数据质量异常（坏质量占比超阈值）、数据延迟（`receiveTime − collectTime` 超阈值）。三者共用一张 `alarm` 表与同一套状态机，成因落在 `alarm_reason`，彼此独立成条、互不掩盖；样本不足或设备本身 `FAULT`/离线时不做判定，也不解除已有警情。
+- **查询与概览**：`latest` / `series`（原始点、小时、天三种粒度）/ 项目概览；"取最新一行"的排序判据收在 `MeasurementMapper#latestRowOf` 单一实现（同测点同 `collect_time` 多行时排序必须带 `id` 兜底，否则取到哪行由执行计划决定）。
+- **影像挂点**：上传/列表/内容/删除；删除是**逻辑删除**（盘上文件保留，可审计可恢复），角色限 ADMIN/MAINTAINER 并留审计痕，重复删除返回 404。影像在测点详情、`/media` 总览页、3D 大屏浮窗三处共用同一对组件。
+- **项目数据范围隔离**：成员关系走显式 `project_member` 表，可见范围沿 `point → object → scene → project` 归集，设备经 `device_point` 反查；**ADMIN 不受限**。过滤做在列表/分页/详情三条路径上，不可见返回 403、不存在仍返回 404；空集合 fail-closed（`1 = 0`，否则 `in(空集)` 会退化成"不过滤 = 看到全部"）。SSE 推送同样按订阅者过滤——服务端没有"发给所有人"这个入口。
+- **审计与留痕**：关键写操作走 `@AuditAction`，`/audit` 页仅 ADMIN 可见（后端类级 `@PreAuthorize`，非管理员接口层就 403）。处置人、维护记录 `operator` 一律由后端取当前登录用户，客户端传什么都不作数。
+- **会话与失效**：JWT 带令牌版本号，**每次请求回库核对**账号仍在、`enabled` 仍为真、版本一致，所以停用/降权/改密**立即生效**，不必等 24h 过期。
+- **测项中立化**：有哪些测项只认 `GET /metrics` 档案，3D 着色、热力图、时间轴回放、测点列表统一按"主测项"表现，大屏顶栏可切换。**加一种测项 = 管理端加一行数据**，前端零改动。
+- **3D 大屏**：推送驱动（SSE，断流 15s / 正常 60s 兜底轮询），时间轴回放 + 地面热力图（每个测点一圈径向渐变，不做插值——7 个离散点插出来的面是算出来的、不是量出来的）。
+
+## 3D 数字孪生（V2 · 双雷达）
+
+- **自持模型，不依赖在线服务**：仓库内自带精细低多边形山地 GLB（320m × 240m、38,400 三角面，含复合山脊/沟谷/滑坡体），默认不依赖 Cesium ion 或在线底图；设 `VITE_SCENE_MODE=globe` 可切回真实地形 + 卫星影像模式。
+- **双雷达标定**：北/南两台雷达分别覆盖 4/3 个可见目标，一条 `device_point` 关系带目标号、方位、俯仰、斜距、反射器高度、LOS、净空、标定状态与有效期；大屏可切换当前雷达并显示其三维视场、目标 LOS 与浮窗标定信息。
+- **标定失效闭环**：设备位姿或测点几何一变，旧标定自动转 `INVALID` 并留痕（成因码 `DEVICE_POSE_CHANGED` / `POINT_MOVED`），可重新标定回 `ACTIVE`。管理端已能改雷达位姿、绑定测点、激活/人工停用标定（含有效期）。
+- **生产数据集**：`generated/production-baseline-20260916/`（10 台雷达 / 1000 个目标 / 141,625 条消息 + 地面真值 + catalog.sql，约 6.7MB gz），标定参数由 V2 地形实际采样；校验：`python3 tools/production_simulator/validate_dataset.py generated/production-baseline-20260916`。
+
+## 验证与验收
+
+所有数字都是**本轮实测**（2026-09-17），不是估算；逐套件明细见 [`tools/acceptance/README.md`](tools/acceptance/README.md)。
+
+| 验证 | 命令 | 本轮实测 |
+|---|---|---|
+| 后端验收（13 套件） | `tools/acceptance/run-all.sh --fresh` | **480 条断言 / 0 失败** |
+| 后端单测 | `cd backend && ./mvnw test` | **89 个测试 / 0 失败** |
+| 前端自检（store 与纯函数真跑） | `cd frontend && npm run selfcheck`（需后端在跑） | **67 条 / 0 失败** |
+| 前端 P0 脚本（模拟网络 + 源码绊线） | `cd frontend && node scripts/check-p0-stage1.mjs` | **35 项全通过** |
+| 前端构建 | `cd frontend && npm run build` | 通过（仅有 Cesium/ECharts 大 chunk 提示） |
 
 ```bash
-docker compose up -d          # 起 db + backend + frontend（首次要构建镜像，见下方注意）
-docker compose ps             # 三个服务都该是 healthy
-docker compose down           # 停；数据留在具名卷里，下次 up 还在
-docker compose down -v        # 连数据一起删（只有清干净重来才用）
+tools/acceptance/run-all.sh --fresh   # 另起空库后端（18080）跑完整套，跑完自动停
+tools/acceptance/run-all.sh           # 或跑在当前已启动的后端上（8080）
+# 退出码：0=全过 · 1=断言失败 · 2=环境问题（后端起不来/登录不上，CI 可据此区分）
 ```
 
-- PostgreSQL 16 持久化在 `monitor-system_pgdata` 卷；上传的影像在 `monitor-system_media` 卷。
-- 配置（端口/密码/密钥）：`cp .env.example .env` 再改；`.env` 不入库。
-- **首次 `up` 很慢**（本机实测约 20 分钟）：要拉 `maven` 基础镜像，并把 pom 里全部依赖从
-  Maven Central 下一遍。这一步缓存在独立的构建层里，**之后只改 Java 代码重构建只要几十秒**。
-- 国内网络两个坑（换机器照抄）：官方的 `get.docker.com` 脚本固定去 `download.docker.com`
-  取 GPG key，本机被重置，改走清华源装 `docker.io`；拉镜像必须配 `registry-mirrors`。
+注意两个前置：套件要**演示账号开着**、要**关掉严格契约**（`INGEST_STRICT_CONTRACT=false`），否则十二个精简报文套件会成片红——看起来像功能坏了，其实是套件跑在更严的模式下；`--fresh` 不受影响。另有 13 条**浏览器内人工验证**步骤（脚本层测不到的组件内竞态与 1000 点规模），见 [`docs/手动验证步骤_第14-16-17-18-19条_20260917.md`](docs/手动验证步骤_第14-16-17-18-19条_20260917.md)。
 
-## 启动方式二：本地 Maven（H2 内存库，零配置）
+## 运维与部署
 
 ```bash
-cd backend
-./mvnw spring-boot:run      # Linux/macOS
-# Windows: mvnw.cmd spring-boot:run
+tools/backup/pg-backup.sh --with-media        # -> backups/monitor-<时间>.sql + media-<时间>.tgz
+tools/backup/pg-restore.sh --latest --with-media backups/media-<时间>.tgz
+tools/backup/selftest.sh                      # 实测一遍整条链（需要 compose 起着，实测 17/17）
 ```
 
-- 默认 H2 内存库，重启即清空——要持久化就用上面的 Compose。
-- 健康检查：`GET http://localhost:8080/api/v1/health`
-- 接口文档：`http://localhost:8080/swagger-ui.html`
-- 演示账号：admin / operator / analyst / maintainer（密码 123456），外加一个**不进登录页**的
-  `outsider`（访客，不属于任何项目）——它是「可见范围为空」这条边界的样本，见验收第 7 条那节。
+- **备份必须带媒体卷**：附件是卷里的文件，不在库里；只备库的话恢复后 `media` 行回来了、点开图却是碎的。
+- **恢复是破坏性操作**（先 `DROP SCHEMA public CASCADE` 再灌），默认要交互敲 `yes`，只有 `--yes` 才跳过；它会先停后端、恢复后等后端真的健康才收工。
+- 库名/用户/项目名一律从 `.env` 读（读不到才退回 compose 默认值）——写死的话，`.env` 一改就会去备份/清空**另一个库**。
+- **迁移**：Flyway V1–V16，容器启动时自动执行，升级不要删数据卷。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`（`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`）。
+- 生产上线流程与验收步骤见 [`docs/交付说明_双雷达精细山体_V2_20260916.md`](docs/交付说明_双雷达精细山体_V2_20260916.md) 与 [`docs/3D数字孪生_生产候选部署与验收.md`](docs/3D数字孪生_生产候选部署与验收.md)。
 
-## 验收（后端）
+## 已知限制与后续
 
-```bash
-tools/acceptance/run-all.sh --fresh    # 另起全新后端（空库，端口 18080）跑完整套，跑完自动停
-tools/acceptance/run-all.sh            # 或跑在当前已启动的后端上（8080）
-```
+按"明确没做"列，不粉饰；完整对账与逐条证据见 [`docs/monitor-system_系统完善与改进清单.md`](docs/monitor-system_系统完善与改进清单.md)。
 
-10 个套件 / 375 条断言，覆盖 §9 验收脚本里后端可独立验证的部分（详见 `tools/acceptance/README.md`）。
-退出码 `0` 全过、`1` 断言失败、`2` 环境问题。
-H2 空库（`--fresh`）**实测 375/375，失败 0**（连跑两轮均绿）；compose 的 PostgreSQL 形态复跑了 `04-alarm.sh`（47/47）、
-`07-device-alarm.sh`（26/26）与 `02-ingest-idempotency.sh`（34/34）。两者执行计划不同，
-有些缺陷只会在其中一个上现形（见下方「取最新一行」那条）。
+- 低电量告警未做（用户定案：暂不做）；只读角色、报表、视频接入、巡查模型未做（属 P1，未定案前不动）。
+- **严格契约模式没有自动化覆盖**——13 个套件都不发 `schemaVersion`/`sequence`，那条路径目前真跑时才被执行，补 `14-strict-contract.sh` 是待办。
+- **1000 点回放仍是逐点请求**（已用粒度降采样 + 并发池 4 + 按天分段压住，但请求个数没变）；根治需要后端批量 series 端点，取数已收口在一处，将来只改那一处。
+- **nginx 访问日志未脱敏**：`?token=` 会原样进默认 combined 日志格式（后端自身请求日志不记 query string）。
+- 主工作页（大屏、告警、测点、设备、管理端、审计、影像）**没有窄屏适配**；管理端表列是后端字段名；健康检查目前只返回 `UP`，未做数据库就绪检查。
+- 3D 视场图形未按地形裁剪、无自动通视计算、模型版本与历史标定未关联（清单第 35–38、40 条）。
 
-套件只认 `BASE` 一个地址，所以 **`docker compose up` 之后直接 `run-all.sh` 就是「一键过验收脚本」**
-（§9 第 8 条的后半句）——跑的是容器里的后端，不是宿主机的 `./mvnw`。
+## 文档索引
 
-验收链的第一环（**模拟器**）由 `tools/radar_simulator/` 提供，`08-simulator.sh` 用它造数并断言：
-造数 → 落库 → 立即可查 → 超限触发 → 等级升级 → 自动恢复 全链打通。
-
-```bash
-python3 tools/radar_simulator/radar_simulator.py --dry-run    # 只看报文
-python3 tools/radar_simulator/radar_simulator.py --inject-overlimit --recover-after 6
-```
+| 文档 | 内容 |
+|---|---|
+| [`docs/通用多传感监测管理系统_需求分析与开发指引_v1.0.md`](docs/通用多传感监测管理系统_需求分析与开发指引_v1.0.md) | 唯一开发基线：范围、角色、领域模型、验收口径 |
+| [`docs/message-contract.md`](docs/message-contract.md) | 雷达标准消息契约（M0 冻结 · 唯一事实源） |
+| [`docs/B侧接口契约_M0.md`](docs/B侧接口契约_M0.md) | 接口 / 字段 / 枚举现行事实源 |
+| [`docs/项目进展沿革_20260917.md`](docs/项目进展沿革_20260917.md) | 2026-09-09 → 09-17 的进展、决策与证据（原 README「当前进度」全文） |
+| [`docs/monitor-system_系统完善与改进清单.md`](docs/monitor-system_系统完善与改进清单.md) | 50 条现状对账（已修复 / 部分完成 / 未动），每条带文件行号证据 |
+| [`docs/手动验证步骤_第14-16-17-18-19条_20260917.md`](docs/手动验证步骤_第14-16-17-18-19条_20260917.md) | 脚本层测不到的人工验证步骤 |
+| [`docs/3D数字孪生_V2双雷达标定与验收.md`](docs/3D数字孪生_V2双雷达标定与验收.md) | 双雷达标定的接口与验收口径 |
+| [`docs/双人分工实施方案v2.md`](docs/双人分工实施方案v2.md) | 分工与里程碑（历史稿见 `docs/archive/`） |
+| [`docs/README_文档管理说明.md`](docs/README_文档管理说明.md) | 文档版本约定与归档规则 |
 
 ## 协作约定
 
-- 单仓库 monorepo；`main`（保护）+ `feature/<模块>` 分支 + PR；每日工作日志当天提交。
-- schema/seed 由 A 统一维护（要改走 V3，不与 B 同改 V1/V2）。
-- 行尾 LF（.gitattributes）；UTF-8；相对路径；Linux 用 `./mvnw`、Windows 用 `mvnw.cmd`。
-- ingest：请求头 `X-Ingest-Key`（dev 默认 `dev-ingest-key`，env `MONITOR_INGEST_KEY` 覆盖）。
-- stream(SSE)：`?token=<JWT>`（EventSource 带不了 Header）。
-
-## 当前进度
-
-- M0 契约已冻结：测项 `defo_mm/rate_mm_d`、幂等 `device_id+message_id`、默认规则 ±3mm 双向、`X-Ingest-Key` / `?token=` 鉴权。
-- A 底座 A0–A4 + schema/种子已入库并验证；B1 telemetry ingest 骨架 + CSV 回放已并入。
-- **后端闭环已跑通**（A-3 已落地）：ingest 校验/去重 → 落库 → 规则触发（含等级升级）→ 警情生成 → 处置留痕 → 自动恢复，外加设备离线告警。
-  端到端可重复验证：`tools/acceptance/run-all.sh --fresh` → **10 套件 / 375 条断言全绿**。
-- **验收链第一环（模拟器）已落地**：`tools/radar_simulator/` 按契约连续造数，不依赖真雷达 CSV；
-  `radar_csv_replay/` 是回放器不是生成器（要真实数据），两者分工互补，都发同一条契约消息。
-- **PostgreSQL 已验证**（B-4）：`postgres:16` 上 V1–V4 迁移全部成功，验收在 PG 上全绿
-  （2026-09-11 复跑全绿），重启后端数据不丢。切库只需 profile：
-  `./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`
-  （`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`，默认 `localhost:5432/monitor`、`monitor/monitor`）。
-- **Docker Compose 一键启动已落地**（B-3 / 验收第 8 条）：`docker compose up -d` 起
-  **db + backend + frontend** 三个服务，前端构建进镜像、由 nginx 托管并反代 `/api`。
-  已实测 —— 容器重建后数据仍在（`measurement/alarm/monitor_point` 计数与 schema 版本前后一致、
-  Flyway 不重跑）、影像落卷、对容器跑验收全绿。
-- **备份恢复已落地**（2026-09-14，验收第 8 条后半）：
-  ```bash
-  tools/backup/pg-backup.sh --with-media        # -> backups/monitor-<时间>.sql + media-<时间>.tgz
-  tools/backup/pg-restore.sh --latest --with-media backups/media-<时间>.tgz
-  tools/backup/selftest.sh                      # 实测一遍整条链（需要 compose 起着）
-  ```
-  库名/用户/项目名一律从 `.env` 读，读不到才退回 compose 默认值——写死的话，
-  `.env` 一改就会去备份/清空**另一个库**（备份时是拿到错的东西，恢复时是删错东西）。
-  恢复是**破坏性**的（先 `DROP SCHEMA public CASCADE` 再灌），所以默认要交互敲 `yes`，
-  只有 `--yes` 才跳过；它还会先停后端（`DROP SCHEMA` 要拿排他锁，和后端的长连接撞上就是卡死）、
-  恢复后等后端**真的健康**再收工（后端起来时 Flyway 会核对迁移版本，备份与代码不一致在这里就会失败）。
-  `--with-media` 那半份不是可有可无：附件是**卷里的文件**，不在库里，只备库的话
-  恢复后 `media` 行回来了、点开图却是碎的。自测脚本按验收第 8 条的原话走完整条链——
-  挂真附件 → 备份 → **破坏**（灌假项目 + 删真告警 + 清空附件卷）→ 恢复 →
-  逐样查回（假项目没了 / 告警回来了 / 历史条数回到基线 / 附件读出真 PNG），**实测 17/17**。
-- **前端已可访问**（Vue3 + Vite + Element Plus + ECharts，阶段 3a 起含 Cesium）：
-  开发态 `cd frontend && npm install && npm run dev` → <http://localhost:5173>；
-  部署态就是上面的 `docker compose up -d` → <http://localhost>（`FRONTEND_PORT` 可改）。
-  已落地工作台页面：**四个角色各有自己的落地页**（管理工作台 / 值班工作台 / 研判工作台 /
-  运维工作台，登录后按角色自动进入；另有一个「未分配角色」兜底页）、测点与曲线、设备状态、
-  告警中心含处置时间线、**管理端读写**、**影像挂点 `/media`**，以及独立整屏的
-  **3D 大屏 `/screen`**（真实地形 + 卫星影像 + 测点按状态着色 + 三级降级）。
-  测点详情共五个页签（资料 / 曲线 / 数据表 / 影像 / 告警），影像在详情页、`/media` 总览页、
-  大屏点击浮窗三处共用同一对组件（`MediaGallery` / `MediaUploader`）。
-  浏览器端到端已在 **compose 形态**实测（下条）。
-  **SSE 已由 B 在阶段 3b 收口**：连接归 `stores/realtime.js`（应用级，不再绑在布局上——
-  否则直接进 `/screen` 这个大屏顶层路由时没人建连接），事件落进 `stores/monitor.js` 的
-  单一数据源；大屏改为推送驱动（点位实时跳动 + 告警脉冲 + 顶部横幅），轮询降级为兜底
-  （断流 15s / 正常 60s）。大屏另有**时间轴回放**与**地面热力图**（每个测点一圈径向渐变，
-  不做插值——7 个离散点插出来的面是算出来的、不是量出来的）。
-  **前端已做「测项中立化」**：「有哪些测项」只认 `GET /metrics` 档案（名称/单位也来自它），
-  3D 着色、热力图、时间轴回放、测点列表统一按「主测项」表现，大屏顶栏可切换。
-  **加一种测项 = 管理端加一行数据**，前端零改动（详见 frontend/README 的三节）。
-- **浏览器端到端已在 compose 形态实测**（2026-09-11）：未登录访问 `/home` 被守卫拦下并
-  回跳 `/login?redirect=/home`、登录后回到原目标；**四个角色各自落到自己的工作台**
-  （`/home/admin` `/home/operator` `/home/analyst` `/home/maintainer`，四条 URL 与四个页面
-  主区块互不相同，顶栏显示「真人名 + 角色」）；越权直达被弹回且**不形成重定向环**
-  （生产构建下 vue-router 的导航次数保护会被摇掉，环会卡死标签页，故刻意在生产产物上验）；
-  各页与 `/screen` 均有真实数据；跨页口径一致（设备页「在线」行数 == 总览「在线设备」）；
-  管理端**新建 → 接口核对 → 删除**全通（即验收第 7 条「平台管理端新建测点 → 业务端无需改代码
-  立即可见」）；全程零 4xx/5xx、零控制台报错。**四角色矩阵 45 断言 / 0 失败**。
-- **审计日志页与设备详情抽屉**（2026-09-14，验收第 7 条后半）：新增 `/audit`（仅 ADMIN，
-  后端控制器是**类级** `@PreAuthorize`，非管理员接口层就 403）与 `DeviceDrawer`
-  （基本信息 / 绑定测点 / 维护记录，设备页与运维台**共用同一个组件**）。浏览器实测 26/26，
-  含一次真解绑→真重绑的往返与一次真写维护记录。**维护记录的 `operator` 由后端从当前登录用户
-  覆盖**，前端传什么都不作数——「谁写的」不该由客户端说了算。
-  顺带把这批接口补进契约：`/devices/{id}/points`、`/maintenance-records`、`/audit-logs`
-  此前**被引用却从无出处**（与 `/media/{id}/content` 同一类问题）。
-- **「取最新一行」的口径已收成单一实现**：`measurement` 同测点同 `collect_time` 可合法落多行
-  （幂等键是 `device+message`，不含 collect_time），此时排序必须带 `id` 兜底，否则取到哪行由
-  执行计划决定。此前 `MeasurementQueryService#latest` 有兜底、`ProjectSummaryService#maxDeformation`
-  没有，两个端点会给同一测点两个值；现统一走 `MeasurementMapper#latestRowOf`，
-  `03-query.sh` ⑨ 有回归断言。
-- **项目概览的「未解除警情」必须同时算上设备告警**（2026-09-11 修）：告警有两条来源，挂的字段不同——
-  `POINT` 类型只写 `point_id`、`DEVICE` 类型只写 `device_id`（另一侧为 NULL）。`ProjectSummaryService`
-  原先只判 `point_id IN (...)`，而 SQL 里 `NULL IN (...)` 不成立，**设备告警一条也数不进来**（B-14）。
-  现改为 `point_id IN (...) OR device_id IN (...)`，设备侧由 `device_point` 反查。注意空集合：
-  MyBatis-Plus 的 `in(空集合)` 会丢掉整条条件，所以 `or` 那一支只在设备非空时才挂，否则会反向退化成
-  「所有设备告警都算」。`07-device-alarm.sh` ①-b 有回归断言（**改回旧写法实测会红**）。
-- **SSE 长连接必须在整页卸载时显式 `close()`**（2026-09-11 实测定位）：`AppLayout` 里那条全局
-  SSE 原先只在 `onBeforeUnmount` 里关，而**整页卸载（F5 / 直接输地址）不会触发它**——文档是被
-  丢弃的。此时浏览器发的 FIN 仍要等对端收尾，可 nginx 的非缓冲反代只能靠「向客户端写失败」
-  察觉，而**第一次写进半关闭的 socket 会成功**，于是要等第二次心跳（后端 `HEARTBEAT_MS` 30s × 2）
-  才收口。这段时间那条半关闭 socket 占着浏览器「单源 6 连接」的名额，**连刷 6 次之后所有请求
-  全部排队，界面像死了几十秒**。对照实验：拦掉 `/api/v1/stream` → 9 次导航全 4–8ms；不拦 →
-  第 6 次冻 47 秒。修法是在 `pagehide` 里显式 `close()`（浏览器当场回收名额，不必等对端），
-  并在 `pageshow`（`persisted`）里补重连——否则从 bfcache 后退回来 SSE 会**静默失效**。
-  后端侧无此问题：直连 8080 时断开能被立即回收，只有过 nginx 才滞后。
-- **调试面已按 profile 收窄**（B-7）：H2 控制台只在基础 profile 开着，`postgres` profile 显式关闭，
-  且 `SecurityConfig` 的放行跟着这个开关走；`frameOptions` 由 `disable()` 收成 `sameOrigin()`。
-  swagger 保留放行（联调期前端要读 OpenAPI）。
-- **契约不再走「签字」**：项目用单仓库单一事实源，双方读同一份文档与代码，git 历史即记录。
-  现行事实源 = `docs/message-contract.md`（消息契约）+ `docs/B侧接口契约_M0.md`（接口/字段/枚举）；
-  `M0_接口冻结_致B_v1.md` 已就地作废（D1–D10 编号仍由它定义，数值以现行文档/代码为准）。
-- **`<img>` 取影像是契约里第二处（也是最后一处）query 鉴权**（2026-09-14）：`<img>` 发不出
-  `Authorization` 头，与 `EventSource` 是同一个约束，所以 `/media/{id}/content` 走 `?token=`。
-  忘了它就是满屏碎图——而且**每张图各自一个 401**，图片加载失败又不走 axios 拦截器，
-  控制台里只有一串裸 401、界面上没有任何提示。前端统一走 `api/monitor.js` 的 `mediaContentUrl()`，
-  三处调用点都不自己拼地址。**证伪过**：把 token 去掉后 18 条浏览器断言红 8 条，
-  错误明细就是 `取图 HTTP 401`。
-- **影像删除是「逻辑删除」**（2026-09-14 新增 `DELETE /api/v1/media/{mediaId}`，契约 §7）：
-  只把库里的行标成 `deleted=1`，**盘上的文件保留**——这是用户定案的口径（与 `monitor_point`/`device`
-  一致，可审计可恢复），代价是卷只增不减，回收磁盘要另配离线策略。删除后该影像从列表与内容端点
-  一并消失，重复删除得 404（不是静默成功），角色限 ADMIN/MAINTAINER，且走 `@AuditAction` 留痕
-  （软删意味着「删了还在库里」，不留痕就无从查证）。前端入口由 `MediaGallery` 的 `deletable` 控制，
-  **3D 大屏浮窗刻意不给**（那是「看」的场合）；但真正的边界在后端 `@PreAuthorize`，藏按钮不是权限。
-  此前「没有删除端点」导致的两个后果都已消解：套件现在自己回收传的图（`06-media.sh` ⑧），
-  误传的照片运维在界面上就能撤。
-- **项目数据范围隔离已落地**（2026-09-14，验收第 7 条前半）。成员关系走显式的 `project_member`
-  表（硬删，`UNIQUE(user_id, project_id)`），**不用 `sys_user.organization_id`**——组织级隔离在
-  「1 组织 1 项目」的种子下演示不出来。可见范围沿 `point → object → scene → project` 归集，
-  设备经 `device_point` 反查；**ADMIN 不受限**，其余看 membership。
-  三处值得记住的地方：
-  - **过滤做在 `BaseCrudController` 的三个钩子上**（`list` / `page` / `get`），七个 CRUD 子类各自实现。
-    只给列表加过滤是不够的——`/points/page` 与按 id 直读是**两条独立的泄漏路径**。
-  - **不可见返回 403，不存在仍返回 404**，两者不合并：「你没权限」和「这东西没了」在验收时要说的话不同。
-  - **空集合要短路**：MyBatis-Plus 的 `in(空集合)` 会**丢掉整条条件**，于是「一个项目都没有」退化成
-    「不过滤 = 看到全部」——**一个在做过滤、实际在放大权限的默认值**。收口在 `DataScopeService.inIds()`
-    （空集产出 `1 = 0`），`10-scope.sh` 里 `outsider` 那 15 条 fail-closed 断言就是钉这个的。
-  警情按 **point 与 device 两侧**都滤（B-14 的镜像），处置动作同样过范围。套件 `10-scope.sh` **107 条**，
-  `--fresh` 全量 **375/375**；**证伪过**：把 `unrestricted()` 注入 `return true;` → 46 条转红，
-  且红的正是**差值型**断言，控制型（admin 直达 200）仍绿——说明承重的是差值那一半。
-  - **推送侧同样按订阅者过滤**（2026-09-14，B 侧同步单提出后当天修掉）。只挡查询是不够的：
-    服务端照样会把别的项目的警情（含 `pointCode` / `deviceCode`）推进不该看到它的浏览器——
-    **界面上根本看不到这个测点，告警横幅却把它弹了出来**。现在广播**没有「发给所有人」这个入口**
-    （无过滤的 `broadcast` 已删除，8 处调用点全部改为 `broadcastScoped` 并给出事件的项目归属），
-    可见性判据**复用 `DataScopeService` 同一份实现**（接口 `SubscriberScope` 落在 `common.sse`，
-    不让 `common` 反向依赖 `scope`）；事件归属是**集合**（一台设备可绑多个项目的测点）、
-    **空集 = 无归属 → 只发 ADMIN**（fail-closed）。`10-scope.sh` ⑪ 开三条真实订阅正反两侧断言，
-    **证伪过**：判定改成恒真时 6 条负向断言全红、正向对照全绿。
-  - **概览的 `maxDeformationMm` 刻意不跟随「测项中立化」**：它只统计 `defo_mm`，不随主测项切换。
-    `metric` 档案只有 `code/name/unit`，判不出量纲类别；按 unit 猜会踩现成的反例——
-    `rate_mm_d` 的 unit 是 `mm/d`，把**速率**算成形变（999 mm/d 顶掉 2 mm，而结果看着仍然合理）。
-    口径写进契约 §3，回归断言在 `03-query.sh` ⑩。
-- 尚缺（详见 `docs/后续阶段工作清单_A_v1.md`）：① 低电量告警未做（用户定案：暂不做）；
-  ② 验收第 7 条里的**只读角色、报表、视频接入、标定/巡查模型**未做（属 P1，未定案前不动）。
-- **设备侧三类告警已成体系**（2026-09-14，验收第 5 条）：离线的同时补上了
-  **数据质量异常**（窗口内坏质量占比超阈值）与**数据延迟**（`receiveTime − collectTime` 超阈值）。
-  三者共用一张 `alarm` 表、一套状态机与处置留痕，**不新增 `alarm_type`**——成因落在
-  `alarm_reason` 列（V7）+ `snapshot.reason` 上。两个判据的边界都刻意收过：
-  回补的历史数据**不算**延迟上报（那是导入不是迟到）；样本不足 4 条时两个判据都不成立，
-  也**不解除**已有警情（「数据变好了」在没有样本时是个没有依据的结论）；
-  设备处于 `FAULT`/离线时暂不判定，闸门放开后照常判定。
-  同一台设备上三种成因**各自独立成条、互不掩盖**——`openAlarmOf` 必须按成因过滤，
-  否则离线扫描会把数据质量警情当成自己的那条、在设备恢复在线时把它「解除」掉
-  （与 B-14 同一类缺陷，`09-data-quality.sh` ④ 是它的回归锚点）。
+- 单仓库 monorepo；`main`（保护）+ `feature/<模块>` 分支 + PR；每日工作日志当天提交到 `docs/daily/`。
+- schema/seed 由 A 统一维护（要改走新版本号迁移，不与他人同改既有迁移文件）。
+- 行尾 LF（`.gitattributes`）；UTF-8；相对路径；Linux 用 `./mvnw`、Windows 用 `mvnw.cmd`。
+- ingest 鉴权：请求头 `X-Ingest-Key`（dev 默认 `dev-ingest-key`，env `MONITOR_INGEST_KEY` 覆盖）；SSE 与影像内容用 `?token=<JWT>`（这两处浏览器发不出自定义头，是浏览器限制不是选择）。
