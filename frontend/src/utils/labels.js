@@ -1,10 +1,17 @@
 /**
  * 枚举 → 中文展示文案。
- *
  * 契约 §4 明确：后端返回的 `lastAction`、`status`、`level` 都是**原始枚举串**，
  * 「不是中文标签——前端自行映射展示文案」。所以映射表只能在前端，
  * 集中放这里而不是散在各个组件里，否则同一个 `OBSERVING` 在两处会译成两个词。
  */
+
+/** 角色枚举 → 中文。与后端 `common/constant/Role.java` 一一对应（管理端的角色下拉用） */
+export const ROLE_LABELS = {
+  ADMIN: '管理员',
+  OPERATOR: '值班员',
+  ANALYST: '研判员',
+  MAINTAINER: '运维员',
+}
 
 export const LEVEL_LABELS = {
   notice: '提示',

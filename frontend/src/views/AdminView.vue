@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import http from '@/api/http'
-import { LEVEL_LABELS, label } from '@/utils/labels'
+import { LEVEL_LABELS, ROLE_LABELS, label } from '@/utils/labels'
 
 /**
  * 平台管理端（需求 §5 第 1 类页面 / 验收第 7 条
@@ -56,6 +56,37 @@ const TABS = [
       { key: 'code', label: '项目编码', required: true },
       { key: 'location', label: '位置' },
       { key: 'description', label: '描述', type: 'textarea' },
+    ],
+  },
+  {
+    // 用户管理（清单第 13 条）。列表与编辑都走同一套通用 CRUD，只有三处是别的资源没有的：
+    //   · 账号与初始密码**只在新建时出现**（createOnly）——账号是身份标识，建好不该改；
+    //   · `columns` 显式声明（其余资源是「后端有什么就显示什么」，用户表有 12 个字段，
+    //     自动取前 8 个会把电话/邮箱挤掉，而这两列恰恰是这个页面最常看的）；
+    //   · 口令是密码输入框（type: 'password'）。
+    key: 'users',
+    label: '用户',
+    path: '/v1/users',
+    fields: [
+      { key: 'username', label: '账号', required: true, createOnly: true, hint: '登录名；建好后不可修改' },
+      { key: 'password', label: '初始密码', type: 'password', required: true, createOnly: true, hint: '至少 8 位；交给本人后请其到「个人中心」自行修改' },
+      { key: 'displayName', label: '姓名', required: true },
+      { key: 'role', label: '角色', type: 'select', options: ['ADMIN', 'OPERATOR', 'ANALYST', 'MAINTAINER'], required: true },
+      { key: 'organizationId', label: '公司（组织）', type: 'ref', ref: 'organizations' },
+      { key: 'jobTitle', label: '岗位' },
+      { key: 'phone', label: '联系电话' },
+      { key: 'email', label: '邮箱' },
+      { key: 'enabled', label: '启用', type: 'switch', default: true, hint: '停用后对方手里的令牌下一个请求即失效（不必等过期）' },
+    ],
+    columns: [
+      { key: 'username', label: '账号' },
+      { key: 'displayName', label: '姓名' },
+      { key: 'roleLabel', label: '角色' },
+      { key: 'organizationName', label: '公司' },
+      { key: 'jobTitle', label: '岗位' },
+      { key: 'phone', label: '联系电话' },
+      { key: 'email', label: '邮箱' },
+      { key: 'enabled', label: '启用' },
     ],
   },
   {
@@ -187,23 +218,47 @@ function normalize(data) {
   return data?.records || []
 }
 
-async function load() {
+/**
+ * 代际守卫（与 PointsView 的 `createRequestGuard` 同一套思路）。
+ *
+ * 为什么需要：切页签时 `reload()` 先把「当前页签」快照下来，再发请求；请求回来时页签可能
+ * 已经变了（用户手比网络快）。此前这里读的是**响应到达那一刻**的 `currentTab`——
+ * 2026-09-17 实测到的症状是：切到「用户」后表格里是 2 行、每格都是「—」，
+ * 正是**上一个页签（项目，2 行）的数据**套在新的列定义上渲染出来的；
+ * 点一下「刷新」（此时页签已稳定）就正常。旧响应必须丢掉，不能写进当前页签。
+ */
+let loadGeneration = 0
+
+async function load(tab, token) {
   loading.value = true
   error.value = ''
   try {
-    rows.value = normalize(await http.get(currentTab.value.path))
+    const data = await http.get(tab.path)
+    if (token !== loadGeneration) return // 迟到的旧页签响应：一个字都不许写
+    rows.value = normalize(data)
   } catch (e) {
+    if (token !== loadGeneration) return
     // 失败时数据也是空的，如果只把 rows 清空，「请求挂了」和「这个资源确实没有数据」
     // 在界面上完全一样——排查时最误导的一种。所以另记一条错误，模板优先显示它。
     rows.value = []
     error.value = e?.message || '请求失败'
   } finally {
-    loading.value = false
+    if (token === loadGeneration) loading.value = false
   }
 }
 
-/** 表头由数据推导：各资源字段不同，写死列在后端加字段时就看不到了 */
-function pickColumns(list) {
+/**
+ * 表头由数据推导：各资源字段不同，写死列在后端加字段时就看不到了。
+ *
+ * 例外是页签自己声明了 `columns`（目前只有「用户」）：那张表字段多，自动取前 8 个会把
+ * 电话/邮箱挤掉，而这两列恰是该页最常看的——所以允许显式覆盖，但**默认仍是自动推导**。
+ */
+function pickColumns(tab, list) {
+  const declared = tab?.columns
+  if (declared?.length) {
+    columns.value = declared.map((c) => ({ ...c, wide: c.wide ?? false }))
+    return
+  }
   if (!list.length) {
     columns.value = []
     return
@@ -253,8 +308,10 @@ function dedupeRef(name, rows) {
 /** 切页签和首次进入走同一条路：先取数，再按取到的数据推列 */
 async function reload() {
   const tab = currentTab.value
-  await Promise.all([load(), ensureRefs(tab)])
-  pickColumns(rows.value)
+  const token = ++loadGeneration
+  await Promise.all([load(tab, token), ensureRefs(tab)])
+  if (token !== loadGeneration) return
+  pickColumns(tab, rows.value)
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +324,30 @@ const formRef = ref(null)
 const form = ref({})
 
 const dialogTitle = computed(() => (editingId.value ? '编辑' : '新建'))
+
+/**
+ * 表单实际要渲染的字段：`createOnly` 的字段（账号、初始密码）只在新建时出现。
+ *
+ * 为什么用 computed 而不是在 v-for 上写 v-if：Vue 3 里 v-if 的优先级**高于** v-for，
+ * 同一个元素上写 `v-for + v-if="f.createOnly"` 时 `f` 还是未定义的，会直接报错。
+ */
+const visibleFields = computed(() =>
+  (currentTab.value?.fields || []).filter((f) => !(f.createOnly && editingId.value)),
+)
+
+/** 表格单元格展示：布尔值给中文，空值给「—」（后端 null 直接渲染会是一片空白） */
+function formatCell(key, value) {
+  if (value === true) return key === 'enabled' ? '启用' : '是'
+  if (value === false) return key === 'enabled' ? '停用' : '否'
+  return value === null || value === undefined || value === '' ? '—' : value
+}
+
+/** 下拉选项的中文：角色与告警等级是枚举串，其余资源直接显示原值 */
+function selectLabel(field, option) {
+  if (field.key === 'role') return label(ROLE_LABELS, option)
+  if (field.key === 'level') return label(LEVEL_LABELS, option)
+  return option || '（不标注）'
+}
 
 /** 新建时按 fields 的 default 铺初值；不这么做，switch 会是 undefined（既不显示开也不显示关） */
 function blankForm(tab) {
@@ -311,6 +392,9 @@ function openEdit(row) {
 function cleanPayload(tab) {
   const payload = {}
   tab.fields.forEach((field) => {
+    // 只在新建时出现的字段（账号、初始密码）编辑时不提交：
+    // 账号后端本来就不收，而把「初始密码」当普通字段回传会变成「改资料顺带改口令」。
+    if (field.createOnly && editingId.value) return
     const v = form.value[field.key]
     if (field.type === 'number') payload[field.key] = v === '' || v === null || v === undefined ? null : Number(v)
     else if (field.type === 'ref') payload[field.key] = v === '' || v === null || v === undefined ? null : v
@@ -391,12 +475,23 @@ onMounted(reload)
         :prop="c.key"
         :label="c.label"
         :min-width="c.wide ? 220 : 110"
+        :formatter="(row, col, value) => formatCell(col.property, value)"
         show-overflow-tooltip
       />
       <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">
           <el-button size="small" link type="primary" @click="openEdit(row)">编辑</el-button>
-          <el-button size="small" link type="danger" @click="remove(row)">删除</el-button>
+          <!--
+            用户不提供「删除」：账号一般用「停用」（enabled=false）就够了，
+            删除留给建错的号——那是少数情况，用接口处理即可，不必在界面上放手一滑就删人的按钮。
+          -->
+          <el-button
+            v-if="currentTab.key !== 'users'"
+            size="small"
+            link
+            type="danger"
+            @click="remove(row)"
+          >删除</el-button>
         </template>
       </el-table-column>
       <template #empty>
@@ -411,7 +506,7 @@ onMounted(reload)
     <el-dialog v-model="dialogVisible" :title="`${dialogTitle}${currentTab.label}`" width="560px">
       <el-form ref="formRef" :model="form" label-width="110px" v-loading="refLoading">
         <el-form-item
-          v-for="f in currentTab.fields"
+          v-for="f in visibleFields"
           :key="f.key"
           :label="f.label"
           :prop="f.key"
@@ -442,12 +537,21 @@ onMounted(reload)
             <el-option
               v-for="opt in f.options"
               :key="opt"
-              :label="f.key === 'level' ? label(LEVEL_LABELS, opt) : opt || '（不标注）'"
+              :label="selectLabel(f, opt)"
               :value="opt"
             />
           </el-select>
 
           <el-switch v-else-if="f.type === 'switch'" v-model="form[f.key]" />
+
+          <el-input
+            v-else-if="f.type === 'password'"
+            v-model="form[f.key]"
+            type="password"
+            show-password
+            autocomplete="new-password"
+            :placeholder="f.hint"
+          />
 
           <el-input
             v-else-if="f.type === 'textarea'"
