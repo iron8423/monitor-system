@@ -75,7 +75,7 @@ async function handleSubmit() {
     <section class="brand">
       <div class="brand-grid" />
       <div class="brand-body">
-        <div class="brand-tag">UGMS · 阶段 2</div>
+        <div class="brand-tag">CQXL · 阶段 2</div>
         <h1 class="brand-title">通用监测管理系统</h1>
         <p class="brand-sub">变形 / 安全监测 · 3D 可视化大屏</p>
 

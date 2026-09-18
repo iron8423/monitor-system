@@ -89,7 +89,7 @@ async function handleCommand(command) {
           <component :is="collapsed ? 'Expand' : 'Fold'" />
         </el-icon>
         <div class="logo">
-          <span class="logo-mark">UGMS</span>
+          <span class="logo-mark">CQXL</span>
           <span class="logo-text">通用监测管理系统</span>
         </div>
         <el-divider direction="vertical" />

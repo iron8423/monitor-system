@@ -581,7 +581,7 @@ onBeforeUnmount(() => {
     <!-- 顶栏 -->
     <header class="hud topbar">
       <div class="topbar-left">
-        <span class="logo">UGMS</span>
+        <span class="logo">CQXL</span>
         <span class="title">三维数字孪生监测大屏</span>
         <span class="project">{{ store.currentProject?.name || '—' }}</span>
         <!-- 项目切换：只影响读这份 store 的页面（就是本屏）——其余页面由后端按成员项目限范围 -->
