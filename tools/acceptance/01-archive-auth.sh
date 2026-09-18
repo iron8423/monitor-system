@@ -150,6 +150,12 @@ check "运维配置不回显接入密钥明文" "0" \
 # P2-9：行数统计里 measurement 走近似值，必须**标出来**（响应里列出近似表并附口径说明），
 # 且整体缓存 60 秒——不然运维页每次刷新都把十几条查询（含一次大表计数）重打一遍。
 check "admin 可读 /ops/stats" "200" "$(http_code "$BASE/ops/stats" -H "$AUTH")"
+# 时区口径（2026-09-18 由 CI 抓出的真 bug 的回归绊线）：平台时间一律 Asia/Shanghai，
+# 与宿主机 TZ 无关。漏了这条钉定，在 UTC 的机器上所有"现在"都会偏 8 小时——
+# 表现为设备按北京时间报数、平台判它是 8 小时后的未来而**整批拒收**。
+# （容器镜像里有 TZ=Asia/Shanghai 盖着，所以这条只在裸机/CI/k8s 上才会红。）
+check "平台时区钉定为 Asia/Shanghai（与宿主机无关）" "Asia/Shanghai" \
+  "$(curl -s "$BASE/ops/config" -H "$AUTH" | data_of "['timeZone']")"
 check "stats 列出了走近似计数的表" "True" \
   "$(curl -s "$BASE/ops/stats" -H "$AUTH" | python3 -c "import sys,json;print('measurement' in (json.load(sys.stdin)['data'].get('approximateTables') or []))")"
 curl -s -o /dev/null "$BASE/ops/stats" -H "$AUTH"

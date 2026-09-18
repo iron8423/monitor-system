@@ -39,6 +39,11 @@ jobs:
 
   backend-acceptance:
     runs-on: ubuntu-latest
+    # 刻意**不**给这个 job 设 TZ：GitHub runner 默认是 UTC，而平台的时间口径是
+    # Asia/Shanghai（应用在 main 第一行把 JVM 默认时区钉死，见 MonitorApplication）。
+    # 2026-09-18 正是这个组合抓出一个真 bug：容器里有 TZ=Asia/Shanghai 盖着，
+    # 裸机/CI 上却让"现在的报文"被判成 8 小时后的未来而整批拒收。
+    # 给 CI 设 TZ 会把这类问题重新盖住——所以这里留白是**故意的**。
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4

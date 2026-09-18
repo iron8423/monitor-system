@@ -249,6 +249,10 @@ public class OpsController {
         data.put("uploadDir", uploadDir);
         data.put("demoAccountsEnabled", demoAccountsEnabled);
         data.put("jwtExpirationHours", jwtExpirationMs / 1000 / 60 / 60);
+        // 时区口径（2026-09-18 由 CI 抓出的真 bug）：平台时间一律按 Times.ZONE 生成，
+        // 与宿主机的 TZ 无关。放在这里是为了让"这台机器上的时间基准是什么"**看得见**——
+        // 裸机部署漏配 TZ 时，这一个字段就能解释"为什么接入整批被判未来"。
+        data.put("timeZone", java.util.TimeZone.getDefault().getID());
         data.put("ingestKeyLength", ingestKey == null ? 0 : ingestKey.length());
         data.put("ingestKeyIsDevDefault", DEV_DEFAULT_INGEST_KEY.equals(ingestKey));
         data.put("securityHint", DEV_DEFAULT_INGEST_KEY.equals(ingestKey)
