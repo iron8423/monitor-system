@@ -10,12 +10,55 @@
   --mk-dark-line: rgba(90, 170, 255, 0.25);
   --mk-text-primary: var(--mk-text);
 
+  /* ---------- 主题（白天 / 黑夜）----------
+     两套主题都只改这一组变量；Element Plus 自己的暗色变量表挂在 html.dark 上，
+     由 composables/useTheme.js 与 data-theme 同步切换。 */
+  /* 外壳顶栏：白天是浅色 + 深色文字，黑夜沿用原来的深色渐变 */
+  --mk-header-bg: linear-gradient(90deg, #ffffff, #eef4fb);
+  --mk-header-text: #1f2d3d;
+  --mk-header-muted: #5c6b80;
+  --mk-header-border: #e4e7ed;
+
+  /* 3D 大屏 HUD：白天是半透明浅色面板，黑夜是原来的深色玻璃面板 */
+  --mk-hud-bg: rgba(255, 255, 255, 0.88);
+  --mk-hud-border: rgba(31, 111, 235, 0.26);
+  --mk-hud-text: #16233a;
+  --mk-hud-muted: #5c6b80;
+  /* Cesium 场景底色（椭球底色）：白天给一个浅冷灰，黑夜是原来的深蓝黑 */
+  --mk-globe-bg: #cfdbe8;
+  --mk-screen-bg: #dfe7f0;
+  --mk-scrollbar: #c6ccd6;
+  --mk-scrollbar-hover: #a9b2c0;
+
   /* 告警等级 / 设备状态色。与 utils/labels.js 里的 LEVEL_TAG 是两套东西：
      那边给 el-tag 选类型，这边给自绘的数值文本上色。 */
   --mk-level-notice: #909399;
   --mk-level-warning: #e6a23c;
   --mk-level-alarm: #f56c6c;
   --mk-online: #35b37e;
+}
+
+/* 黑夜模式：只覆盖上面那组外壳/HUD 变量；Element Plus 组件由 html.dark 接管 */
+[data-theme='dark'] {
+  --mk-bg: #0b1220;
+  --mk-panel: #131c2c;
+  --mk-border: #263349;
+  --mk-text: #dbe7f5;
+  --mk-text-sub: #8fa9c6;
+
+  --mk-header-bg: linear-gradient(90deg, var(--mk-dark-1), var(--mk-dark-2));
+  --mk-header-text: #eaf2ff;
+  --mk-header-muted: #9fb6d4;
+  --mk-header-border: rgba(90, 170, 255, 0.18);
+
+  --mk-hud-bg: rgba(6, 16, 31, 0.74);
+  --mk-hud-border: rgba(90, 170, 255, 0.22);
+  --mk-hud-text: #dbe7f5;
+  --mk-hud-muted: #8fa9c6;
+  --mk-globe-bg: #0b1622;
+  --mk-screen-bg: #06101f;
+  --mk-scrollbar: #2c3a52;
+  --mk-scrollbar-hover: #3d4f6d;
 }
 
 /* ---------- 页面通用件 ----------
@@ -121,12 +164,12 @@ a {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c6ccd6;
+  background: var(--mk-scrollbar);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a9b2c0;
+  background: var(--mk-scrollbar-hover);
 }
 
 ::-webkit-scrollbar-track {

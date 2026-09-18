@@ -4,12 +4,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { useUserStore } from '@/stores/user'
+import { useTheme } from '@/composables/useTheme'
 
 defineOptions({ name: 'LoginView' })
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const { isDark, toggleTheme } = useTheme()
 
 const formRef = ref(null)
 const loading = ref(false)
@@ -93,6 +95,12 @@ async function handleSubmit() {
 
     <!-- 右：登录表单 -->
     <section class="panel">
+      <!-- 登录页也放一个主题开关：它是系统的第一屏，让人在这里就能选自己的习惯 -->
+      <el-tooltip :content="isDark ? '切换到白天模式' : '切换到黑夜模式'" placement="bottom">
+        <el-icon class="theme-toggle" @click="toggleTheme">
+          <component :is="isDark ? 'Sunny' : 'Moon'" />
+        </el-icon>
+      </el-tooltip>
       <div class="card">
         <h2 class="card-title">登录</h2>
         <p class="card-sub">请使用系统账号登录工作台</p>
@@ -279,11 +287,28 @@ async function handleSubmit() {
 
 /* ---------- 右：表单区 ---------- */
 .panel {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 40px;
   background: var(--mk-panel);
+}
+
+.panel .theme-toggle {
+  position: absolute;
+  top: 22px;
+  right: 24px;
+  padding: 7px;
+  font-size: 17px;
+  color: var(--mk-text-sub);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.panel .theme-toggle:hover {
+  color: var(--mk-primary);
+  background: rgba(31, 111, 235, 0.1);
 }
 
 .card {
@@ -341,15 +366,15 @@ async function handleSubmit() {
   padding: 10px 12px;
   text-align: left;
   cursor: pointer;
-  background: #fafbfd;
+  background: var(--mk-bg);
   border: 1px solid var(--mk-border);
   border-radius: 8px;
   transition: all 0.15s ease;
 }
 
 .account:hover {
-  border-color: #b7cdf5;
-  background: #f3f7ff;
+  border-color: var(--mk-primary);
+  background: rgba(31, 111, 235, 0.12);
 }
 
 .account.active {

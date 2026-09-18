@@ -6,6 +6,7 @@ import {
   Cesium,
   ION_CONFIGURED,
   LOCAL_SCENE_ENABLED,
+  applyViewerTheme,
   createViewer,
   flyToPoint,
   flyToPoints,
@@ -21,6 +22,7 @@ import { ALARM_LEVEL, resolvePointVisual } from '@/constants/status'
 import { useMonitorStore } from '@/stores/monitor'
 import { useRealtimeStore } from '@/stores/realtime'
 import { GRANULARITY_TEXT, REPLAY_RANGES, useReplayStore } from '@/stores/replay'
+import { useTheme } from '@/composables/useTheme'
 import { formatNumber, formatSigned, formatTime, fromNow } from '@/utils/format'
 import { frameProgress, indexFromProgress } from '@/utils/timeline'
 
@@ -30,6 +32,7 @@ const router = useRouter()
 const store = useMonitorStore()
 const realtime = useRealtimeStore()
 const replay = useReplayStore()
+const { isDark, toggleTheme } = useTheme()
 const container = ref(null)
 let viewer = null
 let pointLayer = null
@@ -519,6 +522,9 @@ watch(
 watch(heatOn, (on) => heatLayer?.setVisible(on))
 watch(sectorOn, (on) => mountainScene?.setSectorVisible(on))
 
+// 主题切换要把 3D 场景底色一起换掉（影像与地形本身不动——那是数据，不是主题装饰）
+watch(isDark, () => applyViewerTheme(viewer))
+
 watch(
   () => store.projectId,
   (projectId, previous) => {
@@ -625,6 +631,12 @@ onBeforeUnmount(() => {
         <!-- 没配 token → 明说，别让人对着「无地形/兜底底图」猜自己少了什么 -->
         <span v-if="!LOCAL_SCENE_ENABLED && !ION_CONFIGURED" class="chip err" :title="TOKEN_HINT">未配 ion token</span>
         <span class="chip dim">更新于 {{ fromNow(store.loadedAt) }}</span>
+        <!-- 白天/黑夜：大屏也得跟着切，否则从工作台点进来会像换了个系统 -->
+        <el-tooltip :content="isDark ? '切换到白天模式' : '切换到黑夜模式'" placement="bottom">
+          <button class="btn icon" @click="toggleTheme">
+            <el-icon><component :is="isDark ? 'Sunny' : 'Moon'" /></el-icon>
+          </button>
+        </el-tooltip>
         <button class="btn" @click="refresh">刷新</button>
         <!-- 目标是 /home（总览），不是 /overview——后者没有注册路由，
              点下去会落进 catch-all 的 NotFoundView -->
@@ -875,7 +887,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100vh;
   overflow: hidden;
-  background: #06101f;
+  background: var(--mk-screen-bg);
 }
 
 .globe {
@@ -887,9 +899,9 @@ onBeforeUnmount(() => {
 .hud {
   position: absolute;
   z-index: 10;
-  color: #dbe7f5;
-  background: rgba(6, 16, 31, 0.74);
-  border: 1px solid rgba(90, 170, 255, 0.22);
+  color: var(--mk-hud-text);
+  background: var(--mk-hud-bg);
+  border: 1px solid var(--mk-hud-border);
   border-radius: 8px;
   backdrop-filter: blur(6px);
 }
@@ -922,7 +934,7 @@ onBeforeUnmount(() => {
   align-items: center;
   margin-left: 6px;
   font-size: 12px;
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 /* 告警横幅：贴在顶栏下方居中，12s 后自己消失（见 showBanner 的定时器） */
@@ -961,7 +973,7 @@ onBeforeUnmount(() => {
 .scene-warn .warn-desc {
   font-size: 12px;
   line-height: 1.5;
-  color: #9fb3cc;
+  color: var(--mk-hud-muted);
 }
 
 .alarm-banner .lv {
@@ -978,7 +990,7 @@ onBeforeUnmount(() => {
 }
 
 .alarm-banner .when {
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 .banner-enter-active,
@@ -1009,7 +1021,7 @@ onBeforeUnmount(() => {
 
 .project {
   font-size: 13px;
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 .chip {
@@ -1030,7 +1042,7 @@ onBeforeUnmount(() => {
 }
 
 .chip.dim {
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 /* 加载失败要用告警红：琥珀色「warn」在这块深色大屏上不够刺眼，
@@ -1043,7 +1055,7 @@ onBeforeUnmount(() => {
 .btn {
   padding: 4px 10px;
   font-size: 12px;
-  color: #cfe4ff;
+  color: var(--mk-hud-text);
   cursor: pointer;
   background: rgba(31, 111, 235, 0.25);
   border: 1px solid rgba(90, 170, 255, 0.4);
@@ -1056,6 +1068,14 @@ onBeforeUnmount(() => {
 
 .btn.wide {
   width: 100%;
+}
+
+/* 图标按钮（主题切换）：与文字按钮同一套边框与悬停，只是收成方形 */
+.btn.icon {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 7px;
+  font-size: 14px;
 }
 
 .side {
@@ -1082,7 +1102,7 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 8px;
   margin-bottom: 6px;
-  color: #dbe7f5;
+  color: var(--mk-hud-text);
   text-align: left;
   cursor: pointer;
   background: rgba(3, 13, 27, 0.56);
@@ -1107,7 +1127,7 @@ onBeforeUnmount(() => {
 .radar-row small {
   margin-top: 2px;
   font-size: 10px;
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 .radar-status {
@@ -1131,14 +1151,14 @@ onBeforeUnmount(() => {
   gap: 4px 10px;
   padding-top: 5px;
   font-size: 10px;
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 .panel-title {
   margin-bottom: 10px;
   font-size: 12px;
   letter-spacing: 0.1em;
-  color: #7fa6d0;
+  color: var(--mk-hud-muted);
 }
 
 .side-search {
@@ -1146,7 +1166,7 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 7px 9px;
   margin-bottom: 8px;
-  color: #d9eaff;
+  color: var(--mk-hud-text);
   outline: none;
   background: rgba(3, 13, 27, 0.75);
   border: 1px solid rgba(90, 170, 255, 0.25);
@@ -1161,7 +1181,7 @@ onBeforeUnmount(() => {
   padding-top: 6px;
   font-size: 11px;
   line-height: 1.4;
-  color: #718eac;
+  color: var(--mk-hud-muted);
 }
 
 .point-list {
@@ -1209,7 +1229,7 @@ onBeforeUnmount(() => {
   margin-left: auto;
   font-family: Consolas, Monaco, monospace;
   font-size: 12px;
-  color: #9fc2e8;
+  color: var(--mk-hud-muted);
 }
 
 .panel-foot {
@@ -1252,13 +1272,13 @@ onBeforeUnmount(() => {
   align-items: center;
   margin-top: 0;
   font-size: 12px;
-  color: #b7cbe3;
+  color: var(--mk-hud-muted);
 }
 
 .legend-note {
   padding-left: 8px;
   font-size: 11px;
-  color: #7f93ad;
+  color: var(--mk-hud-muted);
   border-left: 1px solid rgba(90, 170, 255, 0.25);
 }
 
@@ -1279,14 +1299,14 @@ onBeforeUnmount(() => {
 
 .popup-head .name {
   font-size: 12px;
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 .close {
   margin-left: auto;
   font-size: 16px;
   line-height: 1;
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
   cursor: pointer;
   background: none;
   border: none;
@@ -1302,21 +1322,21 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   padding: 3px 0;
   font-size: 12px;
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 .kv b {
   font-family: Consolas, Monaco, monospace;
   font-size: 13px;
   font-weight: 600;
-  color: #dbe7f5;
+  color: var(--mk-hud-text);
 }
 
 .kv em {
   font-size: 11px;
   font-style: normal;
   font-weight: 400;
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 /* 主测项那一行加粗一点：弹窗里好几行测项，得一眼看出画面上的颜色是按哪个来的 */
@@ -1354,7 +1374,7 @@ onBeforeUnmount(() => {
 
 .popup-media :deep(.time),
 .popup-media :deep(.note) {
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 /* 地面热力图开关：图例下面的小复选，不该抢视觉 */
@@ -1364,7 +1384,7 @@ onBeforeUnmount(() => {
   align-items: center;
   margin-top: 6px;
   font-size: 11px;
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
   cursor: pointer;
 }
 
@@ -1386,7 +1406,7 @@ onBeforeUnmount(() => {
 
 .timeline .stamp {
   font-size: 12px;
-  color: #dbe7f5;
+  color: var(--mk-hud-text);
   white-space: nowrap;
 }
 
@@ -1397,7 +1417,7 @@ onBeforeUnmount(() => {
 }
 
 .timeline .dim-text {
-  color: #8fa9c6;
+  color: var(--mk-hud-muted);
 }
 
 .timeline .err-text {

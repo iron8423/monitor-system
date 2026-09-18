@@ -201,6 +201,32 @@ VITE_TERRAIN_MODE=ion        # 仅 globe 模式：ion = 官方地形；none = �
 HUD 与数据列表并明确显示「山体加载失败」。`globe` 模式仍按原逻辑异步加载 ion 卫星影像和
 地形，失败时退到 Carto 深色底图/椭球。顶栏状态灯会明确显示当前层级。
 
+### 主题：白天 / 黑夜（2026-09-18）
+
+顶栏最右侧（登录页在表单面板右上角、大屏在顶栏右侧）有一个太阳/月亮图标，一键切换；
+选择记在 `localStorage.monitor_theme`，**首次访问跟随操作系统的 `prefers-color-scheme`**。
+
+实现收在 `src/composables/useTheme.js`，只有一条通路——在 `<html>` 上打两个标记：
+
+| 标记 | 谁认它 |
+|---|---|
+| `data-theme="light\|dark"` | 我们自己写的 CSS 变量（外壳、页面、3D 大屏 HUD） |
+| `class="dark"` | Element Plus 官方暗色变量表（`main.js` 里 import 的那份） |
+
+两个标记**必须同时切**：只切一个会出现「我们的面板暗了、el-table 还是白的」这种半截状态。
+
+**新增组件时按下面这张表取色**，不要再写死颜色——写死的那一处会在另一套主题下"发亮或发黑"：
+
+| 用途 | 变量 |
+|---|---|
+| 页面底色 / 面板 / 边框 / 主文字 / 次要文字 | `--mk-bg` `--mk-panel` `--mk-border` `--mk-text` `--mk-text-sub` |
+| 外壳顶栏（背景 / 文字 / 次要文字 / 分隔线） | `--mk-header-bg` `--mk-header-text` `--mk-header-muted` `--mk-header-border` |
+| 3D 大屏 HUD（面板底 / 描边 / 主文字 / 次要文字） | `--mk-hud-bg` `--mk-hud-border` `--mk-hud-text` `--mk-hud-muted` |
+| 场景底色（Cesium 椭球底色）与页面底色 | `--mk-globe-bg` `--mk-screen-bg` |
+
+**3D 里什么跟着主题变、什么不变**：椭球底色与雾密度跟着变（`createViewer.js` 的
+`applyViewerTheme`），**影像与地形本身不动**——那是数据，不是装饰。
+
 ### 坐标口径（重要）
 
 本地模型以**项目配置里的锚点**（`digital_twin_scene.anchor_longitude/latitude/height`）

@@ -201,7 +201,18 @@ def main() -> int:
                         default=ROOT / "frontend" / "public" / "models")
     parser.add_argument("--out", type=Path,
                         default=ROOT / "generated" / "terrain-asset" / "scene-migration-V20.sql")
+    parser.add_argument("--force", action="store_true",
+                        help="允许覆盖已存在的输出文件（默认拒绝，见下）")
     args = parser.parse_args()
+    # 默认拒绝覆盖：2026-09-18 踩过一次——资产重建后重跑本脚本，把**已经执行过**的
+    # V20 迁移文件改写了（哈希变了），开发库下一次启动直接报 Flyway checksum mismatch。
+    # 迁移一旦执行就不能再改，重新生成要走新版本号；这条防线比注释可靠。
+    if args.out.exists() and not args.force:
+        print(f"拒绝覆盖已存在的文件：{args.out}\n"
+              f"  · 若它还没被任何库执行过：确认后加 --force\n"
+              f"  · 若已经执行过：**不要**改它，另开一个版本号（如 V22）写新迁移",
+              file=sys.stderr)
+        return 2
     sql = HEADER + emit(load_sites(), args.assets_root)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(sql, encoding="utf-8")

@@ -6,6 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useMonitorStore } from '@/stores/monitor'
 import { useRealtimeStore } from '@/stores/realtime'
 import { useUserStore } from '@/stores/user'
+import { useTheme } from '@/composables/useTheme'
 
 defineOptions({ name: 'AppLayout' })
 
@@ -14,6 +15,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const realtime = useRealtimeStore()
 const monitor = useMonitorStore()
+const { isDark, toggleTheme } = useTheme()
 
 const collapsed = ref(false)
 
@@ -96,6 +98,15 @@ async function handleCommand(command) {
       </div>
 
       <div class="header-right">
+        <!--
+          白天/黑夜切换。放在顶栏最右侧的固定位置：它是"环境设置"而不是业务动作，
+          和刷新、导出这类按钮不是一个语义层级。
+        -->
+        <el-tooltip :content="isDark ? '切换到白天模式' : '切换到黑夜模式'" placement="bottom">
+          <el-icon class="theme-toggle" @click="toggleTheme">
+            <component :is="isDark ? 'Sunny' : 'Moon'" />
+          </el-icon>
+        </el-tooltip>
         <el-tag :type="live ? 'success' : 'info'" effect="plain" size="small">
           {{ live ? '实时已连接' : '实时未连接' }}
         </el-tag>
@@ -174,8 +185,23 @@ async function handleCommand(command) {
   justify-content: space-between;
   height: 56px;
   padding: 0 18px;
-  color: #eaf2ff;
-  background: linear-gradient(90deg, var(--mk-dark-1), var(--mk-dark-2));
+  color: var(--mk-header-text);
+  background: var(--mk-header-bg);
+  border-bottom: 1px solid var(--mk-header-border);
+}
+
+.theme-toggle {
+  padding: 6px;
+  font-size: 17px;
+  cursor: pointer;
+  border-radius: 6px;
+  opacity: 0.85;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.theme-toggle:hover {
+  opacity: 1;
+  background: rgba(127, 163, 255, 0.16);
 }
 
 .header-left,
@@ -219,7 +245,7 @@ async function handleCommand(command) {
 
 .crumb {
   font-size: 13px;
-  color: #9fb6d4;
+  color: var(--mk-header-muted);
 }
 
 .user {
@@ -237,7 +263,7 @@ async function handleCommand(command) {
 
 .user-name {
   font-size: 13px;
-  color: #eaf2ff;
+  color: var(--mk-header-text);
 }
 
 .body {
@@ -245,7 +271,7 @@ async function handleCommand(command) {
 }
 
 .aside {
-  background: #fff;
+  background: var(--mk-panel);
   border-right: 1px solid var(--mk-border);
   transition: width 0.2s ease;
 }

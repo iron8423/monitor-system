@@ -5,10 +5,16 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import * as ElementPlusIcons from '@element-plus/icons-vue'
 
 import 'element-plus/dist/index.css'
+// Element Plus 的暗色变量表：只在 <html class="dark"> 下生效，见 composables/useTheme.js
+import 'element-plus/theme-chalk/dark/css-vars.css'
 import './styles/index.css'
 
 import App from './App.vue'
 import router from './router'
+import { initTheme } from './composables/useTheme'
+
+// 主题要在挂载前落到 <html> 上：晚一步就会先闪一帧亮色（FOUC）
+initTheme()
 
 const app = createApp(App)
 

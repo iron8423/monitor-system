@@ -17,6 +17,23 @@ export const ION_CONFIGURED = Boolean(TOKEN)
 export const ION_TERRAIN_MODE = TERRAIN_MODE
 export const LOCAL_SCENE_ENABLED = SCENE_MODE === 'mountain'
 
+/**
+ * 场景底色（椭球底色）按主题给两个值。
+ *
+ * 为什么 3D 也要跟着主题走：白天模式下工作台是浅色的，如果大屏的"天空"仍是深夜蓝黑，
+ * 切过来会像两个系统。底线是不动影像与地形本身——那是数据，不是装饰。
+ */
+const GLOBE_BASE_COLOR = { dark: '#0b1622', light: '#cfdbe8' }
+
+/** 把当前主题应用到 viewer（创建时调一次；主题切换时再调） */
+export function applyViewerTheme(viewer, theme = document.documentElement.dataset.theme) {
+  if (!viewer) return
+  const key = theme === 'light' ? 'light' : 'dark'
+  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString(GLOBE_BASE_COLOR[key])
+  // 雾密度也分两档：浅色底配原来的雾会显得"发灰"
+  viewer.scene.fog.density = key === 'light' ? 0.00012 : 0.0002
+}
+
 /** 全球模式的远程兜底底图；默认 mountain 模式不会请求它。 */
 const FALLBACK_IMAGERY = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
 
@@ -49,7 +66,7 @@ export function createViewer(container) {
   })
 
   const scene = viewer.scene
-  scene.globe.baseColor = Cesium.Color.fromCssColorString('#0b1622')
+  applyViewerTheme(viewer)
   scene.globe.enableLighting = false
   scene.globe.depthTestAgainstTerrain = true
   scene.fog.enabled = true
