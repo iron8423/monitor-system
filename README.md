@@ -72,7 +72,8 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
     ├── radar_simulator/        雷达数据模拟器（无外部依赖，验收链第一环）
     ├── radar_csv_replay/       真雷达 CSV 回放适配器（改写为 BACKFILL 模式）
     ├── production_simulator/   生产规模造数（10 雷达 / 1000 目标）+ 数据集校验
-    ├── mountain_asset/         离线山地 GLB 模型生成脚本
+    ├── mountain_asset/         程序化（虚构）山地 GLB 生成脚本
+    ├── terrain_asset/          离线真实地形资产：公开 DEM + 卫星影像 → GLB
     ├── acceptance/             后端验收套件（15 套件）
     ├── backup/                 备份 / 恢复 / 自测（含影像卷）
     └── operations/             PostgreSQL 备份恢复脚本（运维口径）
@@ -80,7 +81,7 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 
 | 层 | 选型 |
 |---|---|
-| 后端 | Spring Boot 3.5.16 · Java 21 · MyBatis-Plus 3.5.17 · Flyway（V1–V17）· JJWT · springdoc-openapi |
+| 后端 | Spring Boot 3.5.16 · Java 21 · MyBatis-Plus 3.5.17 · Flyway（V1–V18）· JJWT · springdoc-openapi |
 | 数据库 | PostgreSQL 16（部署）/ H2 2.3（本地与验收 `--fresh`） |
 | 前端 | Vue 3.5 · Vite 6 · Pinia · Element Plus · ECharts 6 · CesiumJS 1.145 |
 | 鉴权 | JWT（`Authorization: Bearer`）；例外两处：ingest 用 `X-Ingest-Key` 头，SSE 与影像内容用 `?token=` |
@@ -113,12 +114,15 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 
 ## 3D 数字孪生（V2 · 双雷达）
 
-- **自持模型，不依赖在线服务**：仓库内自带精细低多边形山地 GLB（320m × 240m、38,400 三角面，含复合山脊/沟谷/滑坡体），默认不依赖 Cesium ion 或在线底图；设 `VITE_SCENE_MODE=globe` 可切回真实地形 + 卫星影像模式。
+- **自持模型，不依赖在线服务**：仓库内自带两份地形资产，运行期都不请求 Cesium ion 或在线底图；设 `VITE_SCENE_MODE=globe` 可切回 ion 真实地形 + 卫星影像模式。
+  - **默认（V18 起）= `qingyuan-hillside-1.0.0`**：离线「真实地形」资产。几何骨架来自公开 DEM（SRTM 派生，30m 级）、色彩底来自公开卫星影像（Sentinel-2 cloudless，10m 级、CC BY 4.0），中高频细节由生成器程序化补充并**逐条写在资产的 `ASSET_PROVENANCE.md` 里**；320m × 240m、38,400 三角面、真实起伏约 96m。数据来源、复现方式与「实测 vs 程序化」的边界见 [`tools/terrain_asset/README.md`](tools/terrain_asset/README.md) 与 [`docs/3D数字孪生_离线真实地形资产_20260918.md`](docs/3D数字孪生_离线真实地形资产_20260918.md)。
+  - **保留 = `mountain-demo-2.0.0`**：纯程序化生成的虚构山体（无外部输入、无纹理），作为回退与「零依赖」对照；V18 只切换默认项目的 `asset_url`，旧资产文件与迁移都不删。
+  - 后续接入无人机航测时，用同一条流水线（`--detail-amplitude 0`）替换输入即可，前端零改动。
 - **双雷达标定**：北/南两台雷达分别覆盖 4/3 个可见目标，一条 `device_point` 关系带目标号、方位、俯仰、斜距、反射器高度、LOS、净空、标定状态与有效期；大屏可切换当前雷达并显示其三维视场、目标 LOS 与浮窗标定信息。
 - **标定失效闭环**：设备位姿或测点几何一变，旧标定自动转 `INVALID` 并留痕（成因码 `DEVICE_POSE_CHANGED` / `POINT_MOVED`），可重新标定回 `ACTIVE`。管理端已能改雷达位姿、绑定测点、激活/人工停用标定（含有效期）。
 - **按项目加载场景**：大屏读当前项目的数字孪生资产；项目没配场景时**明说**「未配置数字孪生场景，只显示离线底色」并给一键切到已配置场景的项目（默认项目由后端固定为 id 升序返回，不再随数据库执行计划漂移——此前实测过一次：默认落到没配场景的项目上，屏幕只剩底色，看起来就是"大屏打不开"）。
 - **图层与符号**：雷达视场扇面**每台一个颜色**（按声明顺序固定配色，两台雷达的覆盖面交叠时能看出归属）、可单独开关（图例里的「雷达视场扇面」）、**选中那台提亮**（面 alpha 0.26 / 描边加粗，其余压暗）；主测项不只换数字——**累积形变 = 实心圆 + 实线立柱**，**形变速率 = 空心环 + 虚线立柱**，图例里写明当前主测项用的是哪种编码。
-- **生产数据集**：`generated/production-baseline-20260916/`（10 台雷达 / 1000 个目标 / 141,625 条消息 + 地面真值 + catalog.sql，约 6.7MB gz），标定参数由 V2 地形实际采样；校验：`python3 tools/production_simulator/validate_dataset.py generated/production-baseline-20260916`。
+- **生产数据集**：`generated/production-baseline-20260916/`（10 台雷达 / 1000 个目标 / 141,625 条消息 + 地面真值 + catalog.sql，约 6.7MB gz），标定参数由 **mountain-demo-2.0.0（程序化地形）**实际采样——它服务于独立测试项目 900，与默认项目的默认资产不是同一份，换地形后如需同步重采样是后续动作；校验：`python3 tools/production_simulator/validate_dataset.py generated/production-baseline-20260916`。
 
 ## 验证与验收
 
@@ -153,7 +157,7 @@ tools/backup/selftest.sh                      # 实测一遍整条链（需要 c
 - **备份必须带媒体卷**：附件是卷里的文件，不在库里；只备库的话恢复后 `media` 行回来了、点开图却是碎的。
 - **恢复是破坏性操作**（先 `DROP SCHEMA public CASCADE` 再灌），默认要交互敲 `yes`，只有 `--yes` 才跳过；它会先停后端、恢复后等后端真的健康才收工。
 - 库名/用户/项目名一律从 `.env` 读（读不到才退回 compose 默认值）——写死的话，`.env` 一改就会去备份/清空**另一个库**。
-- **迁移**：Flyway V1–V17，容器启动时自动执行，升级不要删数据卷。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`（`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`）。
+- **迁移**：Flyway V1–V18，容器启动时自动执行，升级不要删数据卷。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`（`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`）。
 - 生产上线流程与验收步骤见 [`docs/交付说明_双雷达精细山体_V2_20260916.md`](docs/交付说明_双雷达精细山体_V2_20260916.md) 与 [`docs/3D数字孪生_生产候选部署与验收.md`](docs/3D数字孪生_生产候选部署与验收.md)。
 
 ## 已知限制与后续
@@ -181,6 +185,8 @@ tools/backup/selftest.sh                      # 实测一遍整条链（需要 c
 | [`docs/monitor-system_系统完善与改进清单.md`](docs/monitor-system_系统完善与改进清单.md) | 50 条现状对账（已修复 / 部分完成 / 未动），每条带文件行号证据 |
 | [`docs/手动验证步骤_第14-16-17-18-19条_20260917.md`](docs/手动验证步骤_第14-16-17-18-19条_20260917.md) | 脚本层测不到的人工验证步骤 |
 | [`docs/3D数字孪生_V2双雷达标定与验收.md`](docs/3D数字孪生_V2双雷达标定与验收.md) | 双雷达标定的接口与验收口径 |
+| [`docs/3D数字孪生_离线真实地形资产_20260918.md`](docs/3D数字孪生_离线真实地形资产_20260918.md) | 离线真实地形资产（DEM + 卫星影像 → GLB）的来源、设计与验证记录 |
+| [`tools/terrain_asset/README.md`](tools/terrain_asset/README.md) | 地形资产流水线用法：抓取数据、生成 GLB、出迁移草稿、接航测成果 |
 | [`docs/双人分工实施方案v2.md`](docs/双人分工实施方案v2.md) | 分工与里程碑（历史稿见 `docs/archive/`） |
 | [`docs/README_文档管理说明.md`](docs/README_文档管理说明.md) | 文档版本约定与归档规则 |
 
