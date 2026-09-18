@@ -203,8 +203,14 @@ HUD 与数据列表并明确显示「山体加载失败」。`globe` 模式仍�
 
 ### 主题：白天 / 黑夜（2026-09-18）
 
-顶栏最右侧（登录页在表单面板右上角、大屏在顶栏右侧）有一个太阳/月亮图标，一键切换；
-选择记在 `localStorage.monitor_theme`，**首次访问跟随操作系统的 `prefers-color-scheme`**。
+顶栏最右侧（登录页在表单面板右上角、大屏在顶栏右侧）有 **`☀ 白天 | ☾ 黑夜` 分段按钮**：
+两个选项都带文字、当前那一个实心高亮——用图标按钮时用户看不出"现在在哪套"，
+也容易在密集的顶栏里被忽略（这条是被用户当场指出来的）。选择记在
+`localStorage.monitor_theme`，**首次访问跟随操作系统的 `prefers-color-scheme`**，
+之后以手动选择为准。
+
+组件是 `src/components/ThemeSwitch.vue`，两个 `variant`：
+`header`（工作台顶栏 / 登录页，取 `--mk-header-*`）与 `hud`（3D 大屏浮层，取 `--mk-hud-*`）。
 
 实现收在 `src/composables/useTheme.js`，只有一条通路——在 `<html>` 上打两个标记：
 

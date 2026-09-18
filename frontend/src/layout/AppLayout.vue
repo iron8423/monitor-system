@@ -6,7 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useMonitorStore } from '@/stores/monitor'
 import { useRealtimeStore } from '@/stores/realtime'
 import { useUserStore } from '@/stores/user'
-import { useTheme } from '@/composables/useTheme'
+import ThemeSwitch from '@/components/ThemeSwitch.vue'
 
 defineOptions({ name: 'AppLayout' })
 
@@ -15,7 +15,6 @@ const router = useRouter()
 const userStore = useUserStore()
 const realtime = useRealtimeStore()
 const monitor = useMonitorStore()
-const { isDark, toggleTheme } = useTheme()
 
 const collapsed = ref(false)
 
@@ -98,15 +97,8 @@ async function handleCommand(command) {
       </div>
 
       <div class="header-right">
-        <!--
-          白天/黑夜切换。放在顶栏最右侧的固定位置：它是"环境设置"而不是业务动作，
-          和刷新、导出这类按钮不是一个语义层级。
-        -->
-        <el-tooltip :content="isDark ? '切换到白天模式' : '切换到黑夜模式'" placement="bottom">
-          <el-icon class="theme-toggle" @click="toggleTheme">
-            <component :is="isDark ? 'Sunny' : 'Moon'" />
-          </el-icon>
-        </el-tooltip>
+        <!-- 白天/黑夜：带文字的分段按钮（图标按钮太隐蔽，用户明确要求"看得见、点得到"） -->
+        <ThemeSwitch variant="header" />
         <el-tag :type="live ? 'success' : 'info'" effect="plain" size="small">
           {{ live ? '实时已连接' : '实时未连接' }}
         </el-tag>
@@ -188,20 +180,6 @@ async function handleCommand(command) {
   color: var(--mk-header-text);
   background: var(--mk-header-bg);
   border-bottom: 1px solid var(--mk-header-border);
-}
-
-.theme-toggle {
-  padding: 6px;
-  font-size: 17px;
-  cursor: pointer;
-  border-radius: 6px;
-  opacity: 0.85;
-  transition: background-color 0.15s ease, opacity 0.15s ease;
-}
-
-.theme-toggle:hover {
-  opacity: 1;
-  background: rgba(127, 163, 255, 0.16);
 }
 
 .header-left,

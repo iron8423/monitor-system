@@ -18,6 +18,7 @@ import { createPointLayer } from '@/cesium/pointLayer'
 import { createHeatmapLayer } from '@/cesium/heatmapLayer'
 import { projectDigitalTwin } from '@/api/monitor'
 import MediaGallery from '@/components/MediaGallery.vue'
+import ThemeSwitch from '@/components/ThemeSwitch.vue'
 import { ALARM_LEVEL, resolvePointVisual } from '@/constants/status'
 import { useMonitorStore } from '@/stores/monitor'
 import { useRealtimeStore } from '@/stores/realtime'
@@ -32,7 +33,7 @@ const router = useRouter()
 const store = useMonitorStore()
 const realtime = useRealtimeStore()
 const replay = useReplayStore()
-const { isDark, toggleTheme } = useTheme()
+const { isDark } = useTheme()
 const container = ref(null)
 let viewer = null
 let pointLayer = null
@@ -632,11 +633,7 @@ onBeforeUnmount(() => {
         <span v-if="!LOCAL_SCENE_ENABLED && !ION_CONFIGURED" class="chip err" :title="TOKEN_HINT">未配 ion token</span>
         <span class="chip dim">更新于 {{ fromNow(store.loadedAt) }}</span>
         <!-- 白天/黑夜：大屏也得跟着切，否则从工作台点进来会像换了个系统 -->
-        <el-tooltip :content="isDark ? '切换到白天模式' : '切换到黑夜模式'" placement="bottom">
-          <button class="btn icon" @click="toggleTheme">
-            <el-icon><component :is="isDark ? 'Sunny' : 'Moon'" /></el-icon>
-          </button>
-        </el-tooltip>
+        <ThemeSwitch variant="hud" />
         <button class="btn" @click="refresh">刷新</button>
         <!-- 目标是 /home（总览），不是 /overview——后者没有注册路由，
              点下去会落进 catch-all 的 NotFoundView -->
@@ -1068,14 +1065,6 @@ onBeforeUnmount(() => {
 
 .btn.wide {
   width: 100%;
-}
-
-/* 图标按钮（主题切换）：与文字按钮同一套边框与悬停，只是收成方形 */
-.btn.icon {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 7px;
-  font-size: 14px;
 }
 
 .side {

@@ -4,14 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { useUserStore } from '@/stores/user'
-import { useTheme } from '@/composables/useTheme'
+import ThemeSwitch from '@/components/ThemeSwitch.vue'
 
 defineOptions({ name: 'LoginView' })
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
-const { isDark, toggleTheme } = useTheme()
 
 const formRef = ref(null)
 const loading = ref(false)
@@ -96,11 +95,7 @@ async function handleSubmit() {
     <!-- 右：登录表单 -->
     <section class="panel">
       <!-- 登录页也放一个主题开关：它是系统的第一屏，让人在这里就能选自己的习惯 -->
-      <el-tooltip :content="isDark ? '切换到白天模式' : '切换到黑夜模式'" placement="bottom">
-        <el-icon class="theme-toggle" @click="toggleTheme">
-          <component :is="isDark ? 'Sunny' : 'Moon'" />
-        </el-icon>
-      </el-tooltip>
+      <ThemeSwitch class="panel-theme" variant="header" />
       <div class="card">
         <h2 class="card-title">登录</h2>
         <p class="card-sub">请使用系统账号登录工作台</p>
@@ -295,20 +290,10 @@ async function handleSubmit() {
   background: var(--mk-panel);
 }
 
-.panel .theme-toggle {
+.panel .panel-theme {
   position: absolute;
   top: 22px;
   right: 24px;
-  padding: 7px;
-  font-size: 17px;
-  color: var(--mk-text-sub);
-  cursor: pointer;
-  border-radius: 6px;
-}
-
-.panel .theme-toggle:hover {
-  color: var(--mk-primary);
-  background: rgba(31, 111, 235, 0.1);
 }
 
 .card {
