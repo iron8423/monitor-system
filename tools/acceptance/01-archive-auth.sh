@@ -134,4 +134,18 @@ check "项目列表首位是 id=1（清远山地边坡）" "1" \
 check "分页第一页与列表同序（不排序的分页会翻出重复行）" "1" \
   "$(curl -s "$BASE/projects/page?pageNum=1&pageSize=1" -H "$AUTH" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['records'][0]['id'])")"
 
+section "⑩ 系统运维接口（新增，2026-09-18）：只读、仅 ADMIN、不回显密钥"
+#
+# 运维页（/ops）读的就是这四个端点。它和审计日志同一档权限，但泄密面更大
+# （连接串、数据量、运行时开关），所以三条边界都要有断言：
+#   ① 管理员能读；② 业务角色读不到（403，不是 200 也不是 404）；③ 响应里不出现密钥明文。
+check "admin 可读 /ops/status" "200" "$(http_code "$BASE/ops/status" -H "$AUTH")"
+check "admin 可读 /ops/migrations" "200" "$(http_code "$BASE/ops/migrations" -H "$AUTH")"
+check "非管理员读 /ops/status -> 403" "403" \
+  "$(http_code "$BASE/ops/status" -H "Authorization: Bearer $(login_as operator)")"
+check "无令牌读 /ops/status -> 401" "401" "$(http_code "$BASE/ops/status")"
+# 只回显"是否仍是默认值"，不回显内容：用开发默认密钥的字面量做探针
+check "运维配置不回显接入密钥明文" "0" \
+  "$(curl -s "$BASE/ops/config" -H "$AUTH" | grep -c "${INGEST_KEY:-dev-ingest-key}")"
+
 summary

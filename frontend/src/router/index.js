@@ -131,6 +131,15 @@ const routes = [
         meta: { title: '审计日志', icon: 'Document', roles: ['ADMIN'] },
       },
       {
+        // 系统运维：看服务本身（状态/迁移/数据规模/运行开关），全部只读。
+        // 与 /admin 的分工写在 OpsView.vue 顶部：那边管**数据**，这边看**服务**。
+        // 同样是类级 @PreAuthorize("hasRole('ADMIN')") 的后端口径，这里只挡人不挡接口。
+        path: 'ops',
+        name: 'ops',
+        component: () => import('@/views/OpsView.vue'),
+        meta: { title: '系统运维', icon: 'Monitor', roles: ['ADMIN'] },
+      },
+      {
         // 个人中心：**所有登录用户都有**，所以刻意不带 `meta.roles`
         // （带了就只有列进去的角色能进，而「看自己的资料」不该分岗位）。
         // 入口在顶栏头像下拉里，不进侧边栏——侧边栏列的是"页面"，
