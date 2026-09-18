@@ -23,6 +23,12 @@ services:
       options: { max-size: "20m", max-file: "5" }
 
   backend:
+    # 固定镜像名 + 版本 tag（复查清单 P2-3）：只有 build: 时，"回退到上一版"这件事
+    # 没有落脚点——上一版镜像压根不存在。带上 image: 之后每次构建都会打上 tag，
+    # 回退就是 IMAGE_TAG=<上一版> docker compose ... up -d（不重新构建）。
+    # 默认值 local 只是为了让本地开发不配环境变量也能跑；正式部署应显式给版本号
+    # （如 IMAGE_TAG=2026.09.18-1），并把它写进发布记录。
+    image: monitor-backend:${IMAGE_TAG:-local}
     build:
       context: ./backend
     depends_on:
@@ -69,6 +75,7 @@ services:
       options: { max-size: "50m", max-file: "5" }
 
   frontend:
+    image: monitor-frontend:${IMAGE_TAG:-local}
     build:
       context: ./frontend
       args:
