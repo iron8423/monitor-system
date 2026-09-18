@@ -16,6 +16,13 @@ import { fromNow } from '@/utils/format'
  * 落进 `audit_log`。所以页面本身没什么逻辑，价值在于它让那些行**看得见**——
  * 尤其影像删除改成逻辑删除之后（行还在库里、界面上不见了），审计是唯一能回答
  * 「这张图为什么不见了」的地方。
+ *
+ * 三条口径（原先挂在页面底部的说明块里，2026-09-18 按用户要求把说明块去掉，
+ * 依据挪到这里，免得下次有人把它当"没用的文案"删掉）：
+ *   · 留痕由后端 `@AuditAction` 自动完成，前端不参与——前端能少记一笔，就少一条「谁干的」查不出来；
+ *   · 「目标」列里的 `targetId` 可能为空：不是每个写接口都能确定目标 id（例如按条件批量操作），
+ *     空着比填一个猜的值好；
+ *   · 本页只对管理员开放，边界由后端**类级** `@PreAuthorize` 定，菜单隐藏只是界面引导。
  */
 
 defineOptions({ name: 'AuditView' })
@@ -187,17 +194,6 @@ function detailText(d) {
       </div>
     </div>
 
-    <div class="mk-panel">
-      <div class="mk-footnote">
-        写操作由后端 <span class="mk-mono">@AuditAction</span> 注解自动留痕，前端不参与——
-        前端能少记一笔，就少一条「谁干的」查不出来。
-        <strong>两个筛选条件都是精确匹配</strong>（后端是 <span class="mk-mono">eq</span> 不是
-        <span class="mk-mono">like</span>），输错一个字就是空列表，不会「差不多匹配」。
-        「目标」里的 <span class="mk-mono">targetId</span> 可能为空：不是每个写接口都能确定
-        目标 id（例如按条件批量操作），空着比填一个猜的值好。
-        <strong>本页只对管理员开放</strong>，后端类级 <span class="mk-mono">@PreAuthorize</span> 定的。
-      </div>
-    </div>
   </div>
 </template>
 
