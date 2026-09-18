@@ -147,6 +147,14 @@ check "无令牌读 /ops/status -> 401" "401" "$(http_code "$BASE/ops/status")"
 # 只回显"是否仍是默认值"，不回显内容：用开发默认密钥的字面量做探针
 check "运维配置不回显接入密钥明文" "0" \
   "$(curl -s "$BASE/ops/config" -H "$AUTH" | grep -c "${INGEST_KEY:-dev-ingest-key}")"
+# P2-9：行数统计里 measurement 走近似值，必须**标出来**（响应里列出近似表并附口径说明），
+# 且整体缓存 60 秒——不然运维页每次刷新都把十几条查询（含一次大表计数）重打一遍。
+check "admin 可读 /ops/stats" "200" "$(http_code "$BASE/ops/stats" -H "$AUTH")"
+check "stats 列出了走近似计数的表" "True" \
+  "$(curl -s "$BASE/ops/stats" -H "$AUTH" | python3 -c "import sys,json;print('measurement' in (json.load(sys.stdin)['data'].get('approximateTables') or []))")"
+curl -s -o /dev/null "$BASE/ops/stats" -H "$AUTH"
+check "第二次读 /ops/stats 命中缓存（cached=true）" "True" \
+  "$(curl -s "$BASE/ops/stats" -H "$AUTH" | python3 -c "import sys,json;print(json.load(sys.stdin)['data'].get('cached'))")"
 
 section "⑪ 列表端点的上限与「截断要说出来」（P1-3）"
 #

@@ -24,6 +24,19 @@ def main() -> int:
     args = parser.parse_args()
     root = Path(args.dataset)
     manifest = load(root / "manifest.json")
+
+    # 数据集边界（复查清单 P2-8）：这份数据的坐标是按自己的场景参数生成的，与仓库里
+    # 那几份默认资产（frontend/public/models/qingyuan-*）没有对应关系。
+    # 这一条**必须**是断言而不是文档里的一句话：README 里早就有类似说明，
+    # 但没有任何东西阻止"把这份数据集当成某个演示项目的生产数据"——
+    # 那样导进去的是一组彼此对不上的坐标，而且要等到大屏上点位飘走才发现。
+    scope = manifest.get("datasetScope")
+    if scope != "independent-test-project":
+        raise SystemExit(
+            f"数据集的 datasetScope 不是 independent-test-project（实得 {scope!r}）："
+            "请确认这份数据是独立测试项目的数据，而不是被当成某个默认资产的配套数据。"
+        )
+
     for name, expected in manifest["files"].items():
         data = (root / name).read_bytes()
         actual_hash = hashlib.sha256(data).hexdigest()

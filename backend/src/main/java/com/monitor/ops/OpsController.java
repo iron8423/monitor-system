@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.sql.DataSource;
@@ -24,6 +25,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 系统运维接口（仅管理员）：给前端「系统运维」页提供**只读**的运行视图。
@@ -52,6 +54,16 @@ public class OpsController {
 
     /** 开发默认 ingest 密钥（与 application.yml 的默认值一致）。只用来回答"是否仍是默认值"。 */
     private static final String DEV_DEFAULT_INGEST_KEY = "dev-ingest-key";
+
+    /** 行数统计的缓存时长（P2-9）：这一页看的是"规模"，不是实时指标。 */
+    private static final long STATS_CACHE_MS = 60_000;
+    private static final long STATS_CACHE_SECONDS = STATS_CACHE_MS / 1000;
+
+    /** 走近似计数的表（目前只有亿级的那一张）。 */
+    private static final Set<String> APPROXIMATE_TABLES = Set.of("measurement");
+
+    private volatile Map<String, Object> statsCache;
+    private volatile long statsCachedAt;
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbcTemplate;
@@ -145,9 +157,50 @@ public class OpsController {
         return Result.ok(data);
     }
 
-    /** 关键表的行数 + 测量值的时间跨度（决定"这个库攒了多少东西"）。 */
+    /**
+     * 关键表的行数 + 测量值的时间跨度（决定"这个库攒了多少东西"）。
+     *
+     * <p><b>大表走近似计数</b>（复查清单 P2-9）：{@code measurement} 在生产基线
+     * （1000 点 × 5 秒）下每天约 3456 万行、一个月十亿级，一次 {@code COUNT(*)} 要扫全表，
+     * 而运维页只是"看一眼"。PostgreSQL 的 {@code pg_class.reltuples} 是统计信息里的估算，
+     * 代价常数级；H2（本地/验收）没有这张表，自动回退精确计数——**不回退成 0**，
+     * 0 会被读成"这张表是空的"，比"数字略偏"严重得多。</p>
+     *
+     * <p><b>近似必须能被识别</b>：响应里带 {@code approximateTables} 与 {@code note}，
+     * 前端在那些数字前写「约」。把估算值当精确值读，会得出"昨天导入 3000 万、今天怎么 2900 万"
+     * 这类假结论（autovacuum 的估算本来就会浮动）。</p>
+     *
+     * <p>整体缓存 {@value #STATS_CACHE_SECONDS} 秒：刷新这一页不该每次都把十几条查询重打一遍。
+     * 缓存是"数据规模"，不做实时性承诺——{@code cached} 字段告诉调用方这次是不是命中缓存。</p>
+     */
     @GetMapping("/stats")
-    public Result<Map<String, Object>> stats() {
+    public Result<Map<String, Object>> stats(
+            @RequestParam(defaultValue = "false") boolean exact) {
+        if (exact) {
+            // 显式要精确值：绕过缓存与近似（见下），并把结果写回缓存——
+            // 于是接下来 60 秒内的读取看到的是刚算出来的真值，而不是"缓存里恰好是旧的估算"。
+            Map<String, Object> fresh = collectStats(true);
+            statsCache = fresh;
+            statsCachedAt = System.currentTimeMillis();
+            Map<String, Object> copy = new LinkedHashMap<>(fresh);
+            copy.put("cached", false);
+            return Result.ok(copy);
+        }
+        Map<String, Object> cached = statsCache;
+        if (cached != null && System.currentTimeMillis() - statsCachedAt < STATS_CACHE_MS) {
+            Map<String, Object> copy = new LinkedHashMap<>(cached);
+            copy.put("cached", true);
+            return Result.ok(copy);
+        }
+        Map<String, Object> data = collectStats(false);
+        statsCache = data;
+        statsCachedAt = System.currentTimeMillis();
+        Map<String, Object> copy = new LinkedHashMap<>(data);
+        copy.put("cached", false);
+        return Result.ok(copy);
+    }
+
+    private Map<String, Object> collectStats(boolean exact) {
         Map<String, Object> counts = new LinkedHashMap<>();
         counts.put("project", count("project"));
         counts.put("scene", count("scene"));
@@ -155,7 +208,7 @@ public class OpsController {
         counts.put("metric", count("metric"));
         counts.put("device", count("device"));
         counts.put("device_point", count("device_point"));
-        counts.put("measurement", count("measurement"));
+        counts.put("measurement", countTable("measurement", exact));
         counts.put("alarm", count("alarm"));
         counts.put("alarm_action", count("alarm_action"));
         counts.put("media", count("media"));
@@ -176,7 +229,13 @@ public class OpsController {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("counts", counts);
         data.put("measurement", measurement);
-        return Result.ok(data);
+        data.put("approximateTables", APPROXIMATE_TABLES.stream().sorted().toList());
+        data.put("exact", exact);
+        data.put("note", exact
+                ? "本次为精确计数（COUNT(*)）；measurement 走 COUNT(*) 在亿级表上会慢，别频繁点"
+                : "measurement 行数来自数据库统计信息（近似，标「约」），其余为精确计数；"
+                    + "整体缓存 " + STATS_CACHE_SECONDS + " 秒；需要真值时用 ?exact=true");
+        return data;
     }
 
     /** 会影响行为的运行时开关（脱敏：只回答"是不是默认值"，不回显密钥本身）。 */
@@ -218,6 +277,31 @@ public class OpsController {
     private long count(String table) {
         Long value = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Long.class);
         return value == null ? 0 : value;
+    }
+
+    /**
+     * 按表给数：{@link #APPROXIMATE_TABLES} 里的表优先用统计信息估算，
+     * 估算不可用时（H2、统计信息缺失）**回退精确计数**。
+     */
+    private long countTable(String table, boolean exact) {
+        if (!exact && APPROXIMATE_TABLES.contains(table)) {
+            Long approx = approximateRowCount(table);
+            if (approx != null) {
+                return approx;
+            }
+        }
+        return count(table);
+    }
+
+    /** PostgreSQL：{@code pg_class.reltuples}；{@code -1} 表示从未 ANALYZE，交回精确计数。 */
+    private Long approximateRowCount(String table) {
+        try {
+            Long value = jdbcTemplate.queryForObject(
+                    "SELECT reltuples::bigint FROM pg_class WHERE relname = ?", Long.class, table);
+            return value == null || value < 0 ? null : value;
+        } catch (Exception e) {
+            return null;   // H2 没有 pg_class：这不是错误，是"这套库不提供估算"
+        }
     }
 
     private long countWhere(String table, String where) {

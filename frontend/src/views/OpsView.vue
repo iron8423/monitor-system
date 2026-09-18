@@ -128,7 +128,12 @@ const statRows = computed(() => {
   return Object.entries(counts).map(([key, value]) => ({
     key,
     label: labels[key] || key,
+    // P2-9：大表（目前只有 measurement）走数据库统计信息估算——**必须标「约」**，
+    // 否则估算值的正常浮动会被读成"数据少了"。近似表由后端在 approximateTables 里列出；
+    // 但点了「精确计数一次」之后返回的是 COUNT(*) 真值（响应里 exact=true），
+    // 那时再顶着「约」字就是误导——标注要跟着口径走，不能跟着表名走。
     value,
+    approximate: !stats.value?.exact && (stats.value?.approximateTables || []).includes(key),
   }))
 })
 
@@ -169,6 +174,22 @@ async function load() {
     error.value = e?.message || '运维信息加载失败'
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 精确计数一次（P2-9）：默认口径里 measurement 走数据库统计信息估算（标「约」），
+ * 需要真值时由人显式点一次——亿级表上的 COUNT(*) 不该被页面自动触发。
+ */
+const exactLoading = ref(false)
+async function loadExactCounts() {
+  exactLoading.value = true
+  try {
+    stats.value = await opsStats(true)
+  } catch (e) {
+    error.value = e?.message || '精确计数失败'
+  } finally {
+    exactLoading.value = false
   }
 }
 
@@ -321,12 +342,19 @@ onMounted(() => {
           数据规模
           <span class="mk-spacer" />
           <span class="mk-muted title-sub">截至 {{ loadedAt ? fromNow(loadedAt) : '—' }}</span>
+          <!-- 精确计数由人显式触发一次：亿级表上的 COUNT(*) 不该被页面自动打出去（P2-9） -->
+          <el-button size="small" link type="primary" :loading="exactLoading" @click="loadExactCounts">
+            精确计数一次
+          </el-button>
         </div>
         <el-table :data="statRows" size="small" class="ops-table">
           <el-table-column prop="label" label="表 / 实体" min-width="150" />
           <el-table-column label="行数" width="120" align="right">
             <template #default="{ row }">
-              <span class="mk-mono">{{ formatNumber(row.value, 0) }}</span>
+              <span class="mk-mono">
+                <span v-if="row.approximate" class="mk-muted" :title="stats?.note">约 </span>
+                {{ formatNumber(row.value, 0) }}
+              </span>
             </template>
           </el-table-column>
         </el-table>

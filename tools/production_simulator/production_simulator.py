@@ -520,6 +520,15 @@ def generate(args) -> int:
     manifest = {
         "formatVersion": "1.0",
         "generatedAt": iso(datetime.now(TZ)),
+        # 数据集边界（复查清单 P2-8）：这份数据的坐标是按**自己的场景参数**生成的，
+        # 与 frontend/public/models 里那几份默认资产（qingyuan-*）**没有任何对应关系**。
+        # 把它当成"某个演示项目的生产数据"导入，得到的是一组彼此对不上的坐标——
+        # 所以这里写死一个可被校验的标记，validate_dataset.py 会断言它。
+        "datasetScope": "independent-test-project",
+        "datasetScopeNote": (
+            "独立测试项目的数据集，与仓库内默认数字孪生资产（frontend/public/models/qingyuan-*）无关；"
+            "要配合某个真实场景使用时，必须按该场景的 DEM/位姿重新采样生成。"
+        ),
         "scenario": cfg,
         "files": {name: file_record(out / name, description) for name, description in descriptions.items()},
     }

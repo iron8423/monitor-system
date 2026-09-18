@@ -43,6 +43,18 @@ python3 tools/production_simulator/validate_dataset.py \
   generated/production-baseline-20260916
 ```
 
+### 这份数据集与默认资产**没有**对应关系（复查清单 P2-8）
+
+`manifest.json` 里有一条 `datasetScope: "independent-test-project"`，`validate_dataset.py`
+会**断言**它存在且取值正确。原因很实际：本数据集的坐标是按 `scenario.production.json`
+自己的锚点与参数生成的，而仓库里那几份默认资产（`frontend/public/models/qingyuan-*`）
+是另一条流水线的产物——把这份数据当成"某个演示项目的生产数据"导入，得到的是一组
+彼此对不上的坐标，而且要等到大屏上点位飘走才会有人发现。
+
+要把它用在某个真实场景上，正确做法是**按该场景的 DEM / 位姿重新采样生成**，
+而不是手工改锚点凑数；重新生成后 `datasetScope` 保持这个值（它描述的是"数据集的性质"，
+不是"跑在哪台机器上"）。
+
 它会检查文件哈希、消息数量、10×1000 档案规模，以及每条标定的量程、水平/垂直视场和 LOS 净空。
 
 ## 准备独立测试库

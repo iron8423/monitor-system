@@ -1,6 +1,8 @@
 {
   "formatVersion": "1.0",
   "generatedAt": "2026-09-16T09:36:50.784+08:00",
+  "datasetScope": "independent-test-project",
+  "datasetScopeNote": "独立测试项目的数据集，与仓库内默认数字孪生资产（frontend/public/models/qingyuan-*）无关；要配合某个真实场景使用时，必须按该场景的 DEM/位姿重新采样生成。",
   "scenario": {
     "datasetName": "production-baseline-10x1000",
     "seed": 20260915,
