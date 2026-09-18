@@ -81,7 +81,7 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 
 | 层 | 选型 |
 |---|---|
-| 后端 | Spring Boot 3.5.16 · Java 21 · MyBatis-Plus 3.5.17 · Flyway（V1–V19）· JJWT · springdoc-openapi |
+| 后端 | Spring Boot 3.5.16 · Java 21 · MyBatis-Plus 3.5.17 · Flyway（V1–V20）· JJWT · springdoc-openapi |
 | 数据库 | PostgreSQL 16（部署）/ H2 2.3（本地与验收 `--fresh`） |
 | 前端 | Vue 3.5 · Vite 6 · Pinia · Element Plus · ECharts 6 · CesiumJS 1.145 |
 | 鉴权 | JWT（`Authorization: Bearer`）；例外两处：ingest 用 `X-Ingest-Key` 头，SSE 与影像内容用 `?token=` |
@@ -121,6 +121,7 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 - **双雷达标定**：北/南两台雷达分别覆盖 4/3 个可见目标，一条 `device_point` 关系带目标号、方位、俯仰、斜距、反射器高度、LOS、净空、标定状态与有效期；大屏可切换当前雷达并显示其三维视场、目标 LOS 与浮窗标定信息。
 - **标定失效闭环**：设备位姿或测点几何一变，旧标定自动转 `INVALID` 并留痕（成因码 `DEVICE_POSE_CHANGED` / `POINT_MOVED`），可重新标定回 `ACTIVE`。管理端已能改雷达位姿、绑定测点、激活/人工停用标定（含有效期）。
 - **按项目加载场景**：大屏读当前项目的数字孪生资产；项目没配场景时**明说**「未配置数字孪生场景，只显示离线底色」并给一键切到已配置场景的项目（默认项目由后端固定为 id 升序返回，不再随数据库执行计划漂移——此前实测过一次：默认落到没配场景的项目上，屏幕只剩底色，看起来就是"大屏打不开"）。
+- **多场景（V20 起）**：一个项目 = 一处场址 = 一份资产，大屏顶栏的**项目下拉就是场景切换**（前端零改动）。除默认的清远山地边坡外，另有三个演示场景：**野外桥梁**（跨谷桥，桥面/桥墩/护栏）、**山区铁路**（路基/道砟/钢轨/轨枕）、**郊外工厂**（地坪/厂房/储罐/烟囱），各 6 个测点 + 1 台雷达，结构与地形拼在同一份 GLB 里（程序化示意级，见 `tools/terrain_asset/features.py`）。切换后测点、曲线与模拟数据都是该场景自己的：`tools/radar_simulator/seed_all_scenes.sh` 一次给四个场景各灌 12 小时历史 + 当前实时值。
 - **图层与符号**：雷达视场扇面**每台一个颜色**（按声明顺序固定配色，两台雷达的覆盖面交叠时能看出归属）、可单独开关（图例里的「雷达视场扇面」）、**选中那台提亮**（面 alpha 0.26 / 描边加粗，其余压暗）；主测项不只换数字——**累积形变 = 实心圆 + 实线立柱**，**形变速率 = 空心环 + 虚线立柱**，图例里写明当前主测项用的是哪种编码。
 - **生产数据集**：`generated/production-baseline-20260916/`（10 台雷达 / 1000 个目标 / 141,625 条消息 + 地面真值 + catalog.sql，约 6.7MB gz），标定参数由 **mountain-demo-2.0.0（程序化地形）**实际采样——它服务于独立测试项目 900，与默认项目的默认资产不是同一份，换地形后如需同步重采样是后续动作；校验：`python3 tools/production_simulator/validate_dataset.py generated/production-baseline-20260916`。
 
@@ -157,7 +158,7 @@ tools/backup/selftest.sh                      # 实测一遍整条链（需要 c
 - **备份必须带媒体卷**：附件是卷里的文件，不在库里；只备库的话恢复后 `media` 行回来了、点开图却是碎的。
 - **恢复是破坏性操作**（先 `DROP SCHEMA public CASCADE` 再灌），默认要交互敲 `yes`，只有 `--yes` 才跳过；它会先停后端、恢复后等后端真的健康才收工。
 - 库名/用户/项目名一律从 `.env` 读（读不到才退回 compose 默认值）——写死的话，`.env` 一改就会去备份/清空**另一个库**。
-- **迁移**：Flyway V1–V19，容器启动时自动执行，升级不要删数据卷。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`（`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`）。
+- **迁移**：Flyway V1–V20，容器启动时自动执行，升级不要删数据卷。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`（`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`）。
 - 生产上线流程与验收步骤见 [`docs/交付说明_双雷达精细山体_V2_20260916.md`](docs/交付说明_双雷达精细山体_V2_20260916.md) 与 [`docs/3D数字孪生_生产候选部署与验收.md`](docs/3D数字孪生_生产候选部署与验收.md)。
 
 ## 已知限制与后续

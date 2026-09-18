@@ -1,0 +1,80 @@
+[
+  {
+    "id": 10,
+    "code": "P-BR01",
+    "name": "桥梁测点1",
+    "local": [
+      -133.0,
+      0.0,
+      83.2
+    ],
+    "longitude": 113.074195,
+    "latitude": 23.7956,
+    "altitude": 326.55
+  },
+  {
+    "id": 11,
+    "code": "P-BR02",
+    "name": "桥梁测点2",
+    "local": [
+      -80.0,
+      0.0,
+      83.2
+    ],
+    "longitude": 113.074715,
+    "latitude": 23.7956,
+    "altitude": 326.55
+  },
+  {
+    "id": 12,
+    "code": "P-BR03",
+    "name": "桥梁测点3",
+    "local": [
+      -27.0,
+      0.0,
+      83.2
+    ],
+    "longitude": 113.0752351,
+    "latitude": 23.7956,
+    "altitude": 326.55
+  },
+  {
+    "id": 13,
+    "code": "P-BR04",
+    "name": "桥梁测点4",
+    "local": [
+      27.0,
+      0.0,
+      83.2
+    ],
+    "longitude": 113.0757649,
+    "latitude": 23.7956,
+    "altitude": 326.55
+  },
+  {
+    "id": 14,
+    "code": "P-BR05",
+    "name": "桥梁测点5",
+    "local": [
+      80.0,
+      0.0,
+      83.2
+    ],
+    "longitude": 113.076285,
+    "latitude": 23.7956,
+    "altitude": 326.55
+  },
+  {
+    "id": 15,
+    "code": "P-BR06",
+    "name": "桥梁测点6",
+    "local": [
+      133.0,
+      0.0,
+      83.2
+    ],
+    "longitude": 113.076805,
+    "latitude": 23.7956,
+    "altitude": 326.55
+  }
+]

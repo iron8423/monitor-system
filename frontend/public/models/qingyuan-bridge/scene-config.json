@@ -1,0 +1,140 @@
+{
+  "name": "野外桥梁形变监测场景",
+  "mode": "offline-real-terrain",
+  "asset": "/models/qingyuan-bridge/qingyuan-bridge.glb",
+  "assetVersion": "qingyuan-bridge-1.0.0",
+  "anchor": {
+    "longitude": 113.0755,
+    "latitude": 23.7956,
+    "height": 243.0
+  },
+  "dimensions": {
+    "width": 400.0,
+    "depth": 300.0,
+    "maxHeight": 96.632
+  },
+  "modelAxes": {
+    "east": "+X",
+    "north": "+Y",
+    "up": "+Z"
+  },
+  "radars": [
+    {
+      "id": 3,
+      "code": "radar-bridge-01",
+      "name": "桥梁形变雷达",
+      "local": [
+        165.0,
+        110.0
+      ],
+      "headingDegrees": 222.98,
+      "pitchDegrees": 4.236,
+      "range": 420.0,
+      "halfAngleDegrees": 30.0,
+      "verticalHalfAngleDegrees": 15.0,
+      "points": [
+        "P-BR01",
+        "P-BR02",
+        "P-BR03",
+        "P-BR04",
+        "P-BR05",
+        "P-BR06"
+      ],
+      "localPosition": [
+        165.0,
+        110.0,
+        61.062
+      ],
+      "absoluteAltitude": 304.062,
+      "longitude": 113.077119,
+      "latitude": 23.7965932,
+      "antennaHeightM": 10.0,
+      "bindings": [
+        {
+          "pointId": 10,
+          "pointCode": "P-BR01",
+          "targetCode": "radar-bridge-01-P-BR01",
+          "azimuthDegrees": 249.74,
+          "elevationDegrees": 2.701,
+          "slantRangeM": 318.007,
+          "headingDeltaDegrees": 26.76,
+          "pitchDeltaDegrees": -1.535,
+          "lineOfSight": true,
+          "minimumClearanceM": 5.789,
+          "valid": true
+        },
+        {
+          "pointId": 11,
+          "pointCode": "P-BR02",
+          "targetCode": "radar-bridge-01-P-BR02",
+          "azimuthDegrees": 245.821,
+          "elevationDegrees": 3.194,
+          "slantRangeM": 268.979,
+          "headingDeltaDegrees": 22.841,
+          "pitchDeltaDegrees": -1.042,
+          "lineOfSight": true,
+          "minimumClearanceM": 10.532,
+          "valid": true
+        },
+        {
+          "pointId": 12,
+          "pointCode": "P-BR03",
+          "targetCode": "radar-bridge-01-P-BR03",
+          "azimuthDegrees": 240.191,
+          "elevationDegrees": 3.875,
+          "slantRangeM": 221.785,
+          "headingDeltaDegrees": 17.211,
+          "pitchDeltaDegrees": -0.361,
+          "lineOfSight": true,
+          "minimumClearanceM": 10.528,
+          "valid": true
+        },
+        {
+          "pointId": 13,
+          "pointCode": "P-BR04",
+          "targetCode": "radar-bridge-01-P-BR04",
+          "azimuthDegrees": 231.442,
+          "elevationDegrees": 4.854,
+          "slantRangeM": 177.112,
+          "headingDeltaDegrees": 8.462,
+          "pitchDeltaDegrees": 0.618,
+          "lineOfSight": true,
+          "minimumClearanceM": 10.512,
+          "valid": true
+        },
+        {
+          "pointId": 14,
+          "pointCode": "P-BR05",
+          "targetCode": "radar-bridge-01-P-BR05",
+          "azimuthDegrees": 217.694,
+          "elevationDegrees": 6.154,
+          "slantRangeM": 139.82,
+          "headingDeltaDegrees": -5.286,
+          "pitchDeltaDegrees": 1.917,
+          "lineOfSight": true,
+          "minimumClearanceM": 10.462,
+          "valid": true
+        },
+        {
+          "pointId": 15,
+          "pointCode": "P-BR06",
+          "targetCode": "radar-bridge-01-P-BR06",
+          "azimuthDegrees": 196.22,
+          "elevationDegrees": 7.454,
+          "slantRangeM": 115.536,
+          "headingDeltaDegrees": -26.76,
+          "pitchDeltaDegrees": 3.218,
+          "lineOfSight": true,
+          "minimumClearanceM": 10.334,
+          "valid": true
+        }
+      ]
+    }
+  ],
+  "camera": {
+    "headingDegrees": 300.0,
+    "pitchDegrees": -26.0,
+    "range": 620.0
+  },
+  "triangleCount": 38400
+}

@@ -1,0 +1,59 @@
+{
+  "assetVersion": "qingyuan-factory-1.0.0",
+  "generatedAt": "2026-09-18T02:32:35+00:00",
+  "generator": "tools/terrain_asset/build_terrain_asset.py",
+  "glb": {
+    "file": "qingyuan-factory.glb",
+    "bytes": 1568844,
+    "sha256": "dda1e8ad8515209a58a7ce6919aa3148bf254bb3ad1d1c7b2ed3bc24105ff1d9"
+  },
+  "texture": {
+    "bytes": 211678,
+    "sha256": "b40ebd6a50b2737530e4fd8e9bd6d13cfe40307c3ff582af632bebbdbdc6771e",
+    "size": [
+      2048,
+      1536
+    ]
+  },
+  "sourceManifest": {
+    "fetchedAt": "2026-09-18T02:22:16+00:00",
+    "bbox": {
+      "west": 113.07378393848919,
+      "south": 23.690681830071167,
+      "east": 113.08221606151082,
+      "north": 23.69731816992883
+    },
+    "datasets": {
+      "dem": {
+        "dataset": "Mapzen/AWS terrain tiles（terrarium 编码，SRTM 派生）",
+        "zoom": 15,
+        "tileCount": 2,
+        "license": "高程数据 SRTM：NASA/USGS 公有领域；瓦片打包：Mapzen Terrain Tiles（CC BY 4.0）。引用：https://registry.opendata.aws/terrain-tiles/"
+      },
+      "imagery": {
+        "dataset": "Sentinel-2 cloudless 2023（EOX IT Services GmbH）",
+        "zoom": 16,
+        "tileCount": 4,
+        "license": "CC BY 4.0。引用：Sentinel-2 cloudless – https://s2maps.eu by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2023)。允许离线缓存与再分发，需保留署名。"
+      }
+    }
+  },
+  "parameters": {
+    "anchor": {
+      "longitude": 113.078,
+      "latitude": 23.694
+    },
+    "width": 500.0,
+    "depth": 375.0,
+    "cells": [
+      200,
+      150
+    ],
+    "detailAmplitude": 1.0,
+    "textureSize": [
+      2048,
+      1536
+    ]
+  },
+  "triangleCount": 60000
+}

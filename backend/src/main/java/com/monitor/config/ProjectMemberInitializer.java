@@ -27,6 +27,9 @@ import java.util.List;
  * 演示直接变成一片空白）；项目 2（另一组织的采空区）<b>只加 admin</b>——
  * 这样「李敏看不到项目 B」才是真的能演的一件事，而不是一句设计说明。</p>
  *
+ * <p>V20 新增的三个演示场景（野外桥梁 / 山区铁路 / 郊外工厂）同样把四个演示账号都放进去：
+ * 大屏的项目下拉框要能直接切换这三个场景，而不是切过去看到空态。</p>
+ *
  * <p>{@code @Order(20)} 必须大于 {@link DataInitializer} 的 10：本类按用户名查用户，
  * 跑在账号创建之前会一条也查不到，然后**因为幂等而在后续每次启动都同样查不到**
  * （第一次启动静默无成员，第二次启动才补上）——这种「第一次是坏的」最难查。</p>
@@ -44,6 +47,16 @@ public class ProjectMemberInitializer implements CommandLineRunner {
     /** 项目 2（西江水泥采空区），只给 admin，用来演示隔离。 */
     private static final String OTHER_PROJECT_CODE = "PRJ-XJ-CKQ";
 
+    /**
+     * 三个演示场景（V20 建：野外桥梁 / 山区铁路 / 郊外工厂）。
+     *
+     * <p>四个演示角色都放进去：大屏的项目下拉框要能一键切换这三个场景，
+     * 演示账号看不到就会得到一片"无可见项目"的空态——那正好是 outsider 那条边界，
+     * 不该由演示场景来演示。</p>
+     */
+    private static final List<String> DEMO_SCENE_CODES =
+            List.of("PRJ-BRIDGE", "PRJ-RAILWAY", "PRJ-FACTORY");
+
     private static final List<String> DEMO_USERS = List.of("admin", "operator", "analyst", "maintainer");
 
     private final ProjectMemberMapper memberMapper;
@@ -59,8 +72,15 @@ public class ProjectMemberInitializer implements CommandLineRunner {
             log.warn("项目成员种子跳过：找不到项目 {} / {}", DEMO_PROJECT_CODE, OTHER_PROJECT_CODE);
             return;
         }
+        List<Long> sceneProjects = DEMO_SCENE_CODES.stream()
+                .map(this::projectIdOf)
+                .filter(java.util.Objects::nonNull)
+                .toList();
         for (String username : DEMO_USERS) {
             ensureMember(username, demoProject);
+            for (Long sceneProject : sceneProjects) {
+                ensureMember(username, sceneProject);
+            }
         }
         ensureMember("admin", otherProject);
     }

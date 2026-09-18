@@ -1,0 +1,127 @@
+{
+  "P-BP01": {
+    "angleDeg": -24.882,
+    "device": "radar-001",
+    "distanceM": 271.213
+  },
+  "P-BP02": {
+    "angleDeg": -18.938,
+    "device": "radar-002",
+    "distanceM": 262.614
+  },
+  "P-BP03": {
+    "angleDeg": -26.063,
+    "device": "radar-002",
+    "distanceM": 160.681
+  },
+  "P-BP04": {
+    "angleDeg": 26.062,
+    "device": "radar-002",
+    "distanceM": 182.481
+  },
+  "P-BR01": {
+    "angleDeg": 26.76,
+    "device": "radar-bridge-01",
+    "distanceM": 318.007
+  },
+  "P-BR02": {
+    "angleDeg": 22.841,
+    "device": "radar-bridge-01",
+    "distanceM": 268.979
+  },
+  "P-BR03": {
+    "angleDeg": 17.211,
+    "device": "radar-bridge-01",
+    "distanceM": 221.785
+  },
+  "P-BR04": {
+    "angleDeg": 8.462,
+    "device": "radar-bridge-01",
+    "distanceM": 177.112
+  },
+  "P-BR05": {
+    "angleDeg": -5.286,
+    "device": "radar-bridge-01",
+    "distanceM": 139.82
+  },
+  "P-BR06": {
+    "angleDeg": -26.76,
+    "device": "radar-bridge-01",
+    "distanceM": 115.536
+  },
+  "P-FC01": {
+    "angleDeg": 15.783,
+    "device": "radar-factory-01",
+    "distanceM": 298.065
+  },
+  "P-FC02": {
+    "angleDeg": 9.234,
+    "device": "radar-factory-01",
+    "distanceM": 268.4
+  },
+  "P-FC03": {
+    "angleDeg": -10.67,
+    "device": "radar-factory-01",
+    "distanceM": 275.932
+  },
+  "P-FC04": {
+    "angleDeg": 0.665,
+    "device": "radar-factory-01",
+    "distanceM": 330.21
+  },
+  "P-FC05": {
+    "angleDeg": -5.271,
+    "device": "radar-factory-01",
+    "distanceM": 185.802
+  },
+  "P-FC06": {
+    "angleDeg": -15.783,
+    "device": "radar-factory-01",
+    "distanceM": 185.172
+  },
+  "P-HK01": {
+    "angleDeg": 24.882,
+    "device": "radar-001",
+    "distanceM": 324.597
+  },
+  "P-HK02": {
+    "angleDeg": 4.657,
+    "device": "radar-001",
+    "distanceM": 325.777
+  },
+  "P-HK03": {
+    "angleDeg": -15.719,
+    "device": "radar-001",
+    "distanceM": 294.58
+  },
+  "P-RW01": {
+    "angleDeg": 28.06,
+    "device": "radar-rail-01",
+    "distanceM": 525.416
+  },
+  "P-RW02": {
+    "angleDeg": 24.17,
+    "device": "radar-rail-01",
+    "distanceM": 441.524
+  },
+  "P-RW03": {
+    "angleDeg": 18.494,
+    "device": "radar-rail-01",
+    "distanceM": 360.608
+  },
+  "P-RW04": {
+    "angleDeg": 9.683,
+    "device": "radar-rail-01",
+    "distanceM": 285.212
+  },
+  "P-RW05": {
+    "angleDeg": -4.794,
+    "device": "radar-rail-01",
+    "distanceM": 221.061
+  },
+  "P-RW06": {
+    "angleDeg": -28.061,
+    "device": "radar-rail-01",
+    "distanceM": 180.562
+  }
+}

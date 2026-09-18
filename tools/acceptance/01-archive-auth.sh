@@ -13,11 +13,13 @@ check "auth/login 返回 JWT（三段点分）" "3" "$(printf '%s' "$TOKEN" | aw
 ME=$(curl -s "$BASE/auth/me" -H "$AUTH" | data_of "['username']")
 check "auth/me 返回当前账号" "$ADMIN_USER" "$ME"
 
-section "② 种子档案：2 项目 / 3 场景 / 9 测点"
+section "② 种子档案：5 项目 / 6 场景 / 27 测点"
 # 2026-09-14：项目 2（西江水泥采空区，V8）加入后，这两个数各 +1 / +2。
-# admin 是全量视角，所以「看得到」这件事没变，变的是种子的规模。
-check "项目数" "2" "$(curl -s "$BASE/projects" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
-check "测点数" "9" "$(curl -s "$BASE/points" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
+# 2026-09-18：V20 加入三个演示场景（野外桥梁 / 山区铁路 / 郊外工厂，各 1 项目 +
+#   1 场景 + 1 对象 + 6 测点），于是 2/3/9 → 5/6/27。admin 是全量视角，
+#   「看得到」这件事没变，变的是种子的规模。
+check "项目数" "5" "$(curl -s "$BASE/projects" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
+check "测点数" "27" "$(curl -s "$BASE/points" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
 check "测点 1 号点号" "P-HK01" "$(curl -s "$BASE/points/1" -H "$AUTH" | data_of "['code']")"
 check "每点 2 测项（D1）" "2" "$(curl -s "$BASE/metrics" -H "$AUTH" | python3 -c "
 import sys,json
@@ -28,7 +30,7 @@ section "③ 设备档案（在线判定归 A，契约 §5）"
 # 2026-09-16：V11（双雷达精细山体）加入南侧雷达 radar-002 后，这个数 1 -> 2。
 # 与 ② 同理：变的不是「看得到」，而是种子的规模。改前这条一直红（`--fresh` 是空库，
 # 种子只有迁移写入，所以 H2 上必然得到 2），只是全仓没人跑过整套验收。
-check "设备数" "2" "$(curl -s "$BASE/devices" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
+check "设备数" "5" "$(curl -s "$BASE/devices" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
 DS=$(curl -s "$BASE/devices/1/status" -H "$AUTH" | python3 -c "
 import sys,json; d=json.load(sys.stdin)['data']
 print(d['status'], d['online'], d['code'])")

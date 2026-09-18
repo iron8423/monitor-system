@@ -28,18 +28,37 @@ GLB + ENU 本地坐标管线直接加载。它和 `tools/mountain_asset/` 的分
 ```bash
 # 1) 抓数据（带 SHA-256 缓存，重复执行不会重复下载）
 python3 tools/terrain_asset/fetch_sources.py \
-    --anchor-lon 113.05133 --anchor-lat 23.75946 \
-    --width 320 --depth 240 \
-    --out generated/terrain-asset/sources
+    --anchor-lon 113.0755 --anchor-lat 23.7956 \
+    --width 400 --depth 300 \
+    --out generated/terrain-asset/sources-bridge
 
-# 2) 生成资产
+# 2) 生成资产（--scene 选场景预设：mountain / bridge / railway / factory）
 python3 tools/terrain_asset/build_terrain_asset.py \
-    --sources generated/terrain-asset/sources \
-    --out frontend/public/models/qingyuan-hillside
+    --scene bridge \
+    --sources generated/terrain-asset/sources-bridge \
+    --out frontend/public/models/qingyuan-bridge
+
+# 3) 从资产产出建库迁移草稿（多场景 = 多项目）
+python3 tools/terrain_asset/emit_scene_migration.py \
+    --assets-root frontend/public/models \
+    --out backend/src/main/resources/db/migration/V20__three_new_scenes.sql
 ```
 
 依赖：Python 3.10+、`numpy`、`Pillow`（`pip install numpy pillow`）。抓取阶段需要联网，
 生成阶段完全离线。
+
+### 场景预设
+
+| `--scene` | 内容 | 结构体（features.py） |
+|---|---|---|
+| `mountain` | 1000×750m 山坡，双雷达 4/3 目标 | 无（纯地形） |
+| `bridge` | 400×300m 谷地，跨谷桥 | 桥面 / 桥墩 / 桥台 / 护栏 / 灯柱 |
+| `railway` | 600×450m 缓坡走廊 | 路基 / 道砟 / 钢轨 / 轨枕 / 接触网支柱 |
+| `factory` | 500×375m 平地 | 地坪 / 厂房 / 储罐 / 烟囱 / 围墙 |
+
+结构体与地形一起写进同一个 GLB（第二个 primitive、顶点着色、unlit），
+因此仍然是一份资产、离线、可复现；但**结构是示意级**（不是设计图），
+30m DEM 也给不出桥面与钢轨——这条边界写在各资产的 `ASSET_PROVENANCE.md` 里。
 
 ### 主要参数
 

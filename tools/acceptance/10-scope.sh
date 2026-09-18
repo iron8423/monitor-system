@@ -165,8 +165,13 @@ check "测点 1 series" "200" "$(http_code "$BASE/points/1/series" -H "$OP_AUTH"
 # 概览的 pointCount 是沿 project→scene→object→point 走出来的，与 /points 的范围条件
 # 是两条独立实现。让它们互相对账（而不是钉一个绝对值 7）：既验了范围口径一致，
 # 又不会被前面套件万一没回收干净的临时点带红。
-OP_PTS=$(curl -s "$BASE/points" -H "$OP_AUTH" | count_of)
-check "项目 1 概览的测点数 == 李敏可见的测点数（两条路径同口径）" "$OP_PTS" \
+#
+# 2026-09-18：V20 之后李敏同时是项目 1/3/4/5 的成员，「她的全部可见测点」（25）
+# 与「项目 1 的测点」（7）不再是同一件事——原来的对账会拿 25 去比 7。
+# 改成按「项目 1 → 场景 → 对象 → 测点」这条链单独数一遍：仍然对的是范围口径，
+# 而不是钉一个会随场景增减而失效的绝对值。
+OP_PTS=$(python3 "$HERE/support/project1_point_count.py" "$BASE" "$OP_TOKEN")
+check "项目 1 概览的测点数 == 李敏在项目 1 可见的测点数（两条路径同口径）" "$OP_PTS" \
   "$(curl -s "$BASE/projects/1/summary" -H "$OP_AUTH" | data_of "['pointCount']")"
 info "李敏可见测点数=$OP_PTS（种子 7 + 前面套件可能留下的临时点）"
 check "项目 1 概览与 admin 同口径" \

@@ -163,3 +163,23 @@ python3 radar_simulator.py --count 2 --interval 0 --step-minutes 60 --clock-anch
 - 只用 Python 3 标准库（`urllib`），无第三方依赖。
 - 已被 `tools/acceptance/08-simulator.sh` 覆盖（26 条断言，其中 9 条是清单第 10 条的接入时间闸门，
   见 `--clock-anchor` 那一节）。
+
+## 演示场景的批量播种（V20 起）
+
+```bash
+# 四个场景各灌 12 小时历史（BACKFILL，喂曲线）+ 当前实时值（REALTIME，喂 latest）
+tools/radar_simulator/seed_all_scenes.sh
+BASE=http://localhost:18083/api/v1 tools/radar_simulator/seed_all_scenes.sh   # 打别的实例
+```
+
+### `scene_positions.json`：位置表不再手抄
+
+严格契约模式下，报文里的 `position.angleDeg / distanceM` 必须与标定
+（`device_point.azimuth_degrees − device.heading_degrees` / `slant_range_m`）在容差内一致，
+否则整条被拒（`POSITION_CALIBRATION_MISMATCH`）——**症状是"一条数据都进不去，
+但界面上一切正常"**。
+
+模拟器默认读取同目录的 `scene_positions.json`（25 个演示测点的角度/斜距/所属设备），
+它由 `tools/terrain_asset/emit_scene_migration.py` 从各资产的 `coverage.json`
+**同源生成**：换地形、加场景、改标定之后，重跑一次生成器即可，不会再有第二份手抄值过期。
+`DEFAULT_POSITION_BY_POINT` / `DEFAULT_DEVICE_BY_POINT` 里的内置表只在文件缺失时兜底。

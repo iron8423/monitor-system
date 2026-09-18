@@ -33,6 +33,7 @@ import argparse
 import json
 import random
 import sys
+from pathlib import Path
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -58,6 +59,23 @@ DEFAULT_POSITION_BY_POINT = {
     "P-HK01": (-14.945, 186.200), "P-BP03": (29.740, 50.076),
     "P-BP04": (-29.530, 32.086),
 }
+
+# 线上那份位置表（scene_positions.json）由 tools/terrain_asset/emit_scene_migration.py
+# 从标定 coverage.json 生成，覆盖全部演示场景。上表只是兜底：标定一改（换地形、加场景），
+# 手抄的值就会过期，而症状是"严格契约下整批被拒、界面却一切正常"。
+SCENE_POSITIONS_PATH = Path(__file__).resolve().parent / "scene_positions.json"
+if SCENE_POSITIONS_PATH.exists():
+    try:
+        for _code, _pos in json.loads(SCENE_POSITIONS_PATH.read_text(encoding="utf-8")).items():
+            if isinstance(_pos, dict):
+                DEFAULT_POSITION_BY_POINT[_code] = (float(_pos["angleDeg"]), float(_pos["distanceM"]))
+                if _pos.get("device"):
+                    DEFAULT_DEVICE_BY_POINT[_code] = str(_pos["device"])
+            else:
+                DEFAULT_POSITION_BY_POINT[_code] = (float(_pos[0]), float(_pos[1]))
+    except (OSError, ValueError, KeyError, TypeError):
+        # 读不了就退回内置表，不因为一份辅助文件让模拟器起不来
+        pass
 # 种子 7 测点：山脊 3 + 滑坡体 4
 DEFAULT_POINTS = ["P-HK01", "P-HK02", "P-HK03", "P-BP01", "P-BP02", "P-BP03", "P-BP04"]
 # 默认规则是 defo_mm 双向 ±3mm（gte +3.0 / lte -3.0），V4 另有 gte +5.0 升到 alarm 档

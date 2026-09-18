@@ -1,0 +1,140 @@
+{
+  "name": "山区铁路路基形变监测场景",
+  "mode": "offline-real-terrain",
+  "asset": "/models/qingyuan-railway/qingyuan-railway.glb",
+  "assetVersion": "qingyuan-railway-1.0.0",
+  "anchor": {
+    "longitude": 113.0219,
+    "latitude": 23.7205,
+    "height": 8.0
+  },
+  "dimensions": {
+    "width": 600.0,
+    "depth": 450.0,
+    "maxHeight": 23.932
+  },
+  "modelAxes": {
+    "east": "+X",
+    "north": "+Y",
+    "up": "+Z"
+  },
+  "radars": [
+    {
+      "id": 4,
+      "code": "radar-rail-01",
+      "name": "铁路路基形变雷达",
+      "local": [
+        270.0,
+        170.0
+      ],
+      "headingDegrees": 222.521,
+      "pitchDegrees": -3.645,
+      "range": 620.0,
+      "halfAngleDegrees": 30.0,
+      "verticalHalfAngleDegrees": 15.0,
+      "points": [
+        "P-RW01",
+        "P-RW02",
+        "P-RW03",
+        "P-RW04",
+        "P-RW05",
+        "P-RW06"
+      ],
+      "localPosition": [
+        270.0,
+        170.0,
+        19.572
+      ],
+      "absoluteAltitude": 27.572,
+      "longitude": 113.0245478,
+      "latitude": 23.7220349,
+      "antennaHeightM": 10.0,
+      "bindings": [
+        {
+          "pointId": 16,
+          "pointCode": "P-RW01",
+          "targetCode": "radar-rail-01-P-RW01",
+          "azimuthDegrees": 250.581,
+          "elevationDegrees": -2.641,
+          "slantRangeM": 525.416,
+          "headingDeltaDegrees": 28.06,
+          "pitchDeltaDegrees": 1.003,
+          "lineOfSight": true,
+          "minimumClearanceM": 1.582,
+          "valid": true
+        },
+        {
+          "pointId": 17,
+          "pointCode": "P-RW02",
+          "targetCode": "radar-rail-01-P-RW02",
+          "azimuthDegrees": 246.691,
+          "elevationDegrees": -2.808,
+          "slantRangeM": 441.524,
+          "headingDeltaDegrees": 24.17,
+          "pitchDeltaDegrees": 0.837,
+          "lineOfSight": true,
+          "minimumClearanceM": 3.274,
+          "valid": true
+        },
+        {
+          "pointId": 18,
+          "pointCode": "P-RW03",
+          "targetCode": "radar-rail-01-P-RW03",
+          "azimuthDegrees": 241.015,
+          "elevationDegrees": -3.027,
+          "slantRangeM": 360.608,
+          "headingDeltaDegrees": 18.494,
+          "pitchDeltaDegrees": 0.618,
+          "lineOfSight": true,
+          "minimumClearanceM": 3.585,
+          "valid": true
+        },
+        {
+          "pointId": 19,
+          "pointCode": "P-RW04",
+          "targetCode": "radar-rail-01-P-RW04",
+          "azimuthDegrees": 232.204,
+          "elevationDegrees": -3.308,
+          "slantRangeM": 285.212,
+          "headingDeltaDegrees": 9.684,
+          "pitchDeltaDegrees": 0.336,
+          "lineOfSight": true,
+          "minimumClearanceM": 4.119,
+          "valid": true
+        },
+        {
+          "pointId": 20,
+          "pointCode": "P-RW05",
+          "targetCode": "radar-rail-01-P-RW05",
+          "azimuthDegrees": 217.727,
+          "elevationDegrees": -3.599,
+          "slantRangeM": 221.061,
+          "headingDeltaDegrees": -4.794,
+          "pitchDeltaDegrees": 0.046,
+          "lineOfSight": true,
+          "minimumClearanceM": 1.813,
+          "valid": true
+        },
+        {
+          "pointId": 21,
+          "pointCode": "P-RW06",
+          "targetCode": "radar-rail-01-P-RW06",
+          "azimuthDegrees": 194.46,
+          "elevationDegrees": -3.585,
+          "slantRangeM": 180.562,
+          "headingDeltaDegrees": -28.06,
+          "pitchDeltaDegrees": 0.06,
+          "lineOfSight": true,
+          "minimumClearanceM": 1.272,
+          "valid": true
+        }
+      ]
+    }
+  ],
+  "camera": {
+    "headingDegrees": 300.0,
+    "pitchDegrees": -24.0,
+    "range": 780.0
+  },
+  "triangleCount": 86400
+}

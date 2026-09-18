@@ -1,0 +1,91 @@
+{
+  "generator": "tools/terrain_asset/fetch_sources.py",
+  "fetchedAt": "2026-09-18T02:22:01+00:00",
+  "anchor": {
+    "longitude": 113.0755,
+    "latitude": 23.7956
+  },
+  "footprintMetres": {
+    "width": 400.0,
+    "depth": 300.0
+  },
+  "marginMetres": 180.0,
+  "bbox": {
+    "west": 113.0717712870378,
+    "south": 23.79262045799152,
+    "east": 113.0792287129622,
+    "north": 23.79857954200848
+  },
+  "sources": {
+    "dem": {
+      "dataset": "Mapzen/AWS terrain tiles（terrarium 编码，SRTM 派生）",
+      "license": "高程数据 SRTM：NASA/USGS 公有领域；瓦片打包：Mapzen Terrain Tiles（CC BY 4.0）。引用：https://registry.opendata.aws/terrain-tiles/",
+      "encoding": "terrarium",
+      "heightDecode": "h = R*256 + G + B/256 - 32768",
+      "zoom": 15,
+      "urlTemplate": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+      "tileCount": 2,
+      "tiles": [
+        {
+          "z": 15,
+          "x": 26676,
+          "y": 14152,
+          "file": "dem/15/26676_14152.png",
+          "bytes": 108717,
+          "sha256": "d09c949b2d5539f65967f10b13a0c0938f3511f3a5d2d4f2f72d7eded3b57d9d"
+        },
+        {
+          "z": 15,
+          "x": 26676,
+          "y": 14153,
+          "file": "dem/15/26676_14153.png",
+          "bytes": 107777,
+          "sha256": "9dcd522f020e2598615bc46f6495d08f333802dabd959a3cd8cae95b6f4830c5"
+        }
+      ]
+    },
+    "imagery": {
+      "dataset": "Sentinel-2 cloudless 2023（EOX IT Services GmbH）",
+      "license": "CC BY 4.0。引用：Sentinel-2 cloudless – https://s2maps.eu by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2023)。允许离线缓存与再分发，需保留署名。",
+      "layer": "s2cloudless-2023_3857",
+      "attribution": "Sentinel-2 cloudless by EOX IT Services GmbH (modified Copernicus Sentinel data 2023)",
+      "zoom": 16,
+      "urlTemplate": "https://tiles.maps.eox.at/wmts?layer={layer}&style=default&tilematrixset=GoogleMapsCompatible&Service=WMTS&Request=GetTile&Version=1.0.0&Format=image%2Fjpeg&TileMatrix={z}&TileRow={y}&TileCol={x}",
+      "tileCount": 4,
+      "tiles": [
+        {
+          "z": 16,
+          "x": 53352,
+          "y": 28305,
+          "file": "imagery/16/53352_28305.jpg",
+          "bytes": 4508,
+          "sha256": "e58c86bcfe203214e96741e3cc27b0287cff7ee20b52297350e2e3f80bd0fb63"
+        },
+        {
+          "z": 16,
+          "x": 53353,
+          "y": 28305,
+          "file": "imagery/16/53353_28305.jpg",
+          "bytes": 4342,
+          "sha256": "a7ff586d01b71ee0ae8f9ec813447dfc1de2cb30de7cb48e57311a7bc5488685"
+        },
+        {
+          "z": 16,
+          "x": 53352,
+          "y": 28306,
+          "file": "imagery/16/53352_28306.jpg",
+          "bytes": 5001,
+          "sha256": "b36d0ea02f5e85c4fe8337fd8a3bc644efdb3ea54b01fc9548ce6feb18025309"
+        },
+        {
+          "z": 16,
+          "x": 53353,
+          "y": 28306,
+          "file": "imagery/16/53353_28306.jpg",
+          "bytes": 4795,
+          "sha256": "0fffaaab82f41ecebf2de257d14ae61201847683686919b81c3d382549416eaa"
+        }
+      ]
+    }
+  }
+}

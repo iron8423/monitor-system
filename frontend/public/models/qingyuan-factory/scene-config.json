@@ -1,0 +1,140 @@
+{
+  "name": "郊外工厂形变监测场景",
+  "mode": "offline-real-terrain",
+  "asset": "/models/qingyuan-factory/qingyuan-factory.glb",
+  "assetVersion": "qingyuan-factory-1.0.0",
+  "anchor": {
+    "longitude": 113.078,
+    "latitude": 23.694,
+    "height": 10.0
+  },
+  "dimensions": {
+    "width": 500.0,
+    "depth": 375.0,
+    "maxHeight": 8.255
+  },
+  "modelAxes": {
+    "east": "+X",
+    "north": "+Y",
+    "up": "+Z"
+  },
+  "radars": [
+    {
+      "id": 5,
+      "code": "radar-factory-01",
+      "name": "厂区形变雷达",
+      "local": [
+        210.0,
+        150.0
+      ],
+      "headingDegrees": 234.201,
+      "pitchDegrees": -2.103,
+      "range": 520.0,
+      "halfAngleDegrees": 30.0,
+      "verticalHalfAngleDegrees": 15.0,
+      "points": [
+        "P-FC01",
+        "P-FC02",
+        "P-FC03",
+        "P-FC04",
+        "P-FC05",
+        "P-FC06"
+      ],
+      "localPosition": [
+        210.0,
+        150.0,
+        7.833
+      ],
+      "absoluteAltitude": 17.833,
+      "longitude": 113.080059,
+      "latitude": 23.6953544,
+      "antennaHeightM": 10.0,
+      "bindings": [
+        {
+          "pointId": 22,
+          "pointCode": "P-FC01",
+          "targetCode": "radar-factory-01-P-FC01",
+          "azimuthDegrees": 249.984,
+          "elevationDegrees": -1.194,
+          "slantRangeM": 298.065,
+          "headingDeltaDegrees": 15.783,
+          "pitchDeltaDegrees": 0.909,
+          "lineOfSight": true,
+          "minimumClearanceM": 4.202,
+          "valid": true
+        },
+        {
+          "pointId": 23,
+          "pointCode": "P-FC02",
+          "targetCode": "radar-factory-01-P-FC02",
+          "azimuthDegrees": 243.435,
+          "elevationDegrees": -1.326,
+          "slantRangeM": 268.4,
+          "headingDeltaDegrees": 9.234,
+          "pitchDeltaDegrees": 0.777,
+          "lineOfSight": true,
+          "minimumClearanceM": 4.612,
+          "valid": true
+        },
+        {
+          "pointId": 24,
+          "pointCode": "P-FC03",
+          "targetCode": "radar-factory-01-P-FC03",
+          "azimuthDegrees": 223.531,
+          "elevationDegrees": -1.289,
+          "slantRangeM": 275.932,
+          "headingDeltaDegrees": -10.67,
+          "pitchDeltaDegrees": 0.813,
+          "lineOfSight": true,
+          "minimumClearanceM": 4.961,
+          "valid": true
+        },
+        {
+          "pointId": 25,
+          "pointCode": "P-FC04",
+          "targetCode": "radar-factory-01-P-FC04",
+          "azimuthDegrees": 234.866,
+          "elevationDegrees": -1.077,
+          "slantRangeM": 330.21,
+          "headingDeltaDegrees": 0.665,
+          "pitchDeltaDegrees": 1.025,
+          "lineOfSight": true,
+          "minimumClearanceM": 5.757,
+          "valid": true
+        },
+        {
+          "pointId": 26,
+          "pointCode": "P-FC05",
+          "targetCode": "radar-factory-01-P-FC05",
+          "azimuthDegrees": 228.93,
+          "elevationDegrees": -1.915,
+          "slantRangeM": 185.802,
+          "headingDeltaDegrees": -5.271,
+          "pitchDeltaDegrees": 0.188,
+          "lineOfSight": true,
+          "minimumClearanceM": 4.224,
+          "valid": true
+        },
+        {
+          "pointId": 27,
+          "pointCode": "P-FC06",
+          "targetCode": "radar-factory-01-P-FC06",
+          "azimuthDegrees": 218.418,
+          "elevationDegrees": -1.921,
+          "slantRangeM": 185.172,
+          "headingDeltaDegrees": -15.783,
+          "pitchDeltaDegrees": 0.181,
+          "lineOfSight": true,
+          "minimumClearanceM": 4.751,
+          "valid": true
+        }
+      ]
+    }
+  ],
+  "camera": {
+    "headingDegrees": 315.0,
+    "pitchDegrees": -32.0,
+    "range": 700.0
+  },
+  "triangleCount": 60000
+}

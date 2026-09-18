@@ -46,6 +46,11 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
 
+# features.py 与本文件同目录；直接 `python3 tools/terrain_asset/build_terrain_asset.py` 时
+# 脚本目录本来就在 sys.path 上，但被 importlib 动态加载时不一定，所以显式补一次。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from features import FEATURES  # noqa: E402  （必须放在 sys.path 之后）
+
 # ---------------------------------------------------------------- 默认参数
 
 DEFAULT_ANCHOR = {"longitude": 113.05133, "latitude": 23.75946}
@@ -96,6 +101,134 @@ RADARS = [
         "points": ["P-BP02", "P-BP03", "P-BP04"],
     },
 ]
+
+# ---------------------------------------------------------------- 场景预设
+#
+# 一个"场景"= 一处场址 + 一套地形参数 + （可选）程序化结构体 + 自己的一批测点与雷达。
+# 大屏按项目（project）切换场景，每个项目在 digital_twin_scene 里指向自己的 GLB。
+SITES: dict[str, dict] = {
+    "mountain": {
+        "title": "清远山地边坡（真实地形）",
+        "anchor": DEFAULT_ANCHOR,
+        "width": DEFAULT_WIDTH, "depth": DEFAULT_DEPTH,
+        "cells": (DEFAULT_CELLS_X, DEFAULT_CELLS_Y),
+        "texture": DEFAULT_TEXTURE,
+        "detail": 2.2,
+        "camera": [315.0, -30.0, 1650.0],
+        "feature": None,
+        "points": POINTS,
+        "radars": RADARS,
+        "asset_prefix": "qingyuan-hillside-v2",
+        "version": "qingyuan-hillside-2.0.0",
+        "scene_name": "清远山地边坡真实地形场景 V2",
+    },
+    "bridge": {
+        "title": "野外桥梁（跨越谷地）",
+        "anchor": {"longitude": 113.0755, "latitude": 23.7956},
+        "width": 400.0, "depth": 300.0,
+        "cells": (160, 120),               # 2.5m
+        "texture": (2048, 1536),
+        "detail": 1.4,
+        "camera": [300.0, -26.0, 620.0],
+        "feature": "bridge",
+        "feature_config": {"span": 320.0, "deckWidth": 14.0, "deckThickness": 1.6,
+                           "clearance": 2.0},
+        "points": [
+            {"id": 10, "code": "P-BR01", "name": "桥梁测点1", "local": [-133.0, 0.0]},
+            {"id": 11, "code": "P-BR02", "name": "桥梁测点2", "local": [-80.0, 0.0]},
+            {"id": 12, "code": "P-BR03", "name": "桥梁测点3", "local": [-27.0, 0.0]},
+            {"id": 13, "code": "P-BR04", "name": "桥梁测点4", "local": [27.0, 0.0]},
+            {"id": 14, "code": "P-BR05", "name": "桥梁测点5", "local": [80.0, 0.0]},
+            {"id": 15, "code": "P-BR06", "name": "桥梁测点6", "local": [133.0, 0.0]},
+        ],
+        "radars": [
+            {"id": 3, "code": "radar-bridge-01", "name": "桥梁形变雷达",
+             "local": [165.0, 110.0], "headingDegrees": 200.0, "pitchDegrees": 0.0,
+             "range": 420.0, "halfAngleDegrees": 30.0, "verticalHalfAngleDegrees": 15.0,
+             "points": ["P-BR01", "P-BR02", "P-BR03", "P-BR04", "P-BR05", "P-BR06"]},
+        ],
+        "asset_prefix": "qingyuan-bridge",
+        "version": "qingyuan-bridge-1.0.0",
+        "scene_name": "野外桥梁形变监测场景",
+        "db": {"project_id": 3, "project_code": "PRJ-BRIDGE",
+               "project_name": "野外桥梁形变监测", "location": "清远市郊 县道跨谷桥",
+               "description": "离线真实地形 + 程序化桥梁结构体；形变数据为模拟",
+               "scene_id": 4, "scene_type": "BRIDGE", "object_id": 4,
+               "object_type": "BRIDGE_DECK", "metric_id_start": 100,
+               "device_serial": "RADAR-2026-BRIDGE-001", "binding_id_start": 18,
+               "twin_id": 2},
+    },
+    "railway": {
+        "title": "山区铁路（路基与轨道）",
+        "anchor": {"longitude": 113.0219, "latitude": 23.7205},
+        "width": 600.0, "depth": 450.0,
+        "cells": (240, 180),               # 2.5m
+        "texture": (2048, 1536),
+        "detail": 1.2,
+        "camera": [300.0, -24.0, 780.0],
+        "feature": "railway",
+        "feature_config": {"span": 540.0, "sleeperSpacing": 1.6},
+        "points": [
+            {"id": 16, "code": "P-RW01", "name": "铁路测点1", "local": [-225.0, -4.5]},
+            {"id": 17, "code": "P-RW02", "name": "铁路测点2", "local": [-135.0, -4.5]},
+            {"id": 18, "code": "P-RW03", "name": "铁路测点3", "local": [-45.0, -4.5]},
+            {"id": 19, "code": "P-RW04", "name": "铁路测点4", "local": [45.0, -4.5]},
+            {"id": 20, "code": "P-RW05", "name": "铁路测点5", "local": [135.0, -4.5]},
+            {"id": 21, "code": "P-RW06", "name": "铁路测点6", "local": [225.0, -4.5]},
+        ],
+        "radars": [
+            {"id": 4, "code": "radar-rail-01", "name": "铁路路基形变雷达",
+             "local": [270.0, 170.0], "headingDegrees": 240.0, "pitchDegrees": -5.0,
+             "range": 620.0, "halfAngleDegrees": 30.0, "verticalHalfAngleDegrees": 15.0,
+             "points": ["P-RW01", "P-RW02", "P-RW03", "P-RW04", "P-RW05", "P-RW06"]},
+        ],
+        "asset_prefix": "qingyuan-railway",
+        "version": "qingyuan-railway-1.0.0",
+        "scene_name": "山区铁路路基形变监测场景",
+        "db": {"project_id": 4, "project_code": "PRJ-RAILWAY",
+               "project_name": "山区铁路路基形变监测", "location": "清远市郊 既有线 K12+300",
+               "description": "离线真实地形 + 程序化铁路路基/轨道；形变数据为模拟",
+               "scene_id": 5, "scene_type": "RAILWAY", "object_id": 5,
+               "object_type": "RAILWAY_EMBANKMENT", "metric_id_start": 112,
+               "device_serial": "RADAR-2026-RAIL-001", "binding_id_start": 24,
+               "twin_id": 3},
+    },
+    "factory": {
+        "title": "郊外工厂（罐区与厂房）",
+        "anchor": {"longitude": 113.0780, "latitude": 23.6940},
+        "width": 500.0, "depth": 375.0,
+        "cells": (200, 150),               # 2.5m
+        "texture": (2048, 1536),
+        "detail": 1.0,
+        "camera": [315.0, -32.0, 700.0],
+        "feature": "factory",
+        "feature_config": {"padWidth": 240.0, "padDepth": 170.0},
+        "points": [
+            {"id": 22, "code": "P-FC01", "name": "厂房测点1", "local": [-70.0, 48.0]},
+            {"id": 23, "code": "P-FC02", "name": "厂房测点2", "local": [-30.0, 30.0]},
+            {"id": 24, "code": "P-FC03", "name": "厂房测点3", "local": [20.0, -50.0]},
+            {"id": 25, "code": "P-FC04", "name": "罐区测点1", "local": [-60.0, -40.0]},
+            {"id": 26, "code": "P-FC05", "name": "罐区测点2", "local": [70.0, 28.0]},
+            {"id": 27, "code": "P-FC06", "name": "烟囱测点", "local": [95.0, 5.0]},
+        ],
+        "radars": [
+            {"id": 5, "code": "radar-factory-01", "name": "厂区形变雷达",
+             "local": [210.0, 150.0], "headingDegrees": 225.0, "pitchDegrees": 0.0,
+             "range": 520.0, "halfAngleDegrees": 30.0, "verticalHalfAngleDegrees": 15.0,
+             "points": ["P-FC01", "P-FC02", "P-FC03", "P-FC04", "P-FC05", "P-FC06"]},
+        ],
+        "asset_prefix": "qingyuan-factory",
+        "version": "qingyuan-factory-1.0.0",
+        "scene_name": "郊外工厂形变监测场景",
+        "db": {"project_id": 5, "project_code": "PRJ-FACTORY",
+               "project_name": "郊外工厂形变监测", "location": "清远市郊 工业园西区",
+               "description": "离线真实地形 + 程序化厂房/罐区；形变数据为模拟",
+               "scene_id": 6, "scene_type": "PLANT", "object_id": 6,
+               "object_type": "PLANT_AREA", "metric_id_start": 124,
+               "device_serial": "RADAR-2026-FACTORY-001", "binding_id_start": 30,
+               "twin_id": 4},
+    },
+}
 
 
 def log(message: str) -> None:
@@ -484,7 +617,7 @@ def pad4(data: bytes, byte: bytes = b"\x00") -> bytes:
 
 
 def write_glb(path: Path, mesh: dict, texture_jpeg: bytes, asset_version: str,
-              extras: dict) -> None:
+              extras: dict, structures: dict | None = None) -> None:
     positions = mesh["positions"].reshape(-1).astype("<f4")
     normals = mesh["normals"].reshape(-1).astype("<f4")
     uvs = mesh["uvs"].reshape(-1).astype("<f4")
@@ -503,6 +636,18 @@ def write_glb(path: Path, mesh: dict, texture_jpeg: bytes, asset_version: str,
                           ("IMAGE", texture_jpeg)):
         offsets[name] = len(binary)
         binary += pad4(payload)
+    structure_offsets = {}
+    structure_u16 = True
+    if structures is not None:
+        structure_u16 = int(structures["positions"].shape[0]) <= 65535
+        for name, payload in (("S_POSITION", structures["positions"].astype("<f4").tobytes()),
+                              ("S_NORMAL", structures["normals"].astype("<f4").tobytes()),
+                              ("S_COLOR", (structures["colors"] * 255.0 + 0.5)
+                               .astype(np.uint8).tobytes()),
+                              ("S_INDICES", structures["indices"]
+                               .astype("<u2" if structure_u16 else "<u4").tobytes())):
+            structure_offsets[name] = len(binary)
+            binary += pad4(payload)
     buffer_views = [
         {"buffer": 0, "byteOffset": offsets["POSITION"], "byteLength": len(position_bytes),
          "target": 34962},
@@ -514,6 +659,18 @@ def write_glb(path: Path, mesh: dict, texture_jpeg: bytes, asset_version: str,
          "target": 34963},
         {"buffer": 0, "byteOffset": offsets["IMAGE"], "byteLength": len(texture_jpeg)},
     ]
+    if structures is not None:
+        buffer_views.extend([
+            {"buffer": 0, "byteOffset": structure_offsets["S_POSITION"],
+             "byteLength": len(structures["positions"]) * 12, "target": 34962},
+            {"buffer": 0, "byteOffset": structure_offsets["S_NORMAL"],
+             "byteLength": len(structures["normals"]) * 12, "target": 34962},
+            {"buffer": 0, "byteOffset": structure_offsets["S_COLOR"],
+             "byteLength": len(structures["colors"]) * 4, "target": 34962},
+            {"buffer": 0, "byteOffset": structure_offsets["S_INDICES"],
+             "byteLength": len(structures["indices"]) * (2 if structure_u16 else 4),
+             "target": 34963},
+        ])
     pos_min = mesh["positions"].reshape(-1, 3).min(axis=0).tolist()
     pos_max = mesh["positions"].reshape(-1, 3).max(axis=0).tolist()
     gltf = {
@@ -540,7 +697,16 @@ def write_glb(path: Path, mesh: dict, texture_jpeg: bytes, asset_version: str,
                 "roughnessFactor": 1.0,
             },
             "extensions": {"KHR_materials_unlit": {}},
-        }],
+        }] + ([{
+            "name": "StructureVertexColors",
+            "doubleSided": True,
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+                "metallicFactor": 0.0,
+                "roughnessFactor": 1.0,
+            },
+            "extensions": {"KHR_materials_unlit": {}},
+        }] if structures is not None else []),
         "textures": [{"sampler": 0, "source": 0}],
         "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 33071, "wrapT": 33071}],
         "images": [{"name": "sentinel2-terrain-texture", "bufferView": 4,
@@ -557,6 +723,29 @@ def write_glb(path: Path, mesh: dict, texture_jpeg: bytes, asset_version: str,
         ],
         "extras": extras,
     }
+    if structures is not None:
+        structure_count = int(structures["positions"].shape[0])
+        s_min = structures["positions"].min(axis=0).tolist()
+        s_max = structures["positions"].max(axis=0).tolist()
+        gltf["meshes"][0]["primitives"].append({
+            "attributes": {"POSITION": 4, "NORMAL": 5, "COLOR_0": 6},
+            "indices": 7,
+            "material": 1,
+            "mode": 4,
+        })
+        gltf["accessors"].extend([
+            # 结构体的 bufferView 排在纹理之后：0..3 地形、4 纹理图、5..8 结构体——
+            # 这里曾经写成 4..7，于是顶点数据被当成"JPEG 图像"读，结构体在浏览器里
+            # 直接不出现（地形照常渲染，所以只看画面很容易漏掉）。
+            {"bufferView": 5, "componentType": 5126, "count": structure_count, "type": "VEC3",
+             "min": s_min, "max": s_max},
+            {"bufferView": 6, "componentType": 5126, "count": structure_count, "type": "VEC3"},
+            {"bufferView": 7, "componentType": 5121, "normalized": True,
+             "count": structure_count, "type": "VEC4"},
+            {"bufferView": 8,
+             "componentType": 5123 if structure_u16 else 5125,
+             "count": int(structures["indices"].size), "type": "SCALAR"},
+        ])
     json_chunk = pad4(json.dumps(gltf, separators=(",", ":"), ensure_ascii=False)
                       .encode("utf-8"), b" ")
     bin_chunk = pad4(bytes(binary))
@@ -615,16 +804,20 @@ def line_of_sight(terrain: Heightfield, start: tuple[float, float, float],
         z = start[2] + dz * t
         ground = terrain.floor + terrain.sample(x, y)
         clearance = min(clearance, z - ground)
-    return clearance > margin, clearance
+    # 强制转成 Python 原生类型：结构体场景里 z/ground 可能来自 numpy 标量，
+    # 不转换会让 `valid` 变成 np.bool_，后面 json.dumps 直接抛 TypeError。
+    return bool(clearance > margin), float(clearance)
 
 
-def solve_radar_pose(terrain: Heightfield, radar: dict, points: dict) -> dict:
+def solve_radar_pose(terrain: Heightfield, radar: dict, points: dict,
+                     rel_heights: dict[str, float] | None = None) -> dict:
     """为雷达挑一组「几何上真的看得见目标」的位姿。
 
     真实地形不像程序化山体那样配合叙事，所以这里做一个小范围确定性搜索：
     沿本地网格移动 + 抬高天线 + 重新瞄准，取「最小净空最大」的那组解。
     搜索是确定性的（固定步长、固定顺序），同一份输入必然得到同一组位姿。
     """
+    rel_heights = rel_heights or {}
     targets = [points[code] for code in radar["points"]]
     base_x, base_y = radar["local"]
     best = None
@@ -639,7 +832,8 @@ def solve_radar_pose(terrain: Heightfield, radar: dict, points: dict) -> dict:
             azimuths, elevations, ranges = [], [], []
             for target in targets:
                 tx, ty = target["local"]
-                tz = terrain.floor + terrain.sample(tx, ty) + POINT_MARKER_HEIGHT_M
+                tz = (terrain.floor + rel_heights.get(target["code"], terrain.sample(tx, ty))
+                      + POINT_MARKER_HEIGHT_M)
                 dx, dy = tx - x, ty - y
                 horizontal = math.hypot(dx, dy)
                 dz = tz - head[2]
@@ -660,7 +854,7 @@ def solve_radar_pose(terrain: Heightfield, radar: dict, points: dict) -> dict:
                 if abs(elevation - pitch) > radar["verticalHalfAngleDegrees"] - margin:
                     ok = False
                 tx, ty = target["local"]
-                tz = (terrain.floor + terrain.sample(tx, ty)
+                tz = (terrain.floor + rel_heights.get(target["code"], terrain.sample(tx, ty))
                       + POINT_MARKER_HEIGHT_M + DEFAULT_REFLECTOR_HEIGHT_M)
                 visible, clearance = line_of_sight(terrain, head, (tx, ty, tz))
                 clearance_min = min(clearance_min, clearance)
@@ -680,21 +874,24 @@ def solve_radar_pose(terrain: Heightfield, radar: dict, points: dict) -> dict:
     return best
 
 
-def build_radars(terrain: Heightfield) -> tuple[list[dict], list[dict]]:
-    point_lookup = {item["code"]: item for item in POINTS}
+def build_radars(terrain: Heightfield, points_def: list[dict], radars_def: list[dict],
+                 rel_heights: dict[str, float] | None = None) -> tuple[list[dict], list[dict]]:
+    rel_heights = rel_heights or {}
+    point_lookup = {item["code"]: item for item in points_def}
     radars, bindings_out = [], []
-    for radar in RADARS:
-        pose = solve_radar_pose(terrain, radar, point_lookup)
+    for radar in radars_def:
+        pose = solve_radar_pose(terrain, radar, point_lookup, rel_heights)
         # pose["ground"] 是**绝对高程**（基准面 + 相对高度）。写进 localPosition 的必须是
         # **相对高度**——ENU 本地坐标里 +Z 的零点就是基准面。V18 曾在这里写成绝对值，
         # 迁移那边又加了一次基准面，结果两台雷达整整齐齐浮在场景上方 107m
         # （雷达"飞到天上"的那个 bug）。绝对高程另存 absoluteAltitude，供 SQL/文档使用。
         ground_relative = terrain.sample(pose["local"][0], pose["local"][1])
+        radar_lon, radar_lat = terrain.lonlat_of(pose["local"][0], pose["local"][1])
         bindings = []
         for code in radar["points"]:
             target = point_lookup[code]
             tx, ty = target["local"]
-            ground = terrain.floor + terrain.sample(tx, ty)
+            ground = terrain.floor + rel_heights.get(code, terrain.sample(tx, ty))
             target_z = ground + POINT_MARKER_HEIGHT_M
             head_z = pose["ground"] + pose["antenna"]
             dx, dy = tx - pose["local"][0], ty - pose["local"][1]
@@ -715,15 +912,17 @@ def build_radars(terrain: Heightfield) -> tuple[list[dict], list[dict]]:
                 "slantRangeM": round(slant, 3),
                 "headingDeltaDegrees": round(angular_difference(azimuth, pose["heading"]), 3),
                 "pitchDeltaDegrees": round(elevation - pose["pitch"], 3),
-                "lineOfSight": visible,
-                "minimumClearanceM": round(clearance, 3),
-                "valid": visible and slant <= radar["range"],
+                "lineOfSight": bool(visible),
+                "minimumClearanceM": round(float(clearance), 3),
+                "valid": bool(visible and slant <= radar["range"]),
             })
         radars.append({
             **{k: v for k, v in radar.items() if k != "points"},
             "points": list(radar["points"]),
             "localPosition": [pose["local"][0], pose["local"][1], round(ground_relative, 3)],
             "absoluteAltitude": round(pose["ground"], 3),
+            "longitude": round(radar_lon, 7),
+            "latitude": round(radar_lat, 7),
             "headingDegrees": round(pose["heading"], 3),
             "pitchDegrees": round(pose["pitch"], 3),
             "antennaHeightM": pose["antenna"],
@@ -749,14 +948,15 @@ def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def write_metadata(out: Path, *, terrain: Heightfield, radars: list[dict],
+def write_metadata(out: Path, *, terrain: Heightfield, points_def: list[dict],
+                   point_heights: dict[str, float], radars: list[dict],
                    bindings: list[dict], glb_bytes: bytes, texture_bytes: bytes,
                    asset_version: str, source_manifest: dict, args: argparse.Namespace,
                    mesh: dict) -> dict:
     points = []
-    for item in POINTS:
+    for item in points_def:
         x, y = item["local"]
-        z = terrain.sample(x, y)
+        z = point_heights.get(item["code"], terrain.sample(x, y))
         lon, lat, altitude = geodetic(terrain, x, y, z, POINT_MARKER_HEIGHT_M)
         points.append({
             **item,
@@ -855,9 +1055,10 @@ def render_scene_update_sql(*, terrain: Heightfield, points: list[dict], radars:
                 pitch=radar["pitchDegrees"], rng=radar["range"],
                 half=radar["halfAngleDegrees"], vhalf=radar["verticalHalfAngleDegrees"],
                 antenna=radar["antennaHeightM"], id=radar["id"]))
-    # 测点归属按新地形重排（北侧雷达：山脊 3 点 + 上部滑坡体 1 点；南侧雷达：坡脚 3 点），
-    # 所以整组重建标定行——沿用 V11 的 DELETE + INSERT 形状，避免改 point_id 时撞唯一键。
-    lines.append("DELETE FROM device_point WHERE device_id IN (1, 2);")
+    # 测点归属按新地形重排，所以整组重建标定行——沿用 V11 的 DELETE + INSERT 形状，
+    # 避免改 point_id 时撞唯一键。
+    device_ids = ", ".join(str(r["id"]) for r in sorted(radars, key=lambda r: r["id"]))
+    lines.append(f"DELETE FROM device_point WHERE device_id IN ({device_ids});")
     lines.append("")
     lines.append("INSERT INTO device_point (")
     lines.append("    id, device_id, point_id, target_code,")
@@ -970,28 +1171,32 @@ def write_provenance(out: Path, *, asset_version: str, glb_sha: str, terrain: He
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="生成离线真实地形 GLB 资产")
+    parser.add_argument("--scene", choices=sorted(SITES), default="mountain",
+                        help="场景预设：mountain（山地边坡）/ bridge（野外桥梁）/ "
+                             "railway（山区铁路）/ factory（郊外工厂）")
     parser.add_argument("--sources", type=Path, default=Path("generated/terrain-asset/sources"))
     parser.add_argument("--out", type=Path,
                         default=Path("frontend/public/models/qingyuan-hillside"))
-    parser.add_argument("--asset-name", default=DEFAULT_ASSET_NAME)
-    parser.add_argument("--asset-version", default=DEFAULT_ASSET_VERSION)
-    parser.add_argument("--scene-name", default="清远山地边坡真实地形场景")
-    parser.add_argument("--width", type=float, default=DEFAULT_WIDTH)
-    parser.add_argument("--depth", type=float, default=DEFAULT_DEPTH)
-    parser.add_argument("--cells-x", type=int, default=DEFAULT_CELLS_X)
-    parser.add_argument("--cells-y", type=int, default=DEFAULT_CELLS_Y)
-    parser.add_argument("--detail-amplitude", type=float, default=1.6,
+    parser.add_argument("--asset-name", default=None)
+    parser.add_argument("--asset-version", default=None)
+    parser.add_argument("--scene-name", default=None)
+    parser.add_argument("--width", type=float, default=None)
+    parser.add_argument("--depth", type=float, default=None)
+    parser.add_argument("--cells-x", type=int, default=None)
+    parser.add_argument("--cells-y", type=int, default=None)
+    parser.add_argument("--detail-amplitude", type=float, default=None,
                         help="程序化地形细节基准幅度（米）；航测数据接进来时应传 0")
     parser.add_argument("--detail-seed", type=int, default=20260918)
-    parser.add_argument("--texture-width", type=int, default=DEFAULT_TEXTURE[0])
-    parser.add_argument("--texture-height", type=int, default=DEFAULT_TEXTURE[1])
-    parser.add_argument("--camera", type=float, nargs=3, default=[315.0, -30.0, 1650.0],
+    parser.add_argument("--texture-width", type=int, default=None)
+    parser.add_argument("--texture-height", type=int, default=None)
+    parser.add_argument("--camera", type=float, nargs=3, default=None,
                         metavar=("HEADING", "PITCH", "RANGE"))
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    site = SITES[args.scene]
     sources: Path = args.sources
     manifest_path = sources / "manifest.json"
     if not manifest_path.exists():
@@ -999,22 +1204,48 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     source_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     anchor = source_manifest["anchor"]
+    # 尺寸/网格/纹理/相机/细节幅度以场景预设为准（命令行显式传值仍可覆盖）
+    width = args.width if args.width is not None else site["width"]
+    depth = args.depth if args.depth is not None else site["depth"]
+    cells_x = args.cells_x if args.cells_x is not None else site["cells"][0]
+    cells_y = args.cells_y if args.cells_y is not None else site["cells"][1]
+    texture_size = ((args.texture_width or site["texture"][0]),
+                    (args.texture_height or site["texture"][1]))
+    detail_amplitude = (args.detail_amplitude if args.detail_amplitude is not None
+                        else site["detail"])
+    args.camera = args.camera or site["camera"]
+    args.detail_amplitude = detail_amplitude
+    args.scene_name = args.scene_name or site["scene_name"]
+    args.width, args.depth = width, depth
+    args.texture_width, args.texture_height = texture_size
+    if args.asset_name is None:
+        args.asset_name = site["asset_prefix"]
+    if args.asset_version is None:
+        args.asset_version = site["version"]
 
     log(f"读取 DEM / 影像瓦片：{sources}")
     dem = load_dem_mosaic(sources, source_manifest)
     imagery = load_imagery_mosaic(sources, source_manifest)
     log(f"高程拼图 {dem.data.shape}，影像拼图 {imagery.data.shape}")
 
-    log("构建高程场（DEM 骨架 + 程序化细节）...")
-    terrain = build_heightfield(dem, anchor, args.width, args.depth,
-                                args.cells_x, args.cells_y,
-                                args.detail_amplitude, args.detail_seed)
+    log(f"构建高程场（场景 {args.scene}：{site['title']}）...")
+    terrain = build_heightfield(dem, anchor, width, depth, cells_x, cells_y,
+                                detail_amplitude, args.detail_seed)
     log(f"高程范围 {terrain.heights.min():.1f}–{terrain.heights.max():.1f}m"
         f"（基准面 {terrain.floor:.1f}m，起伏 {terrain.heights.max() - terrain.heights.min():.1f}m）")
 
+    structures, point_heights = (None, {})
+    if site["feature"]:
+        log(f"建模结构体：{site['feature']} ...")
+        cfg = dict(site.get("feature_config", {}))
+        cfg["pointCodes"] = [p["code"] for p in site["points"]]
+        geom, point_heights = FEATURES[site["feature"]](terrain, cfg)
+        structures = geom.packed()
+        log(f"结构体顶点 {structures['positions'].shape[0]}、三角形 "
+            f"{structures['indices'].size // 3}")
+
     log("烘焙卫星纹理（曝光归一 + 山坡阴影 + 细节合成）...")
-    texture_size = (args.texture_width, args.texture_height)
-    texture_bytes, preview = bake_texture(imagery, terrain, args.width, args.depth,
+    texture_bytes, preview = bake_texture(imagery, terrain, width, depth,
                                           texture_size, args.detail_seed)
     log(f"纹理 {len(texture_bytes) / 1024:.0f} KiB")
 
@@ -1022,7 +1253,7 @@ def main(argv: list[str] | None = None) -> int:
     mesh = build_mesh(terrain)
 
     log("解算雷达位姿与视线...")
-    radars, bindings = build_radars(terrain)
+    radars, bindings = build_radars(terrain, site["points"], site["radars"], point_heights)
     for radar in radars:
         log(f"  {radar['code']} {radar['name']}：位姿 "
             f"({radar['localPosition'][0]:.0f},{radar['localPosition'][1]:.0f}) "
@@ -1038,6 +1269,7 @@ def main(argv: list[str] | None = None) -> int:
         "anchor": {"longitude": anchor["longitude"], "latitude": anchor["latitude"],
                    "height": terrain.floor},
         "dimensionsMetres": [terrain.width, terrain.depth],
+        "feature": site["feature"],
         "texture": {"width": args.texture_width, "height": args.texture_height,
                     "source": "Sentinel-2 cloudless 2023 (EOX, CC BY 4.0)",
                     "bakedLighting": "hillshade sun azimuth 315°, altitude 45°"},
@@ -1045,11 +1277,12 @@ def main(argv: list[str] | None = None) -> int:
         "syntheticDetailMetres": args.detail_amplitude,
         "license": "Imagery CC BY 4.0 (EOX Sentinel-2 cloudless); DEM SRTM public domain",
     }
-    write_glb(glb_path, mesh, texture_bytes, args.asset_version, extras)
+    write_glb(glb_path, mesh, texture_bytes, args.asset_version, extras, structures)
     glb_bytes = glb_path.read_bytes()
     log(f"写入 {glb_path}（{len(glb_bytes) / 1024 / 1024:.2f} MiB）")
 
-    result = write_metadata(args.out, terrain=terrain, radars=radars, bindings=bindings,
+    result = write_metadata(args.out, terrain=terrain, points_def=site["points"],
+                            point_heights=point_heights, radars=radars, bindings=bindings,
                             glb_bytes=glb_bytes, texture_bytes=texture_bytes,
                             asset_version=args.asset_version,
                             source_manifest=source_manifest, args=args, mesh=mesh)
