@@ -8,6 +8,8 @@ import com.monitor.common.PageResult;
 import com.monitor.common.Result;
 import com.monitor.common.exception.BizException;
 import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
+import java.util.ArrayList;
 
 /**
  * 通用 CRUD 控制器基类：读开放给所有登录用户，写仅 ADMIN。
@@ -33,7 +36,26 @@ import java.util.List;
  * {@code @PreAuthorize("hasRole('ADMIN')")} 已经把调用者限定成 ADMIN，
  * 而 ADMIN 在数据范围上本就不受限，再加一层是空条件。</p>
  */
-public abstract class BaseCrudController<T extends BaseEntity> {
+@Slf4j
+public abstract class BaseCrudController<T extends BaseEntity>
+        implements com.monitor.audit.spi.AuditSnapshotSource {
+
+    /**
+     * 列表端点的默认上限（P1-3）。
+     *
+     * <p>取值理由：本仓记录的生产基线是「单项目 1000 测点、每点 2 测项」，于是
+     * {@code /points} 约 1000 行、{@code /metrics} 约 2000 行。默认 2000 意味着
+     * **基线规模下不会有任何端点被截断**，而它挡的是"数据长到十倍之后列表把整个
+     * 单点响应撑到几 MB"这件事。</p>
+     */
+    protected static final long DEFAULT_LIST_LIMIT = 2000;
+
+    /** 显式 {@code ?limit=} 的上限：再大就不该用列表端点，而该走分页或导出。 */
+    protected static final long MAX_LIST_LIMIT = 10000;
+
+    /** 被截断时回给调用方的响应头：截断必须**说出来**，静默少几行比报错更难查。 */
+    public static final String HEADER_LIMIT = "X-Result-Limit";
+    public static final String HEADER_TRUNCATED = "X-Result-Truncated";
 
     protected abstract BaseMapper<T> mapper();
 
@@ -51,6 +73,15 @@ public abstract class BaseCrudController<T extends BaseEntity> {
      * 而列表断言是绿的。</p>
      */
     protected abstract boolean inScope(T entity);
+
+    /**
+     * 审计用的「按主键取当前值」（P1-8，见 {@code AuditSnapshotSource}）。
+     * 放在基类里，于是所有档案类端点（项目/场景/对象/测点/设备/测项/组织）自动带上前后值。
+     */
+    @Override
+    public Object auditSnapshot(Long id) {
+        return id == null ? null : mapper().selectById(id);
+    }
 
     /**
      * 列表与分页的排序钩子。默认**不加排序**（基类拿不到子类实体的主键 lambda——
@@ -83,9 +114,49 @@ public abstract class BaseCrudController<T extends BaseEntity> {
         return ordered(wrapper == null ? new LambdaQueryWrapper<>() : wrapper);
     }
 
+    /**
+     * 列表：**默认带上限**，并在被截断时通过响应头明说（P1-3）。
+     *
+     * <p>为什么不是"超限就 400"：列表端点是只读的，直接报错会让整个页面打不开，
+     * 而用户真正需要的往往是"先看到前 N 行"。为什么不是"悄悄截断"：少几行与数据真的
+     * 只有几行，在响应体里长得一模一样——截断必须由 {@code X-Result-Truncated} 说出来，
+     * 前端据此提示，运维据此改用 {@code /page} 或加 {@code limit}。</p>
+     *
+     * <p>多查一行（{@code limit + 1}）是判"到底有没有被截"的唯一可靠办法：
+     * 行数**恰好等于**上限时不叫截断，而靠等号去猜会把这种合法情况误报。</p>
+     */
     @GetMapping
-    public Result<List<T>> list() {
-        return Result.ok(mapper().selectList(baseQuery()));
+    public Result<List<T>> list(@RequestParam(required = false) Long limit,
+                                HttpServletResponse response) {
+        return Result.ok(listCapped(limit, response));
+    }
+
+    /**
+     * 按上限取列表（受数据范围限制）。子类覆盖了 {@code list()} 的（设备端点要推导状态）
+     * 也走这里，保证"上限与截断标注"只有一份实现。
+     */
+    protected List<T> listCapped(Long limit, HttpServletResponse response) {
+        long effective = effectiveLimit(limit);
+        List<T> rows = mapper().selectList(baseQuery().last("LIMIT " + (effective + 1)));
+        boolean truncated = rows.size() > effective;
+        if (truncated) {
+            rows = new ArrayList<>(rows.subList(0, (int) effective));
+            log.warn("列表被上限截断：{} 请求 limit={}（可用 /page 分页或调大 limit，最大 {}）",
+                    getClass().getSimpleName(), effective, MAX_LIST_LIMIT);
+        }
+        if (response != null) {
+            response.setHeader(HEADER_LIMIT, String.valueOf(effective));
+            response.setHeader(HEADER_TRUNCATED, String.valueOf(truncated));
+        }
+        return rows;
+    }
+
+    /** 入参归一：缺省用默认上限，超出区间一律夹到边界（并把生效值回给调用方）。 */
+    protected static long effectiveLimit(Long limit) {
+        if (limit == null) {
+            return DEFAULT_LIST_LIMIT;
+        }
+        return Math.min(Math.max(limit, 1L), MAX_LIST_LIMIT);
     }
 
     @GetMapping("/page")

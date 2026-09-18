@@ -1,0 +1,90 @@
+# 持续集成（复查清单 P2-2）：把「记得跑」变成「每次必跑」。
+#
+# 三个 job 的分工：
+#   backend-tests   后端单测（H2 内存库，不需要外部服务）
+#   backend-accept  16 套验收（run-all --fresh 自己起一个空库后端；含自带后端的 16 号严格契约套件）
+#   frontend        构建 + 源码绊线 + 对着真后端的前端自检
+#
+# 为什么验收也放进 CI：本仓的回归网（556 条断言）此前只能靠人记得跑，
+# 而"记得跑"在本仓的历史里已经失败过多次（清单 P1-13 记的就是这件事）。
+#
+# 为什么不用 `-o`（离线）：CI 上没有预热的 ~/.m2，必须走在线；本地默认离线是另一码事。
+# MVNW_OPTS 在这里显式传成 "-B"，run-all.sh 里 `${MVNW_OPTS:--o}` 的空值判断会照用这个值。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # 同一分支上后一次推送取消前一次未跑完的 CI（省 runner，也让结果对应最新代码）
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: 后端单元测试
+        run: cd backend && ./mvnw -B test
+
+  backend-acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # run-all.sh 需要 ss（iproute2）与 curl；ubuntu-latest 自带，这里只做显式声明
+      - name: 验收套件（H2 空库）
+        run: FRESH_PORT=18085 MVNW_OPTS="-B" tools/acceptance/run-all.sh --fresh
+        timeout-minutes: 30
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: 安装依赖
+        run: cd frontend && npm ci
+      - name: 构建
+        run: cd frontend && npm run build
+      - name: 源码绊线（P0 第 1 批 35 项）
+        run: cd frontend && node scripts/check-p0-stage1.mjs
+      - name: 启动后端（前端自检要用到 8080）
+        run: |
+          cd backend
+          # setsid + nohup：让后端脱离本步骤的进程组，步骤结束后仍活着给下一步用
+          setsid nohup ./mvnw -B -DskipTests spring-boot:run > /tmp/backend-selfcheck.log 2>&1 &
+          for i in $(seq 1 120); do
+            if curl -sf http://localhost:8080/api/v1/health/ready > /dev/null; then
+              echo "后端已就绪（${i}s）"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "后端在 120s 内未就绪" >&2
+          tail -50 /tmp/backend-selfcheck.log >&2
+          exit 1
+      - name: 前端自检（79 条，含回放粒度与窗口口径）
+        run: cd frontend && npm run selfcheck

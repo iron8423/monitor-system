@@ -148,4 +148,25 @@ check "无令牌读 /ops/status -> 401" "401" "$(http_code "$BASE/ops/status")"
 check "运维配置不回显接入密钥明文" "0" \
   "$(curl -s "$BASE/ops/config" -H "$AUTH" | grep -c "${INGEST_KEY:-dev-ingest-key}")"
 
+section "⑪ 列表端点的上限与「截断要说出来」（P1-3）"
+#
+# 列表端点此前没有上限：生产基线 1000 测点尚可，再长一个数量级就是每次刷新几十 MB。
+# 现在的口径是「默认 2000、可用 ?limit= 调、上限 10000」，并且**被截断时用响应头说出来**
+# ——少几行与"本来就只有几行"在响应体里长得一模一样，静默截断比报错更难查。
+# 三条断言各自钉一件事：limit 生效、未截断时标记 false、默认口径下基线规模不被截。
+HD=$(mktemp); HD2=$(mktemp); HD3=$(mktemp)
+curl -s -D "$HD" -o /dev/null "$BASE/points?limit=2" -H "$AUTH"
+curl -s -D "$HD2" -o /dev/null "$BASE/points" -H "$AUTH"
+curl -s -D "$HD3" -o /dev/null "$BASE/points?limit=999999" -H "$AUTH"
+check "limit=2 -> 响应里恰好 2 条" "2" \
+  "$(curl -s "$BASE/points?limit=2" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
+check_grep "limit=2 时回 X-Result-Limit: 2" "^X-Result-Limit: 2" "$HD"
+check_grep "limit=2 时回 X-Result-Truncated: true（截断被明说）" "^X-Result-Truncated: true" "$HD"
+check_grep "默认（不传 limit）不截断时回 false" "^X-Result-Truncated: false" "$HD2"
+check "limit 超上限被夹到 10000（并把生效值回给调用方）" "10000" \
+  "$(sed -n 's/^X-Result-Limit: *//p' "$HD3" | tr -d '\r')"
+check "limit=1 -> 1 条（下界也夹住）" "1" \
+  "$(curl -s "$BASE/points?limit=1" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))")"
+rm -f "$HD" "$HD2" "$HD3"
+
 summary

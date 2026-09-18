@@ -50,6 +50,47 @@ let disposed = false
 let removeRenderError = null
 const viewerError = ref('')
 
+/**
+ * WebGL 上下文状态（复查清单 P1-12）。
+ *
+ * 为什么必须处理：显卡驱动重启、系统休眠唤醒、显存吃紧时，浏览器会**丢掉** WebGL 上下文。
+ * 此时页面不会报错、不会白屏，只是画面**冻在最后一帧**——大屏看起来一切正常，
+ * 值班员看到的却是几分钟前的旧画面。改造前全仓 grep webglcontextlost 零命中，
+ * 唯一的"恢复办法"是有人发现不对、手动刷新页面。
+ *
+ * 两件事分工：
+ *   · lost 时 `preventDefault()`（规范要求：不阻止默认行为，浏览器不会尝试恢复），
+ *     并给出**明确提示**——冻结的画面必须被说出来；
+ *   · restored 时提供「重建三维视图」：Cesium 的 viewer 在上下文丢失后不一定能自行复原，
+ *     整块重建是唯一可靠的路径（数据与 SSE 连接都不受影响，只重建渲染层）。
+ */
+const glLost = ref(false)
+const glRestored = ref(false)
+let rebuildingViewer = false
+let removeContextLost = null
+let removeContextRestored = null
+
+/** 监听上下文事件。canvas 元素随 viewer 重建，所以监听也要跟着重建（见 teardownViewer） */
+function bindContextEvents(v) {
+  const canvas = v?.scene?.canvas
+  if (!canvas) return
+  const onLost = (event) => {
+    // 规范要求先 preventDefault，否则浏览器不会尝试恢复上下文
+    event.preventDefault()
+    glLost.value = true
+    glRestored.value = false
+    console.warn('[cesium] WebGL 上下文丢失：画面已冻结，等待重建')
+  }
+  const onRestored = () => {
+    glRestored.value = true
+    console.info('[cesium] WebGL 上下文已恢复：可点「重建三维视图」')
+  }
+  canvas.addEventListener('webglcontextlost', onLost, false)
+  canvas.addEventListener('webglcontextrestored', onRestored, false)
+  removeContextLost = () => canvas.removeEventListener('webglcontextlost', onLost)
+  removeContextRestored = () => canvas.removeEventListener('webglcontextrestored', onRestored)
+}
+
 function reportViewerError(error) {
   if (disposed) return
   viewerError.value = error?.message || '请检查浏览器 WebGL 支持、硬件加速及页面资源是否加载完整。'
@@ -459,10 +500,19 @@ watch(
   },
 )
 
-onMounted(async () => {
+/**
+ * 建立 viewer 与它的全部渲染层。
+ *
+ * 抽成函数是为了 P1-12 的"重建"：WebGL 上下文丢失后要能**把这一坨重新做一遍**，
+ * 而卸载路径（onBeforeUnmount）与重建路径共用 {@link teardownViewer}。
+ * 刻意不把 realtime.start() 与轮询定时器放进来——它们与渲染无关，
+ * 重建时不能重复启动（会多出一个定时器、两条 SSE）。
+ */
+async function initViewer() {
   try {
     viewer = createViewer(container.value)
     removeRenderError = viewer.scene.renderError.addEventListener((_scene, error) => reportViewerError(error))
+    bindContextEvents(viewer)
     pointLayer = createPointLayer(viewer)
     heatLayer = createHeatmapLayer(viewer)
     // 暴露到全局，便于在浏览器控制台排查（也方便后续做演示调试）
@@ -489,9 +539,6 @@ onMounted(async () => {
     viewer.scene.postRender.addEventListener(trackPopup)
     removePostRender = () => viewer?.scene.postRender.removeEventListener(trackPopup)
 
-    // 实时推送的连接归 store（它能覆盖到本页这个顶层路由），这里只负责唤醒
-    realtime.start()
-
     // 先出数据、再升级地形/影像：任何一个环节慢，页面都已经有画面了
     await loadData()
     if (disposed) return
@@ -507,27 +554,84 @@ onMounted(async () => {
         await plantMastsOnTerrain()
       }
     }).catch(reportViewerError)
-
-    /*
-     * 3b：数据主路是 SSE（`stores/realtime.js` → `stores/monitor.js` 单一数据源），
-     * 这里只留**兜底轮询**，两种情况：
-     *   - 流断了 → 15s 一次补齐，界面照常"活着"（宁可旧一点，也不能停在那一刻）；
-     *   - 流正常 → 60s 才对一次账（每 4 跳一次），兜住推送覆盖不到的变化
-     *     （新建测点、漏事件）。比后端产出周期刷得更快没有意义，只会白刷接口。
-     */
-    let tick = 0
-    pollTimer = setInterval(() => {
-      tick += 1
-      if (!realtime.isLive) {
-        store.refreshLatest()
-      } else if (tick % 4 === 0) {
-        store.refreshLatest()
-      }
-    }, 15000)
   } catch (error) {
     reportViewerError(error)
   }
+}
+
+/**
+ * 销毁渲染层并解绑事件。**与 onBeforeUnmount 共用**：重建时若漏掉某一项，
+ * 旧 viewer 的监听/图层会留在内存里继续吃帧（实测过一次：漏解绑 postRender，
+ * 页面帧率随重建次数线性下降）。
+ */
+function teardownViewer() {
+  removePostRender?.()
+  removePostRender = null
+  removeRenderError?.()
+  removeRenderError = null
+  removeContextLost?.()
+  removeContextLost = null
+  removeContextRestored?.()
+  removeContextRestored = null
+  clickHandler?.destroy()
+  clickHandler = null
+  heatLayer?.destroy()
+  heatLayer = null
+  pointLayer?.destroy()
+  pointLayer = null
+  mountainScene?.destroy()
+  mountainScene = null
+  sceneConfig.value = null
+  activeRadarId.value = null
+  if (viewer) {
+    viewer.destroy()
+  }
+  window.__viewer = null
+  window.__digitalTwinScene = null
+  viewer = null
+}
+
+/**
+ * 重建三维视图（P1-12 的按钮）：丢掉旧 viewer，按同一套初始化流程再来一遍。
+ * 数据（store）、SSE 连接、回放状态都不动——它们与 WebGL 上下文无关。
+ */
+async function rebuildViewer() {
+  if (rebuildingViewer || disposed) return
+  rebuildingViewer = true
+  try {
+    teardownViewer()
+    glLost.value = false
+    glRestored.value = false
+    viewerError.value = ''
+    await initViewer()
+  } finally {
+    rebuildingViewer = false
+  }
+}
+
+onMounted(async () => {
+  await initViewer()
+
+  // 实时推送的连接归 store（它能覆盖到本页这个顶层路由），这里只负责唤醒。
+  // 放在 initViewer 之外：重建视图不该重连推送、也不该多起一个定时器。
+  realtime.start()
+  let tick = 0
+  pollTimer = setInterval(() => {
+    tick += 1
+    if (!realtime.isLive) {
+      store.refreshLatest()
+    } else if (tick % 4 === 0) {
+      store.refreshLatest()
+    }
+  }, 15000)
 })
+
+/*
+ * 兜底轮询（3b：数据主路是 SSE，见 stores/realtime.js 与 stores/monitor.js）：
+ *   - 流断了 → 15s 一次补齐，界面照常"活着"（宁可旧一点，也不能停在那一刻）；
+ *   - 流正常 → 60s 才对一次账（每 4 跳一次），兜住推送覆盖不到的变化
+ *     （新建测点、漏事件）。比后端产出周期刷得更快没有意义，只会白刷接口。
+ */
 
 /** 地形就绪后，把 7 根立柱的起点换到真实地形面上 */
 async function plantMastsOnTerrain() {
@@ -585,17 +689,8 @@ onBeforeUnmount(() => {
   clearTimeout(bannerTimer)
   // 回放的定时器不在组件里，但得跟着页面停，否则它会一直推着索引走
   replay.dispose()
-  removePostRender?.()
-  removeRenderError?.()
-  clickHandler?.destroy()
-  heatLayer?.destroy()
-  pointLayer?.destroy()
-  mountainScene?.destroy()
-  mountainScene = null
-  viewer?.destroy()
-  window.__viewer = null
-  window.__digitalTwinScene = null
-  viewer = null
+  // 渲染层的销毁与重建共用一套（P1-12）：卸载时漏掉某一项，旧监听会留在内存里继续吃帧
+  teardownViewer()
 })
 </script>
 
@@ -711,6 +806,22 @@ onBeforeUnmount(() => {
         <template v-if="assetProblem.error"> · {{ assetProblem.error }}</template>
         —— 请先确认盘上的模型文件与数据库记录的 asset_sha256 哪一个是权威值。
       </span>
+    </section>
+
+    <!--
+      WebGL 上下文丢失（P1-12）：画面**冻在最后一帧**，不提示的话看起来完全正常——
+      这是这一条最危险的地方：值班员会继续看一份不再更新的画面。
+      恢复后不自动重建，而是等人点：重建会短暂黑屏，且失败时要能看见原因。
+    -->
+    <section v-if="glLost" class="hud gl-warn" role="alert">
+      <span class="warn-title">
+        {{ glRestored ? 'WebGL 上下文已恢复，建议重建视图' : 'WebGL 上下文丢失：画面已冻结' }}
+      </span>
+      <span class="warn-desc">
+        常见于显卡驱动重启或系统休眠唤醒。测点数据与实时推送不受影响，只是三维画面停止刷新。
+      </span>
+      <button class="btn" @click="rebuildViewer">重建三维视图</button>
+      <button class="btn" @click="reloadViewer">重新加载页面</button>
     </section>
 
     <!-- 刚推来的告警：一闪而过的横幅，看一眼就知道「哪个点在报」 -->
@@ -1055,6 +1166,34 @@ onBeforeUnmount(() => {
   line-height: 1.5;
   color: var(--mk-hud-muted);
   word-break: break-all;
+}
+
+/*
+  WebGL 上下文丢失（P1-12）：与前两条错开位置（62 / 112 / 162），
+  三条同时出现的概率极低，但叠在一起会互相盖住，代价只是多一个 top。
+*/
+.gl-warn {
+  top: 162px;
+  left: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  max-width: 560px;
+  padding: 10px 14px;
+  border-color: rgba(230, 162, 60, 0.55);
+}
+
+.gl-warn .warn-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f2c078;
+}
+
+.gl-warn .warn-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mk-hud-muted);
 }
 
 .alarm-banner .lv {

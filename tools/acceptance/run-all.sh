@@ -124,8 +124,11 @@ printf '\n%s验收目标：%s%s\n' "$C_DIM" "$BASE" "$C_OFF"
 # （建一个临时账号、验完停用+逻辑删除），与 10-scope 的差值型断言隔开一层，少一层噪声。
 # 16-strict-contract 自带一个后端（端口 18099），跑的不是 BASE 指向的那个实例：
 # 严格契约在生产编排里是**默认打开**的，而其余套件都跑在 strict=false 上。
-# 它自己造数、自己回收，落在数组倒数第二位——只有 14（改口令）必须垫底。
-SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh 08-simulator.sh 09-data-quality.sh 13-calibration.sh 15-users.sh 10-scope.sh 11-concurrency.sh 12-ingest-concurrency.sh 16-strict-contract.sh 14-password-change.sh)
+# 它自己造数、自己回收，落在数组倒数第三位——只有 14（改口令）必须垫底。
+#
+# 17-audit 排在 16 之后、14 之前：它也自己造数（临时测点/设备）并回收，
+# 但审计行按设计**不回收**（只增不减），所以放在末尾一带，尽量不影响别的套件的计数断言。
+SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh 08-simulator.sh 09-data-quality.sh 13-calibration.sh 15-users.sh 10-scope.sh 11-concurrency.sh 12-ingest-concurrency.sh 16-strict-contract.sh 17-audit.sh 14-password-change.sh)
 TOTAL_PASS=0; TOTAL_FAIL=0; FAILED_SUITES=()
 
 # 后端日志路径：--fresh 时是本脚本自己起的那个进程的输出，可以让套件去 grep 证据行；

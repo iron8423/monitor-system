@@ -101,6 +101,55 @@ function detailText(d) {
   if (!t || t === '{}' || t === 'null') return ''
   return t
 }
+
+/**
+ * 「变更」列的展示（P1-8 / V23）：把 `before_json` 与 `after_json` 压成一两行
+ * 「字段: 旧 → 新」。只列**真的变了**的字段——整行 JSON 贴出来没人会读，
+ * 而审计的价值恰恰是「一眼看出这次改了什么」。
+ *
+ * 三种退化形状都如实说出来，不装作没有：
+ *   · 只有 after  → 新建（原来没有这一行）；
+ *   · 只有 before → 删除（现在没有这一行了）；
+ *   · 两端都没有  → 这类端点拿不到行级快照（复合键端点，见 AuditSnapshotSource 的注释）。
+ */
+function parseJson(s) {
+  if (!s) return null
+  try {
+    const v = JSON.parse(s)
+    return v && typeof v === 'object' ? v : null
+  } catch {
+    return null
+  }
+}
+
+function changeLines(row) {
+  const before = parseJson(row.beforeJson)
+  const after = parseJson(row.afterJson)
+  if (!before && !after) return []
+  if (!before && after) return [{ key: '新建', from: '', to: `#${after.id ?? '?'}` }]
+  if (before && !after) return [{ key: '删除', from: `#${before.id ?? '?'}`, to: '' }]
+  // 只比两边都出现的字段：只在一侧出现的字段说明"这次没带它"（updateById 跳过 null），
+  // 当成"改成空"会得出错误结论——本仓对这类"入参不等于全量"的坑已经踩过不止一次。
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+  const lines = []
+  for (const k of keys) {
+    if (k === 'updatedAt' || k === 'createdAt') continue // 时间戳每次都会变，列出来只是噪声
+    const a = before[k]
+    const b = after[k]
+    if (JSON.stringify(a) === JSON.stringify(b)) continue
+    if (b === undefined) continue
+    lines.push({ key: k, from: fmt(a), to: fmt(b) })
+  }
+  return lines.slice(0, 4)
+}
+
+function fmt(v) {
+  if (v === undefined) return '—'
+  if (v === null) return '空'
+  if (typeof v === 'object') return Array.isArray(v) ? `[${v.length} 项]` : '{…}'
+  const s = String(v)
+  return s.length > 24 ? `${s.slice(0, 24)}…` : s
+}
 </script>
 
 <template>
@@ -154,6 +203,18 @@ function detailText(d) {
             </el-tag>
           </template>
         </el-table-column>
+        <!-- 结果：SUCCESS / FAILED。旧数据（V23 之前）在迁移里回填成 SUCCESS，
+             所以空值只可能出现在"迁移后某个写路径忘了填"的情形，显示成「—」比假装成功好 -->
+        <el-table-column label="结果" width="90">
+          <template #default="{ row }">
+            <el-tag
+              :type="row.result === 'FAILED' ? 'danger' : (row.result === 'SUCCESS' ? 'success' : 'info')"
+              size="small"
+            >
+              {{ row.result || '—' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="目标" width="180">
           <template #default="{ row }">
             <span class="mk-muted type">{{ row.targetType || '—' }}</span>
@@ -162,7 +223,23 @@ function detailText(d) {
             <span v-if="row.targetId" class="mk-mono id">{{ row.targetId }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="细节" min-width="220">
+        <!-- 变更（P1-8）：一句话说清"改了什么"，比整段入参 JSON 有用得多 -->
+        <el-table-column label="变更" min-width="260">
+          <template #default="{ row }">
+            <div v-if="row.result === 'FAILED'" class="fail-line">
+              <span class="mk-muted">被拒：</span>
+              <span class="reason">{{ row.errorMessage || '（无原因）' }}</span>
+            </div>
+            <div v-for="line in changeLines(row)" :key="line.key" class="change-line mk-mono">
+              <span class="k">{{ line.key }}</span>
+              <span class="mk-muted from">{{ line.from || '—' }}</span>
+              <span class="mk-muted">→</span>
+              <span class="to">{{ line.to || '—' }}</span>
+            </div>
+            <span v-if="!changeLines(row).length && row.result !== 'FAILED'" class="mk-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="细节（入参）" min-width="200">
           <template #default="{ row }">
             <span v-if="detailText(row.detail)" class="mk-mono detail" :title="detailText(row.detail)">
               {{ detailText(row.detail) }}
@@ -253,6 +330,38 @@ function detailText(d) {
 
 .ip {
   font-size: 12px;
+}
+
+/* 变更行的排版（P1-8）：字段名固定宽度，旧值划掉、新值高亮，扫一眼就知道改了什么 */
+.change-line {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.change-line .k {
+  min-width: 88px;
+  color: var(--mk-text-sub);
+}
+
+.change-line .from {
+  text-decoration: line-through;
+}
+
+.change-line .to {
+  color: var(--mk-primary);
+}
+
+.fail-line {
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.fail-line .reason {
+  color: #f56c6c;
+  word-break: break-all;
 }
 
 .pager {

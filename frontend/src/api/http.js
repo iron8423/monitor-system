@@ -9,6 +9,24 @@ const http = axios.create({
 })
 
 /**
+ * 403 提示去重（P2-12）。
+ *
+ * 一个页面往往同时发好几条请求（列表 + 概览 + 展开行）。角色不够时它们会**同时**返回 403，
+ * 于是同一个原因弹四五个一模一样的红条，把真正想看的错误挤下去。
+ * 这里按时间窗口去重：2 秒内相同的 403 文案只提示一次，其它请求照常失败、照常走各自的 catch
+ * （提示去重不等于错误被吞）。
+ */
+let lastForbiddenAt = 0
+let lastForbiddenText = ''
+function notifyForbidden(text) {
+  const now = Date.now()
+  if (now - lastForbiddenAt < 2000 && text === lastForbiddenText) return
+  lastForbiddenAt = now
+  lastForbiddenText = text
+  ElMessage.error(text)
+}
+
+/**
  * 请求拦截：统一补 Authorization: Bearer <JWT>。
  * 只有 SSE 例外，它用 ?token= 传（EventSource 发不了 Header），在 stream 模块里单独拼。
  */
@@ -40,9 +58,20 @@ http.interceptors.response.use(
       const error = new Error(body.message || '请求失败')
       error.code = body.code
       if (!response.config?.silent) {
-        ElMessage.error(error.message)
+        if (body.code === 403) {
+          notifyForbidden(`你的角色无权执行该操作：${error.message}`)
+        } else {
+          ElMessage.error(error.message)
+        }
       }
       return Promise.reject(error)
+    }
+
+    // 列表被上限截断（P1-3）：后端用响应头明说，这里统一提示一次。
+    // 不提示的话，"少了几行"在界面上和"本来就只有这几行"完全一样。
+    if (!response.config?.silent && response.headers?.['x-result-truncated'] === 'true') {
+      const limit = response.headers['x-result-limit'] || '上限'
+      ElMessage.warning(`列表已按上限截断（最多 ${limit} 条）：请用筛选或分页缩小范围`)
     }
 
     return body
@@ -85,7 +114,14 @@ http.interceptors.response.use(
     }
 
     if (!error.config?.silent) {
-      ElMessage.error(message)
+      // 403 统一走「你的角色无权执行该操作」+ 后端原文（P2-12）；
+      // 文案优先用后端 message —— 它比前端的猜测更贴近真实原因（数据范围/角色/状态都可能）。
+      if (status === 403) {
+        const reason = body?.message || '当前角色没有该操作权限'
+        notifyForbidden(`你的角色无权执行该操作：${reason}`)
+      } else {
+        ElMessage.error(message)
+      }
     }
     return Promise.reject(error)
   },

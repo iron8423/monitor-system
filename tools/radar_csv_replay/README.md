@@ -35,7 +35,7 @@ python radar_csv_replay.py --date 20260827 --send --inject-duplicate
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--root` | `C:\Users\ASUS\Desktop\实习\点形变雷达系统\web_存档` | 真雷达 CSV（有变形数据的那份） |
+| `--root` | **必填**（或环境变量 `RADAR_CSV_ROOT`） | 真雷达 CSV 根目录（有变形数据的那份）。旧版本写死在一台机器的 Windows 桌面路径上，换机器后只会显示「没找到 CSV」——现在不给就在开始前明确报错（退出码 2） |
 | `--date` | 全部 | 只回放某天，如 `20260908` |
 | `--target` | 全部 | 只回放某个目标，如 `1` |
 | `--endpoint` | `http://127.0.0.1:8080/api/v1/ingest/measurements` | 系统 ingest 接口 |

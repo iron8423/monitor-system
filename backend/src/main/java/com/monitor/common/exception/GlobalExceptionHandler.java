@@ -1,6 +1,8 @@
 package com.monitor.common.exception;
 
 import com.monitor.common.Result;
+import com.monitor.audit.service.DeniedWriteAuditor;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,8 +26,11 @@ import jakarta.validation.ConstraintViolationException;
  */
 @Slf4j
 @RestControllerAdvice
+@RequiredArgsConstructor
 @SuppressWarnings("null")
 public class GlobalExceptionHandler {
+
+    private final DeniedWriteAuditor deniedWriteAuditor;
 
     /** 业务异常：HTTP 状态与 body.code 一致（如 404 测点不存在 → HTTP 404）。 */
     @ExceptionHandler(BizException.class)
@@ -58,6 +63,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public Result<Void> handleAccessDenied(AccessDeniedException e) {
+        // 方法级 @PreAuthorize 的拒绝走的是这条（控制器 advice 先于过滤器处理），
+        // 与 RestAccessDeniedHandler 共用同一个留痕组件（P1-8）
+        deniedWriteAuditor.recordIfWriteAttempt();
         return Result.fail(403, "无权限访问");
     }
 

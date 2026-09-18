@@ -28,7 +28,11 @@ from datetime import datetime, timedelta
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
-DEFAULT_ROOT = r"C:\Users\ASUS\Desktop\实习\点形变雷达系统\web_存档"
+# 真雷达 CSV 的根目录。**刻意不给默认值**（复查清单 P2-7）：
+# 旧默认值写死在某台机器的 Windows 桌面路径上，换一台机器运行时它只会表现为
+# "没找到 CSV"——看起来像数据没了，其实是路径根本不存在。
+# 现在必须显式给：命令行 --root，或环境变量 RADAR_CSV_ROOT。
+RADAR_CSV_ROOT_ENV = "RADAR_CSV_ROOT"
 DEFAULT_EP = "http://127.0.0.1:8080/api/v1/ingest/measurements"
 DEFAULT_INGEST_KEY = "dev-ingest-key"
 # V11 起 radar-001 只覆盖北侧可见目标。南侧的 P-HK01/P-BP03/P-BP04
@@ -207,7 +211,8 @@ def post(ep, payload, ingest_key=None):
 
 def main():
     ap = argparse.ArgumentParser(description="雷达 CSV 回放适配器")
-    ap.add_argument("--root", default=DEFAULT_ROOT, help="真雷达 CSV 根目录")
+    ap.add_argument("--root", default=None,
+                    help="真雷达 CSV 根目录（必填，或用环境变量 RADAR_CSV_ROOT）")
     ap.add_argument("--date", default=None, help="只回放某天，格式 YYYYMMDD，如 20260908")
     ap.add_argument("--target", default=None, help="只回放某个目标，如 1（对应 Target1）")
     ap.add_argument("--endpoint", default=DEFAULT_EP, help="系统 ingest 接口")
@@ -227,6 +232,21 @@ def main():
     ap.add_argument("--inject-duplicate", action="store_true", help="每条消息发两遍，测幂等去重")
     args = ap.parse_args()
 
+    # 根目录必须显式给（P2-7）：没给就在**开始之前**把话说清楚，
+    # 而不是跑到 scan_files 里一路空转到"没找到 CSV"——那会让人以为数据坏了。
+    root = args.root or os.environ.get(RADAR_CSV_ROOT_ENV)
+    if not root:
+        print(
+            "[!] 未指定 CSV 根目录。请用 --root <目录>，或设置环境变量 "
+            f"{RADAR_CSV_ROOT_ENV}；目录下应当有形如「目标信号强度-YYYYMMDD」的子目录。\n"
+            "    例：python radar_csv_replay.py --root /data/radar/web_存档 --date 20260908",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if not os.path.isdir(root):
+        print(f"[!] 目录不存在：{root}", file=sys.stderr)
+        sys.exit(2)
+
     point_map = {}
     for seg in (args.point_map or "").split(","):
         if ":" in seg:
@@ -234,9 +254,9 @@ def main():
             point_map[int(k.strip())] = v.strip()
     ingest_key = args.ingest_key or os.environ.get("MONITOR_INGEST_KEY") or DEFAULT_INGEST_KEY
 
-    files = scan_files(args.root, args.date)
+    files = scan_files(root, args.date)
     if not files:
-        print("[!] 没找到 CSV。请确认 --root 与 --date。")
+        print(f"[!] 在 {root} 下没找到符合 --date 的 CSV。请确认 --root 与 --date。")
         sys.exit(1)
 
     all_events = []

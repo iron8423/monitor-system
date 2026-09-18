@@ -432,6 +432,23 @@ try {
     assert.ok(src('cesium/pointLayer.js').includes('（过期）'), '点标签没有过期后缀')
   })
 
+  /**
+   * P2-11：菜单与使用说明会漂移——菜单加了新页面，说明页还停在上一版，
+   * 而「说明页少一个模块」不会报错、也没人会注意到。这条把两者的源码对起来：
+   * `AppLayout` 的每个菜单标题都必须在 `HelpView` 的 MODULES 里有一节。
+   *
+   * 例外只有「使用说明」自己（它就是那一页），以及右上角头像里的「个人中心」
+   * （不是菜单项，但说明页里也有——方向相反，不在这里断言）。
+   */
+  ok('绊线·P2-11：每个菜单项都在使用说明里有对应小节', () => {
+    const layout = src('layout/AppLayout.vue')
+    const help = src('views/HelpView.vue')
+    const titles = [...layout.matchAll(/\{\s*path:\s*'[^']+',\s*title:\s*'([^']+)'/g)].map((m) => m[1])
+    assert.ok(titles.length >= 9, `菜单标题解析失败，只拿到 ${titles.length} 个：${titles.join('/')}`)
+    const missing = titles.filter((t) => t !== '使用说明' && !help.includes(`name: '${t}'`))
+    assert.deepEqual(missing, [], `这些菜单项在 HelpView 的 MODULES 里没有小节：${missing.join('、')}`)
+  })
+
   // 执行实际路由守卫和 onError；只替换浏览器 history、页面组件与对话框。
   const { default: router } = await server.ssrLoadModule('/src/router/index.js')
   const { useUserStore } = await server.ssrLoadModule('/src/stores/user.js')

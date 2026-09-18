@@ -19,6 +19,7 @@ import com.monitor.common.exception.BizException;
 import com.monitor.common.util.Times;
 import com.monitor.project.mapper.MonitorPointMapper;
 import com.monitor.scope.service.DataScopeService;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -85,8 +86,10 @@ public class DeviceController extends BaseCrudController<Device> {
      */
     @Override
     @GetMapping
-    public Result<List<Device>> list() {
-        List<Device> devices = deviceMapper.selectList(scopeFilter());
+    public Result<List<Device>> list(@RequestParam(required = false) Long limit,
+                                     HttpServletResponse response) {
+        // 上限与 X-Result-Truncated 的判定都在基类（P1-3）；这里只补"读时推导状态"
+        List<Device> devices = listCapped(limit, response);
         devices.forEach(DeviceController::fillDerivedStatus);
         return Result.ok(devices);
     }
