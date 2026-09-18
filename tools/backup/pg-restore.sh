@@ -1,5 +1,5 @@
 #!/bin/bash
-# PostgreSQL 恢复（《双人分工实施方案v2》§9 验收第 8 条：备份恢复）。
+# PostgreSQL 恢复（对应验收第 8 条：备份恢复）。
 #
 #   tools/backup/pg-restore.sh backups/monitor-20260914-120000.sql
 #   tools/backup/pg-restore.sh --latest              # 用 backups/ 里最新的那份

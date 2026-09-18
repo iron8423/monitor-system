@@ -8,8 +8,7 @@
 > 需求基线：[`docs/通用多传感监测管理系统_需求分析与开发指引_v1.0.md`](docs/通用多传感监测管理系统_需求分析与开发指引_v1.0.md)（唯一开发基线）
 > 数据接入契约：[`docs/message-contract.md`](docs/message-contract.md)（M0 冻结 · 唯一事实源）
 > 接口契约：[`docs/B侧接口契约_M0.md`](docs/B侧接口契约_M0.md)
-> 进展沿革（历史决策、证据与各处「更正」）：[`docs/项目进展沿革_20260917.md`](docs/项目进展沿革_20260917.md)
-> 未完成事项：[`docs/monitor-system_系统完善与改进清单.md`](docs/monitor-system_系统完善与改进清单.md)（50 条现状对账）· [`docs/后续阶段工作清单_A_v1.md`](docs/后续阶段工作清单_A_v1.md)
+> 现状与待办：[`docs/全项目功能与工具复查清单_20260918.md`](docs/全项目功能与工具复查清单_20260918.md)（32 条：P0 6 / P1 14 / P2 12）· [`docs/monitor-system_系统完善与改进清单.md`](docs/monitor-system_系统完善与改进清单.md)（更早的 55 条对账，留作历史）
 
 ## 快速开始
 
@@ -185,7 +184,6 @@ tools/backup/selftest.sh                      # 实测一遍整条链（需要 c
 | [`docs/通用多传感监测管理系统_需求分析与开发指引_v1.0.md`](docs/通用多传感监测管理系统_需求分析与开发指引_v1.0.md) | 唯一开发基线：范围、角色、领域模型、验收口径 |
 | [`docs/message-contract.md`](docs/message-contract.md) | 雷达标准消息契约（M0 冻结 · 唯一事实源） |
 | [`docs/B侧接口契约_M0.md`](docs/B侧接口契约_M0.md) | 接口 / 字段 / 枚举现行事实源 |
-| [`docs/项目进展沿革_20260917.md`](docs/项目进展沿革_20260917.md) | 2026-09-09 → 09-17 的进展、决策与证据（原 README「当前进度」全文） |
 | [`docs/monitor-system_系统完善与改进清单.md`](docs/monitor-system_系统完善与改进清单.md) | 50 条现状对账（已修复 / 部分完成 / 未动），每条带文件行号证据 |
 | [`docs/手动验证步骤_第14-16-17-18-19条_20260917.md`](docs/手动验证步骤_第14-16-17-18-19条_20260917.md) | 脚本层测不到的人工验证步骤 |
 | [`docs/3D数字孪生_V2双雷达标定与验收.md`](docs/3D数字孪生_V2双雷达标定与验收.md) | 双雷达标定的接口与验收口径 |
@@ -193,12 +191,10 @@ tools/backup/selftest.sh                      # 实测一遍整条链（需要 c
 | [`docs/全项目功能与工具复查清单_20260918.md`](docs/全项目功能与工具复查清单_20260918.md) | 全项目复查：32 条逻辑/缺口问题（P0 6 / P1 14 / P2 12），每条带证据与建议，并与旧清单对账 |
 | [`docs/真实数据接入与三维建模全流程_雷达与无人机航测_20260918.md`](docs/真实数据接入与三维建模全流程_雷达与无人机航测_20260918.md) | 真雷达 + 无人机航测：原始数据、转换原理、建模流程与交付/验收清单 |
 | [`tools/terrain_asset/README.md`](tools/terrain_asset/README.md) | 地形资产流水线用法：抓取数据、生成 GLB、出迁移草稿、接航测成果 |
-| [`docs/双人分工实施方案v2.md`](docs/双人分工实施方案v2.md) | 分工与里程碑（历史稿见 `docs/archive/`） |
-| [`docs/README_文档管理说明.md`](docs/README_文档管理说明.md) | 文档版本约定与归档规则 |
 
 ## 协作约定
 
-- 单仓库 monorepo；`main`（保护）+ `feature/<模块>` 分支 + PR；每日工作日志当天提交到 `docs/daily/`。
+- 单仓库 monorepo；`main`（保护）+ `feature/<模块>` 分支 + PR。
 - schema/seed 由 A 统一维护（要改走新版本号迁移，不与他人同改既有迁移文件）。
 - 行尾 LF（`.gitattributes`）；UTF-8；相对路径；Linux 用 `./mvnw`、Windows 用 `mvnw.cmd`。
 - ingest 鉴权：请求头 `X-Ingest-Key`（dev 默认 `dev-ingest-key`，env `MONITOR_INGEST_KEY` 覆盖）；SSE 与影像内容用 `?token=<JWT>`（这两处浏览器发不出自定义头，是浏览器限制不是选择）。

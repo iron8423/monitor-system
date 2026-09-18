@@ -1,5 +1,5 @@
 #!/bin/bash
-# PostgreSQL 备份（《双人分工实施方案v2》§9 验收第 8 条：备份恢复）。
+# PostgreSQL 备份（对应验收第 8 条：备份恢复）。
 #
 #   tools/backup/pg-backup.sh                 # 只备数据库 -> backups/monitor-<时间戳>.sql
 #   tools/backup/pg-backup.sh --with-media    # 连附件卷一起备 -> 再加 backups/media-<时间戳>.tgz
