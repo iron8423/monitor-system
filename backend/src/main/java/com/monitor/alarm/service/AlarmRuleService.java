@@ -7,7 +7,9 @@ import com.monitor.alarm.entity.AlarmRule;
 import com.monitor.alarm.mapper.AlarmRuleMapper;
 import com.monitor.common.exception.BizException;
 import com.monitor.project.entity.MonitorPoint;
+import com.monitor.project.entity.Project;
 import com.monitor.project.mapper.MonitorPointMapper;
+import com.monitor.project.mapper.ProjectMapper;
 import com.monitor.scope.service.DataScopeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,12 @@ import java.util.stream.Collectors;
  * <p>{@code type} 目前只接受 {@code THRESHOLD}：速率类告警可用雷达已上报的 {@code rate_mm_d}
  * 测项配 {@code THRESHOLD} 规则覆盖，无需引擎另算窗口速率（两个口径会打架）。
  * {@code CHANGE}（窗口内变化量）无测项可替代，待有明确需求并定下语义后再实现。</p>
+ *
+ * <p><b>作用域（V22）</b>：{@code pointId} 非空 = 该测点专属；否则 {@code projectId} 非空 =
+ * 该项目下所有测点；两者都空 = 全局。全局档在多场景（V20 起）是**危险默认值**——
+ * 一套 ±3mm 会同时套到桥梁、路基与储罐基础上，阈值只对上了量纲、没对上结构，
+ * 所以接口层不再把"没给作用域"当成一件理所当然的事：它仍然可用（老客户端兼容），
+ * 但要在管理端明确选"全部项目"才写得出来，读回来也能一眼看出。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -36,6 +44,7 @@ public class AlarmRuleService {
 
     private final AlarmRuleMapper ruleMapper;
     private final MonitorPointMapper pointMapper;
+    private final ProjectMapper projectMapper;
     private final DataScopeService dataScope;
 
     /**
@@ -57,11 +66,17 @@ public class AlarmRuleService {
         Map<Long, String> codes = pointIds.isEmpty() ? Map.of()
                 : pointMapper.selectByIds(pointIds).stream()
                         .collect(Collectors.toMap(MonitorPoint::getId, MonitorPoint::getCode, (x, y) -> x));
+        Set<Long> projectIds = rules.stream().map(AlarmRule::getProjectId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, String> projectNames = projectIds.isEmpty() ? Map.of()
+                : projectMapper.selectByIds(projectIds).stream()
+                        .collect(Collectors.toMap(Project::getId, Project::getName, (x, y) -> x));
 
         List<AlarmRuleVO> vos = new ArrayList<>(rules.size());
         for (AlarmRule r : rules) {
             AlarmRuleVO vo = toVO(r);
             vo.setPointCode(r.getPointId() == null ? null : codes.get(r.getPointId()));
+            vo.setProjectName(r.getProjectId() == null ? null : projectNames.get(r.getProjectId()));
             vos.add(vo);
         }
         return vos;
@@ -139,11 +154,30 @@ public class AlarmRuleService {
         if (req.getLevel() != null && !LEVELS.contains(req.getLevel().toLowerCase())) {
             throw new BizException("level 仅支持 notice / warning / alarm: " + req.getLevel());
         }
+
+        // 作用域校验（V22）：引用必须存在，且两者同时给出时不能互相矛盾。
+        // 不做静默纠正（如"按测点自动改项目"）：调用方以为规则建在 A 上、实际落在 B 上，
+        // 是比 400 难查得多的错误——阈值错了要等下一次越限才发现。
+        MonitorPoint point = req.getPointId() == null ? null : pointMapper.selectById(req.getPointId());
+        if (req.getPointId() != null && point == null) {
+            throw new BizException("测点不存在: " + req.getPointId());
+        }
+        if (req.getProjectId() != null && projectMapper.selectById(req.getProjectId()) == null) {
+            throw new BizException("项目不存在: " + req.getProjectId());
+        }
+        if (point != null && req.getProjectId() != null) {
+            Long actual = pointMapper.selectProjectIdOfPoint(point.getId());
+            if (!req.getProjectId().equals(actual)) {
+                throw new BizException("测点 " + point.getCode() + " 不属于项目 " + req.getProjectId()
+                        + "（实际归属：" + (actual == null ? "无" : actual) + "）；点专属规则不需要再给项目作用域");
+            }
+        }
     }
 
     private void apply(AlarmRule rule, AlarmRuleRequest req) {
         rule.setName(req.getName());
         rule.setPointId(req.getPointId());
+        rule.setProjectId(req.getProjectId());
         rule.setMetricCode(req.getMetricCode());
         rule.setRuleType(req.getType() == null ? "THRESHOLD" : req.getType().toUpperCase());
         rule.setOperator(req.getOperator() == null ? "gte" : req.getOperator().toLowerCase());
@@ -169,6 +203,10 @@ public class AlarmRuleService {
             MonitorPoint p = pointMapper.selectById(rule.getPointId());
             vo.setPointCode(p == null ? null : p.getCode());
         }
+        if (rule.getProjectId() != null) {
+            Project p = projectMapper.selectById(rule.getProjectId());
+            vo.setProjectName(p == null ? null : p.getName());
+        }
         return vo;
     }
 
@@ -177,6 +215,7 @@ public class AlarmRuleService {
         vo.setId(r.getId());
         vo.setName(r.getName());
         vo.setPointId(r.getPointId());
+        vo.setProjectId(r.getProjectId());
         vo.setMetricCode(r.getMetricCode());
         vo.setType(r.getRuleType());
         vo.setOperator(r.getOperator());

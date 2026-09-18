@@ -288,13 +288,29 @@ try {
   // ── ⑤ 回放取数规模（清单第 18 条）────────────────────────────
   const { pickGranularity, mapWithLimit, splitWindow } = await server.ssrLoadModule('/src/stores/replay.js')
 
-  check('粒度：7 点看 24 小时 → 原始点', pickGranularity(24, 7) === 'raw')
+  // P0-3：raw 有 5000 点硬上限（后端 SeriesWindowPolicy），生产 5 秒采样下约 6 小时。
+  // 所以"24 小时以内都取原始点"这条旧口径已经不成立——24 小时 @7 点 = 12 万行，
+  // 单点就是 1.7 万行，接口会 400、曲线整条消失。
+  check('粒度：单点 6 小时 → 原始点（4320 行，刚好在上限内）', pickGranularity(6, 1) === 'raw')
+  check('粒度：单点 24 小时 → 按小时（1.7 万行超 raw 上限，必须降采）', pickGranularity(24, 1) === 'hour')
+  check('粒度：7 点看 24 小时 → 按小时（P0-3 之后不再取原始点）', pickGranularity(24, 7) === 'hour')
   check('粒度：7 点看 7 天 → 按小时（raw 是 84 万行）', pickGranularity(168, 7) === 'hour')
   check('粒度：1000 点看 24 小时 → 按小时（**点数必须一起算**，只看窗口就会在这里崩）',
     pickGranularity(24, 1000) === 'hour')
   check('粒度：1000 点看 30 天 → 按天', pickGranularity(720, 1000) === 'day')
   check('粒度：零窗口不抛也不误判，单点不被无故降采样',
-    pickGranularity(0, 1) === 'raw' && pickGranularity(24, 1) === 'raw')
+    pickGranularity(0, 1) === 'raw' && pickGranularity(1, 1) === 'raw')
+
+  // 前端与后端的上限必须是同一个数（两边各写一份是为了不跨进程共享常量，
+  // 但一旦漂移，表现是"前端以为能取 raw、后端 400"，所以这条绊线放在这里）。
+  const { MAX_RAW_POINTS, RAW_SAFE_WINDOW_HOURS, rawFitsInLimit, autoGranularity } =
+    await server.ssrLoadModule('/src/utils/seriesGranularity.js')
+  check('上限口径：raw 上限与后端一致（5000 点 / 720 行每小时）', MAX_RAW_POINTS === 5000)
+  check('上限口径：安全窗口 = 6 小时', RAW_SAFE_WINDOW_HOURS === 6)
+  check('上限口径：边界两侧（6h 放行 / 7h 不放行）',
+    rawFitsInLimit(6) === true && rawFitsInLimit(7) === false)
+  check('上限口径：autoGranularity 只在这两档之间切换',
+    autoGranularity(1) === 'raw' && autoGranularity(24) === 'hour')
 
   {
     let peak = 0

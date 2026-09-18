@@ -180,9 +180,32 @@ const TABS = [
     key: 'alarm-rules',
     label: '告警规则',
     path: '/v1/alarm-rules',
+    /**
+     * 显式列（与「用户」页签同理）：规则的作用域现在有三个维度
+     * （项目名 / 点号 / 都为空），自动取前 8 个键会把 value、level 这些
+     * 真正要看的阈值列挤掉，只剩一串 id。
+     */
+    columns: [
+      { key: 'id', label: 'ID' },
+      { key: 'name', label: '规则名称' },
+      { key: 'projectName', label: '适用项目' },
+      { key: 'pointCode', label: '适用测点' },
+      { key: 'metricCode', label: '测项' },
+      { key: 'operator', label: '比较' },
+      { key: 'value', label: '阈值' },
+      { key: 'level', label: '等级' },
+      { key: 'enabled', label: '启用' },
+    ],
     fields: [
       { key: 'name', label: '规则名称', required: true },
-      { key: 'pointId', label: '适用测点', type: 'ref', ref: 'points', hint: '留空 = 全局规则' },
+      { key: 'pointId', label: '适用测点', type: 'ref', ref: 'points', hint: '留空 = 按下面的项目作用域' },
+      {
+        key: 'projectId',
+        label: '适用项目',
+        type: 'ref',
+        ref: 'projects',
+        hint: '留空且未选测点 = 全局规则（所有项目共用这套阈值，慎用）',
+      },
       { key: 'metricCode', label: '测项', type: 'ref', ref: 'metricCodes', required: true },
       { key: 'type', label: '规则类型', type: 'select', options: ['THRESHOLD'], default: 'THRESHOLD' },
       { key: 'operator', label: '比较方式', type: 'select', options: ['gte', 'lte'], default: 'gte', required: true },

@@ -2,6 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { opsConfig, opsMigrations, opsStats, opsStatus } from '@/api/ops'
+import { listProjects, projectDigitalTwin } from '@/api/monitor'
+import { useIntegrityStore } from '@/stores/integrity'
+import { HASH_TEXT, isHashProblem } from '@/utils/assetHash'
 import { formatNumber, formatTime, fromNow } from '@/utils/format'
 
 /**
@@ -27,6 +30,54 @@ const migrations = ref(null)
 const stats = ref(null)
 const config = ref(null)
 const loadedAt = ref('')
+const projectNames = ref({})
+
+/**
+ * 资产哈希核对（复查清单 P0-5）。
+ *
+ * 核对本身在浏览器里做（模型文件是前端静态资源，后端进程读不到），结果存 integrity store。
+ * 大屏加载模型时也会往同一个 store 里写——两处读同一份结论，避免"大屏报红、运维页说正常"。
+ *
+ * 这里**额外**做一件大屏不做的事：把全部启用了数字孪生的项目都核一遍。
+ * 大屏只核对当前选中的那一个，值班员不切项目就永远不知道另一份资产有没有被动过。
+ */
+const integrity = useIntegrityStore()
+const assetLoading = ref(false)
+const assetError = ref('')
+
+const assetRows = computed(() =>
+  integrity.results.map((r) => ({
+    ...r,
+    projectName: projectNames.value[r.projectId] || `项目 ${r.projectId}`,
+    statusText: HASH_TEXT[r.status] || r.status,
+  })),
+)
+
+const assetSummary = computed(() => {
+  const rows = assetRows.value
+  if (!rows.length) return '尚未核对'
+  const bad = rows.filter((r) => isHashProblem(r.status)).length
+  const ok = rows.filter((r) => r.status === 'ok').length
+  return bad > 0 ? `${bad} 项需要处理（共核对 ${rows.length} 项）` : `全部一致（${ok}/${rows.length}）`
+})
+
+/** 拉全部项目 → 逐个取场景配置 → 只核对启用中的 GLB（3D Tiles 见 utils/assetHash 的说明）。 */
+async function checkAssets() {
+  assetLoading.value = true
+  assetError.value = ''
+  try {
+    const projects = await listProjects()
+    projectNames.value = Object.fromEntries((projects || []).map((p) => [p.id, p.name]))
+    const cfgs = await Promise.all(
+      (projects || []).map((p) => projectDigitalTwin(p.id).catch(() => null)),
+    )
+    await integrity.verifyAll(cfgs.filter((c) => c?.enabled && c?.assetUrl))
+  } catch (e) {
+    assetError.value = e?.message || '资产核对失败'
+  } finally {
+    assetLoading.value = false
+  }
+}
 
 const uptimeText = computed(() => {
   const seconds = status.value?.uptimeSeconds
@@ -121,7 +172,12 @@ async function load() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  // 资产核对与运维信息并行：它要下载几个 MB 的模型，不该拖住首屏那几个数字。
+  // 失败也不算页面错误——上面那张卡片自己会写清楚。
+  checkAssets()
+})
 </script>
 
 <template>
@@ -169,6 +225,55 @@ onMounted(load)
         <div class="tile-label">实时推送连接</div>
         <div class="tile-value">{{ status?.sseClients ?? '—' }}</div>
         <div class="tile-sub">数据库连接池 {{ status?.pool?.active ?? '—' }}/{{ status?.pool?.max ?? '—' }} 在用</div>
+      </div>
+    </div>
+
+    <div class="mk-panel">
+      <div class="mk-panel-title">
+        资产哈希核对
+        <span class="mk-spacer" />
+        <span class="mk-muted title-sub">{{ assetSummary }}</span>
+        <el-button size="small" link type="primary" :loading="assetLoading" @click="checkAssets">
+          全部核对
+        </el-button>
+      </div>
+      <el-alert
+        v-if="assetError"
+        class="ops-alert"
+        type="error"
+        :title="assetError"
+        :closable="false"
+        show-icon
+      />
+      <el-table :data="assetRows" size="small" class="ops-table">
+        <el-table-column prop="projectName" label="项目" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="assetUrl" label="资产" min-width="240" show-overflow-tooltip />
+        <el-table-column label="状态" width="220">
+          <template #default="{ row }">
+            <el-tag :type="isHashProblem(row.status) ? 'danger' : (row.status === 'ok' ? 'success' : 'info')" size="small">
+              {{ row.statusText }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="登记 / 实测" min-width="240">
+          <template #default="{ row }">
+            <span class="mk-mono">
+              {{ row.expected ? row.expected.slice(0, 12) : '—' }}
+              /
+              {{ row.actual ? row.actual.slice(0, 12) : '—' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="核对时间" width="170">
+          <template #default="{ row }">{{ row.checkedAt ? formatTime(row.checkedAt) : '—' }}</template>
+        </el-table-column>
+        <el-table-column label="说明" min-width="200">
+          <template #default="{ row }">{{ row.error || `${row.bytes ? formatNumber(row.bytes) + ' 字节' : ''}` }}</template>
+        </el-table-column>
+      </el-table>
+      <div class="ops-hint">
+        核对在浏览器里做：模型文件是前端静态资源，后端进程读不到；比对的是本机此刻加载到的那一份
+        与数据库登记的 asset_sha256。不一致说明盘上的模型与平台记录不是同一份，先确认哪一个是权威值。
       </div>
     </div>
 
@@ -305,6 +410,14 @@ onMounted(load)
   gap: 10px;
   padding: 10px 16px 0;
   font-size: 12px;
+}
+
+/* 表格下方的口径说明：这页的每个数字都可能被误读，所以宁可多一句解释 */
+.ops-hint {
+  padding: 10px 16px 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--mk-text-sub);
 }
 
 .doc-link {

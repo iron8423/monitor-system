@@ -78,7 +78,8 @@ public class SecurityConfig {
                     // 注册与登录同属「还没有会话时就要能调」的入口；
                     // 注意 /auth/me 与 /auth/password **不在**这里——它们是「我的资料/口令」，
                     // 必须有有效会话，放行就等于谁都能改别人。
-                    .requestMatchers("/api/v1/health", "/api/v1/auth/login", "/api/v1/auth/logout",
+                    .requestMatchers("/api/v1/health", "/api/v1/health/ready",
+                            "/api/v1/auth/login", "/api/v1/auth/logout",
                             "/api/v1/auth/register").permitAll()
                     // ingest 免 JWT（无网关，改用 X-Ingest-Key 共享密钥，见 IngestKeyFilter）
                     .requestMatchers("/api/v1/ingest/**").permitAll();

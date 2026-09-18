@@ -14,6 +14,9 @@ public class AlarmRuleVO {
     private String name;
     private Long pointId;
     private String pointCode;
+    /** 项目作用域（V22）；与 {@code pointId} 同时为空表示全局规则。 */
+    private Long projectId;
+    private String projectName;
     private String metricCode;
     private String type;
     private String operator;

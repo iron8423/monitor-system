@@ -208,10 +208,24 @@ check "outsider 直达种子测点 1 的 latest -> 403" "403" \
   "$(http_code "$BASE/points/1/latest" -H "$OUT_AUTH")"
 check "outsider 直达种子设备 1 的状态 -> 403" "403" \
   "$(http_code "$BASE/devices/1/status" -H "$OUT_AUTH")"
-# 刻意的例外：全局告警规则（point_id 为空）对所有登录用户可见。
-# 规则本体不含项目业务数据（只有阈值与等级），而「为什么报警」不该对看得见警情的人保密。
-check "outsider 仍看得到全局告警规则（例外）" "true" \
-  "$(curl -s "$BASE/alarm-rules" -H "$OUT_AUTH" | any_of)"
+# 规则可见性（V22 起按作用域分三组，见 DataScopeService.alarmRuleFilter）：
+#   · 全局规则（point_id 与 project_id 都为空）对所有登录用户可见——它同时作用于所有项目，
+#     值班员看不到规则就无从解释「为什么报警」，而规则本体只有阈值与等级，不含项目业务数据；
+#   · 项目规则随项目可见性、点专属规则随测点可见性。
+# V22 把三条种子规则绑到了项目 1，所以 outsider 现在应当**一条都看不到**。
+check "outsider 看不到绑定项目的种子规则" "0" \
+  "$(curl -s "$BASE/alarm-rules" -H "$OUT_AUTH" | count_of)"
+# 全局例外不能因为上面那条断言失去覆盖：临时建一条真正的全局规则（项目/测点都不给），
+# outsider 必须看得到**且只看得到它**——否则说明项目档的可见性过滤漏给了（V22 之前
+# 所有规则都是全局的，这个漏洞不会被任何断言发现）。
+GRID=$(curl -s -X POST "$BASE/alarm-rules" -H "$AUTH" -H "$JSON" \
+  -d "{\"name\":\"隔离验收全局规则-$RUN_ID\",\"metricCode\":\"rate_mm_d\",\"type\":\"THRESHOLD\",\"operator\":\"gte\",\"value\":99.0,\"level\":\"notice\",\"enabled\":true}" \
+  | data_of "['id']")
+check "outsider 看得到全局例外规则，且只有这一条（$GRID）" "$GRID" \
+  "$(curl -s "$BASE/alarm-rules" -H "$OUT_AUTH" | python3 -c "import sys,json; rs=json.load(sys.stdin)['data']; print(rs[0]['id'] if len(rs)==1 else '<共 %d 条>' % len(rs))")"
+curl -s -o /dev/null -X DELETE "$BASE/alarm-rules/$GRID" -H "$AUTH"
+check "删掉全局规则后 outsider 又看不到任何规则" "0" \
+  "$(curl -s "$BASE/alarm-rules" -H "$OUT_AUTH" | count_of)"
 
 section "⑥ 警情：两条来源都要滤（B-14 的镜像）"
 # B-14 是「设备告警一条也数不进来」（少算），这里是反向的「一条都不该多给」。
@@ -228,7 +242,21 @@ check "两个临时测点都建出来了" "true" \
   "$([ "$(is_id "$P1")" = true ] && [ "$(is_id "$P2")" = true ] && echo true || echo false)"
 info "临时测点：项目 1 -> $P1（$CODE1），项目 2 -> $P2（$CODE2）"
 
-# 各灌一条超限值（全局规则 defo_mm >= 3mm，V2 种子），各自产生一条待确认警情。
+# 各灌一条超限值，各自产生一条待确认警情。
+# 规则作用域（V22）：种子的 ±3 / +5 已绑到**项目 1**，项目 2 的点必须自己有一条
+# 项目规则才会成警情——所以这里显式建一条，跑完即删。这同时是本套件想要的口径：
+# 两侧各有各的规则，警情归属只由「点属于哪个项目」决定。
+R2ID=$(curl -s -X POST "$BASE/alarm-rules" -H "$AUTH" -H "$JSON" \
+  -d "{\"name\":\"隔离验收项目2规则-$RUN_ID\",\"projectId\":$PRJ_B,\"metricCode\":\"defo_mm\",\"type\":\"THRESHOLD\",\"operator\":\"gte\",\"value\":3.0,\"level\":\"warning\",\"enabled\":true,\"repeatSuppressSeconds\":300}" \
+  | data_of "['id']")
+check "项目 2 临时规则已建（V22 作用域）" "true" "$(is_id "$R2ID")"
+# 第二条（更高等级）：§⑪ 会往项目 2 的点再灌一条 defo=5.5，它必须**升级**成 alarm 档
+# 才会再发一次 SSE 事件——同一测点同一测项只有一条未解除警情，没有更高档规则时
+# 第二条测值只会被既有警情吸收、什么事件都不发，负向断言就退化成"事件根本没发生"。
+R2BID=$(curl -s -X POST "$BASE/alarm-rules" -H "$AUTH" -H "$JSON" \
+  -d "{\"name\":\"隔离验收项目2升级规则-$RUN_ID\",\"projectId\":$PRJ_B,\"metricCode\":\"defo_mm\",\"type\":\"THRESHOLD\",\"operator\":\"gte\",\"value\":5.0,\"recoveryValue\":2.0,\"level\":\"alarm\",\"enabled\":true,\"repeatSuppressSeconds\":300}" \
+  | data_of "['id']")
+check "项目 2 升级规则已建" "true" "$(is_id "$R2BID")"
 # 幂等键含 messageId，故两个点的 messageId 必须不同——否则第二批整批判 DUPLICATE，
 # 而重复上报照样返回 HTTP 200，于是「警情没产生」会被误判成规则不生效。
 #
@@ -439,6 +467,10 @@ section "⑫ 回收：套件自己不留垃圾"
 # 顺序有讲究：**先删影像、再解绑、再结警情删设备/测点**。
 # 影像行挂在测点上，测点一软删它就成孤儿（同 lib.sh 里 recycle_point 那段说的问题）；
 # device_point 是硬删除、没有级联，不先解绑就会留下指向已删测点的悬空绑定行。
+# 临时规则（项目 2 那条）也一并删掉：本套件有一句「跑完不留自建规则」的同类断言传统
+# （04 套件末尾），留着它会让下次有人看到"多了一条规则"时误以为是自己建的。
+curl -s -o /dev/null -X DELETE "$BASE/alarm-rules/$R2ID" -H "$AUTH"
+curl -s -o /dev/null -X DELETE "$BASE/alarm-rules/$R2BID" -H "$AUTH"
 curl -s -o /dev/null -X DELETE "$BASE/media/$MID" -H "$AUTH"
 curl -s -o /dev/null -X DELETE "$BASE/devices/$DEV_ID/points/$P2" -H "$AUTH"
 recycle_device "$DEV_ID" "隔离验收临时设备"
@@ -449,5 +481,6 @@ check "回收后 admin 的测点数回到基线" "$ALL_P0" "$(curl -s "$BASE/poi
 check "回收后李敏的测点数回到基线" "$OP_P0" "$(curl -s "$BASE/points" -H "$OP_AUTH" | count_of)"
 check "回收后 admin 的项目数回到基线" "$ALL_PRJ0" "$(curl -s "$BASE/projects" -H "$AUTH" | count_of)"
 check "回收后李敏的设备数回到基线" "$OP_D0" "$(curl -s "$BASE/devices" -H "$OP_AUTH" | count_of)"
+check "回收后自建规则已清空（只剩种子 3 条）" "3" "$(curl -s "$BASE/alarm-rules" -H "$AUTH" | count_of)"
 
 summary

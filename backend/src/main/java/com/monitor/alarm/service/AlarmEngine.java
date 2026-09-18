@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -140,14 +141,41 @@ public class AlarmEngine {
     }
 
     /**
-     * 该测点该测项下启用中的规则：**全局规则**（{@code point_id} 为空）与**该测点专属规则**的并集。
-     * <p>全局规则会按测点各自成警情，所以这里必须按点过滤而不能只看规则——只看规则就看不见升级了。</p>
+     * 该测点该测项下启用中的规则：全局规则 / 本项目规则 / 该测点专属规则的并集。
+     *
+     * <p>V22 起规则有项目作用域，三档的匹配顺序是：点档（{@code point_id} 非空）按点命中、
+     * 项目档（{@code point_id} 空、{@code project_id} 非空）按测点归属的项目命中、
+     * 两列都空是全局档（兼容 V22 之前的种子形状）。</p>
+     *
+     * <p><b>为什么先查规则、再按需解析归属</b>：项目档与全局档在 {@code point_id} 上都是 NULL，
+     * 所以那条查询天然把两者一起取回来；只有在候选里**确实出现**了项目档规则时才需要知道
+     * "这个测点属于哪个项目"。绝大多数部署里没有项目档规则（或该测项没有），
+     * 于是这条热路径的查询数与 V22 之前完全一致，多出来的那条单行 JOIN
+     * （{@link MonitorPointMapper#selectProjectIdOfPoint}）是可解释的、按需付出的代价。</p>
+     *
+     * <p><b>归属解析不出来时按"只匹配全局档"处理</b>：测点不存在、对象/场景被软删、
+     * 项目列为空——这些情况下没有任何依据说这个测点属于哪个项目，
+     * 于是项目档规则一律不参与。方向是 fail-closed：宁可少报（并留下可查的档案异常），
+     * 也不要把甲项目的阈值套到乙项目的测点上。</p>
      */
     private List<AlarmRule> enabledRulesFor(Long pointId, String metricCode) {
-        return ruleMapper.selectList(new LambdaQueryWrapper<AlarmRule>()
+        List<AlarmRule> candidates = ruleMapper.selectList(new LambdaQueryWrapper<AlarmRule>()
                 .eq(AlarmRule::getEnabled, true)
                 .eq(AlarmRule::getMetricCode, metricCode)
                 .and(w -> w.isNull(AlarmRule::getPointId).or().eq(AlarmRule::getPointId, pointId)));
+        if (candidates.stream().noneMatch(r -> r.getProjectId() != null)) {
+            return candidates;
+        }
+        Long projectId = pointMapper.selectProjectIdOfPoint(pointId);
+        List<AlarmRule> matched = new ArrayList<>(candidates.size());
+        for (AlarmRule r : candidates) {
+            if (r.getPointId() != null) {
+                matched.add(r);                                  // 点档：projectId 只是档案，不参与匹配
+            } else if (r.getProjectId() == null || r.getProjectId().equals(projectId)) {
+                matched.add(r);                                  // 全局档 / 命中归属的项目档
+            }
+        }
+        return matched;
     }
 
     /**

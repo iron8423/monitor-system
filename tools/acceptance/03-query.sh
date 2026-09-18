@@ -31,8 +31,11 @@ check_contains "position 来自 attributes" "angleDeg" "$(printf '%s' "$LAT" | p
 import sys,json;print(json.load(sys.stdin)['data']['latest'].get('position'))")"
 check "signal 来自 attributes" "0.9" "$(printf '%s' "$LAT" | data_of "['latest']['signal']")"
 
-section "③ series 默认 defo_mm / raw：应恰好 3 点，值 1/2/3"
-SER=$(curl -s "$BASE/points/$PID/series" -H "$AUTH")
+section "③ series 默认 defo_mm / raw：显式窗口取回 3 点，值 1/2/3"
+# 显式给窗口（P0-3 之后不传窗口只取近 24 小时，而本套件的造数在 2026-08-25~27，
+# 早已滑出默认窗口——那是**刻意的**，默认窗口的口径在下一节单独断言）。
+WIN="from=2026-08-24T00:00:00%2B08:00&to=2026-08-28T00:00:00%2B08:00"
+SER=$(curl -s "$BASE/points/$PID/series?$WIN" -H "$AUTH")
 check "默认 metricCode" "defo_mm" "$(printf '%s' "$SER" | data_of "['metricCode']")"
 check "点数" "3" "$(printf '%s' "$SER" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")"
 check "值序列（升序）" "[1.0, 2.0, 3.0]" "$(printf '%s' "$SER" | python3 -c "
@@ -40,13 +43,34 @@ import sys,json;print([p['v'] for p in json.load(sys.stdin)['data']['points']])"
 check_contains "t 为 ISO8601 带 +08:00" "+08:00" \
   "$(printf '%s' "$SER" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['points'][0]['t'])")"
 
-section "④ 分桶 hour / day：3 天 3 条 -> 各 3 桶"
+section "④ 默认时间窗（P0-3）：不传 from/to 只取近 24 小时，且窗口回显出来"
+# 这一节钉的是「series 不再默认返回全历史」：改造前 from/to 全省略时**条件整条消失**，
+# 等于把该测点全部历史拉进内存。生产基线 1000 点 × 5 秒，一次误调用就能把 JVM 撑爆。
+DEF=$(curl -s "$BASE/points/$PID/series" -H "$AUTH")
+check "不传窗口 -> 0 点（本套件数据在三周前，落在默认窗口之外）" "0" \
+  "$(printf '%s' "$DEF" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")"
+check "回显 windowDefaulted=true" "True" "$(printf '%s' "$DEF" | data_of "['windowDefaulted']")"
+check "默认窗口跨度恰好 24 小时" "86400" "$(printf '%s' "$DEF" | python3 -c "
+import sys,json,re,datetime
+def p(s): return datetime.datetime.fromisoformat(re.sub(r'\.\d+','',s))
+d=json.load(sys.stdin)['data']
+print(int((p(d['to'])-p(d['from'])).total_seconds()))")"
+# 只给一端也不能变回全历史：只给 from 时上界取 **now**（本例正好罩住 3 条造数），
+# 只给 to 时下界取 to-24h（给到 08-28 就只罩 08-27，恰好 1 点）。
+check "只给 from=08-24 -> 上界补到 now，命中 3 点" "3" \
+  "$(curl -s "$BASE/points/$PID/series?from=2026-08-24T00:00:00%2B08:00" -H "$AUTH" \
+     | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")"
+check "只给 to=08-28 -> 下界 to-24h，命中 08-27 那 1 点" "1" \
+  "$(curl -s "$BASE/points/$PID/series?to=2026-08-28T00:00:00%2B08:00" -H "$AUTH" \
+     | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")"
+
+section "⑤ 分桶 hour / day：3 天 3 条 -> 各 3 桶（聚合已下沉到 SQL）"
 for g in hour day; do
-  check "granularity=$g 桶数" "3" "$(curl -s "$BASE/points/$PID/series?granularity=$g" -H "$AUTH" \
+  check "granularity=$g 桶数" "3" "$(curl -s "$BASE/points/$PID/series?$WIN&granularity=$g" -H "$AUTH" \
     | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")"
 done
 
-section "⑤ from/to 三种时间写法都应接受"
+section "⑥ from/to 三种时间写法都应接受"
 while IFS='|' read -r q label; do
   check "$label" "3" "$(curl -s "$BASE/points/$PID/series?$q" -H "$AUTH" \
     | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")"
@@ -56,23 +80,31 @@ from=2026-08-25T00:00:00&to=2026-08-28T00:00:00|ISO8601 本地时间
 from=2026-08-25%2000:00:00&to=2026-08-28%2000:00:00|空格分隔
 EOF
 
-section "⑥ 窗口收敛：只取 26 日 -> 1 点"
+section "⑦ 窗口收敛：只取 26 日 -> 1 点"
 check "from/to 命中 1 点" "1" "$(curl -s "$BASE/points/$PID/series?from=2026-08-26T00:00:00%2B08:00&to=2026-08-26T23:59:59%2B08:00" -H "$AUTH" \
   | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")"
 
-section "⑦ 单位口径（种子测点 6 有档案 metric 行）"
+section "⑧ 单位口径（种子测点 6 有档案 metric 行）"
 check "rate_mm_d 单位" "mm/d" "$(curl -s "$BASE/points/6/series?metricCode=rate_mm_d" -H "$AUTH" | data_of "['unit']")"
 check "defo_mm 单位" "mm" "$(curl -s "$BASE/points/6/series" -H "$AUTH" | data_of "['unit']")"
 info "注：档案取到的单位与兜底值恰好同值，此条只验口径一致，不区分来源"
 
-section "⑧ 入参校验与错误码"
+section "⑨ 入参校验与错误码"
 check "非法时间 -> 400" "400" "$(http_code "$BASE/points/$PID/series?from=not-a-time" -H "$AUTH")"
 check "非法 granularity -> 400" "400" "$(http_code "$BASE/points/$PID/series?granularity=week" -H "$AUTH")"
+# 跨度上限（P0-3）：31 天放行、31 天零 1 秒拒收。上限存在的理由与默认窗口同源——
+# 它挡的是"一次查询把整段历史搬进 JVM"，而不是某一种调用姿势。
+check "跨度 31 天 -> 200" "200" \
+  "$(http_code "$BASE/points/$PID/series?from=2026-07-28T00:00:00%2B08:00&to=2026-08-28T00:00:00%2B08:00" -H "$AUTH")"
+check "跨度 31 天零 2 秒 -> 400" "400" \
+  "$(http_code "$BASE/points/$PID/series?from=2026-07-27T23:59:58%2B08:00&to=2026-08-28T00:00:00%2B08:00" -H "$AUTH")"
+check "from 晚于 to -> 400" "400" \
+  "$(http_code "$BASE/points/$PID/series?from=2026-08-28T00:00:00%2B08:00&to=2026-08-27T00:00:00%2B08:00" -H "$AUTH")"
 check "不存在测点 latest -> 404" "404" "$(http_code "$BASE/points/99999/latest" -H "$AUTH")"
 check "不存在测点 series -> 404" "404" "$(http_code "$BASE/points/99999/series" -H "$AUTH")"
 check "无 JWT -> 401" "401" "$(http_code "$BASE/points/$PID/latest")"
 
-section "⑨ 同刻多行：latest 与 summary 必须取到同一行"
+section "⑩ 同刻多行：latest 与 summary 必须取到同一行"
 # 同一点、同一 collect_time、两次不同 messageId 的上报会落两行——幂等键是 device+message，
 # 不含 collect_time，所以这不是「重复上报」。此时「最新一行」必须只有一个判据，
 # 否则 /points/{id}/latest 与 /projects/{id}/summary 会各自取到不同行，同一测点两个值。
@@ -108,7 +140,7 @@ for r in "objects/$T_OBJ" "scenes/$T_SCN" "projects/$T_PRJ"; do
 done
 info "已回收临时项目链"
 
-section "⑩ 概览的最大形变只认 defo_mm，不是「所有测项里最大的那个」"
+section "⑪ 概览的最大形变只认 defo_mm，不是「所有测项里最大的那个」"
 # 这一条钉的是**刻意写死**的口径（契约 §3），不是待办。测项中立化那轮很容易顺手把
 # maxDeformation 也改成「扫全部测项」——那是错的，而且错得安静：KPI 被速率顶掉，
 # 数值仍然是个合理的数，没人会看出来。

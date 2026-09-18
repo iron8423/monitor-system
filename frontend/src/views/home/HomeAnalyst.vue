@@ -9,6 +9,7 @@ import StatTiles from '@/components/StatTiles.vue'
 import { usePolling } from '@/composables/usePolling'
 import { useThresholds } from '@/composables/useThresholds'
 import { createRequestGuard } from '@/utils/requestGuard'
+import { RAW_SAFE_WINDOW_HOURS } from '@/utils/seriesGranularity'
 
 /**
  * 研判工作台（研判员）。需求 §3 给研判员的定位是「看曲线/照片/现场，判断真假」——
@@ -24,6 +25,11 @@ import { createRequestGuard } from '@/utils/requestGuard'
  * 「看曲线判真假」还有个前提：曲线本身要可信。所以这里只画 `defo_mm` 原始点
  * （`granularity=raw`），不做任何聚合——聚合会磨平瞬时突跳，而突跳正是判断传感器
  * 异常还是真实形变的关键。
+ *
+ * **窗口因此必须跟着 raw 的上限走**（P0-3）：后端对 raw 单次最多 5000 点，
+ * 生产 5 秒采样下就是约 6 小时（见 `utils/seriesGranularity.js`）。不传窗口时后端默认给
+ * 近 24 小时，那个窗口在原始点上是 1.7 万行——直接 400、曲线整条空掉。所以这里显式取
+ * 最近 RAW_SAFE_WINDOW_HOURS 小时（研判看的是"最近有没有突跳"，这个长度够用）。
  */
 
 defineOptions({ name: 'HomeAnalyst' })
@@ -69,7 +75,12 @@ async function pick(row) {
   const pointId = row.pointId
   seriesLoading.value = true
   try {
-    const s = await api.pointSeries(pointId, { metricCode: 'defo_mm', granularity: 'raw' })
+    const s = await api.pointSeries(pointId, {
+      metricCode: 'defo_mm',
+      granularity: 'raw',
+      // 与后端的 raw 上限对齐（见 utils/seriesGranularity.js 的说明）
+      from: new Date(Date.now() - RAW_SAFE_WINDOW_HOURS * 3600 * 1000).toISOString(),
+    })
     if (!seriesGuard.isCurrent(token)) return
     series.value = s
   } catch {
@@ -229,7 +240,8 @@ const chartPoints = computed(() => series.value?.points || [])
         队列按状态取：研判员收 <span class="mk-mono">CONFIRMED</span>（已确认、待定性），
         研判动作 <span class="mk-mono">research</span> 之后转入
         <span class="mk-mono">OBSERVING</span>。曲线只画
-        <span class="mk-mono">defo_mm</span> 的原始点位并直接显示后端给的原始 ISO 时间——
+        <span class="mk-mono">defo_mm</span> 最近 {{ RAW_SAFE_WINDOW_HOURS }} 小时的原始点位
+        （后端的 raw 上限是 5000 点，5 秒采样下再长就取不到原始点了），直接显示后端给的原始 ISO 时间——
         不做聚合，聚合会磨平瞬时突跳，而突跳正是分辨「传感器异常」与「真实形变」的关键。
         阈值线取自 <span class="mk-mono">/alarm-rules</span>（与
         <span class="mk-mono">/points</span> 同一份实现

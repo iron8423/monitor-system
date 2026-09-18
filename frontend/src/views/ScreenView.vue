@@ -21,10 +21,12 @@ import MediaGallery from '@/components/MediaGallery.vue'
 import ThemeSwitch from '@/components/ThemeSwitch.vue'
 import { ALARM_LEVEL, resolvePointVisual } from '@/constants/status'
 import { useMonitorStore } from '@/stores/monitor'
+import { useIntegrityStore } from '@/stores/integrity'
 import { useRealtimeStore } from '@/stores/realtime'
 import { GRANULARITY_TEXT, REPLAY_RANGES, useReplayStore } from '@/stores/replay'
 import { useTheme } from '@/composables/useTheme'
 import { formatNumber, formatSigned, formatTime, fromNow } from '@/utils/format'
+import { HASH_TEXT, isHashProblem } from '@/utils/assetHash'
 import { frameProgress, indexFromProgress } from '@/utils/timeline'
 
 defineOptions({ name: 'ScreenView' })
@@ -66,6 +68,34 @@ const imageryState = ref('loading') // loading | ion | fallback | failed
 const mountainState = ref(LOCAL_SCENE_ENABLED ? 'loading' : 'skipped')
 const sceneConfig = ref(null)
 const sceneError = ref('')
+
+/**
+ * 资产哈希核对（P0-5）：加载模型时顺手算一遍 SHA-256，与库里登记的值比对。
+ * 结果存在 integrity store 里，运维页读的是同一份——两处不能各说各话。
+ */
+const integrity = useIntegrityStore()
+const assetCheck = computed(
+  () => (store.projectId ? integrity.byProject[store.projectId] || null : null),
+)
+const assetProblem = computed(
+  () => (assetCheck.value && isHashProblem(assetCheck.value.status) ? assetCheck.value : null),
+)
+const assetChipClass = computed(() => {
+  if (!assetCheck.value) return 'dim'
+  return isHashProblem(assetCheck.value.status) ? 'err' : 'ok'
+})
+const assetChipText = computed(() => (assetCheck.value ? HASH_TEXT[assetCheck.value.status] || '资产核对' : '资产未核对'))
+const assetChipTitle = computed(() => {
+  const r = assetCheck.value
+  if (!r) return '进入场景后自动核对模型 SHA-256'
+  return [
+    HASH_TEXT[r.status] || r.status,
+    `资产：${r.assetUrl}`,
+    r.expected ? `登记：${r.expected.slice(0, 16)}…` : '登记：无',
+    r.actual ? `实测：${r.actual.slice(0, 16)}…` : '',
+    r.error ? `错误：${r.error}` : '',
+  ].filter(Boolean).join('\n')
+})
 const activeRadarId = ref(null)
 
 /** 跟随测点的浮窗 */
@@ -356,6 +386,9 @@ async function loadProjectScene(projectId) {
       findSceneAlternate(projectId, generation)
       return null
     }
+    // 资产哈希核对（P0-5）与模型加载并行：核对只是"报一条"，
+    // 既不该拖慢首屏，也不该拦住场景——模型真坏了也要先把现场显示出来。
+    integrity.verify(config).catch(() => {})
     const scene = await createDigitalTwinScene(viewer, config)
     if (generation !== sceneLoadGeneration) {
       scene.destroy()
@@ -627,6 +660,9 @@ onBeforeUnmount(() => {
           :class="mountainState === 'ok' ? 'ok' : mountainState === 'failed' ? 'err' : 'dim'"
           :title="sceneError || sceneDescription"
         >{{ MOUNTAIN_TEXT[mountainState] }}</span>
+        <!-- 资产哈希核对结果（P0-5）：模型与库里登记的那一份是不是同一个。
+             此前只有"加载成功/失败"这一档——加载成功、内容却已被替换，界面上一个字都不会说。 -->
+        <span class="chip" :class="assetChipClass" :title="assetChipTitle">资产 {{ assetChipText }}</span>
         <span v-if="!LOCAL_SCENE_ENABLED" class="chip" :class="terrainState === 'ok' ? 'ok' : 'dim'">{{ TERRAIN_TEXT[terrainState] }}</span>
         <span class="chip" :class="['ion', 'offline'].includes(imageryState) ? 'ok' : 'dim'">{{ IMAGERY_TEXT[imageryState] }}</span>
         <!-- 没配 token → 明说，别让人对着「无地形/兜底底图」猜自己少了什么 -->
@@ -658,6 +694,23 @@ onBeforeUnmount(() => {
         切到「{{ sceneAlternate.name }}」
       </button>
       <span v-else class="warn-desc">可在上方「项目」里切换其它项目。</span>
+    </section>
+
+    <!--
+      资产哈希不符（P0-5）：与"未配场景"分开说，因为这是**两条完全不同的处置建议**——
+      前者去管理端配资产，后者要么是资产被换过，要么是库里的登记值过期了。
+      展示上刻意不自动隐藏：它是"这台机器上看到的模型与平台记录不是同一份"这一事实，
+      不是一次可以刷过去的事件。
+    -->
+    <section v-if="assetProblem" class="hud asset-warn" role="alert">
+      <span class="warn-title">{{ HASH_TEXT[assetProblem.status] }}</span>
+      <span class="warn-desc">
+        资产 {{ assetProblem.assetUrl }}
+        <template v-if="assetProblem.expected"> · 登记 {{ assetProblem.expected.slice(0, 16) }}…</template>
+        <template v-if="assetProblem.actual"> · 实测 {{ assetProblem.actual.slice(0, 16) }}…</template>
+        <template v-if="assetProblem.error"> · {{ assetProblem.error }}</template>
+        —— 请先确认盘上的模型文件与数据库记录的 asset_sha256 哪一个是权威值。
+      </span>
     </section>
 
     <!-- 刚推来的告警：一闪而过的横幅，看一眼就知道「哪个点在报」 -->
@@ -971,6 +1024,37 @@ onBeforeUnmount(() => {
   font-size: 12px;
   line-height: 1.5;
   color: var(--mk-hud-muted);
+}
+
+/*
+  资产哈希不符（P0-5）：与「未配场景」同形（都是左上角一条），但颜色按"要处置"处理——
+  左边框与标题用告警红，而正文沿用 HUD 的次级文字色，避免整块发亮。
+  位置错开 62px 是因为两者理论上可能同时出现（场景加载成功、但哈希不符），
+  叠在一起会互相盖住。
+*/
+.asset-warn {
+  top: 112px;
+  left: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  max-width: 560px;
+  padding: 10px 14px;
+  border-color: rgba(245, 108, 108, 0.55);
+}
+
+.asset-warn .warn-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f56c6c;
+}
+
+.asset-warn .warn-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mk-hud-muted);
+  word-break: break-all;
 }
 
 .alarm-banner .lv {

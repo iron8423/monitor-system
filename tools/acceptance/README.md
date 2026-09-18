@@ -40,7 +40,7 @@ MONITOR_DEMO_ACCOUNTS=true docker compose -f docker-compose.production.yml up -d
 
 ### 前置：被测实例必须 `strict-contract=false`
 
-**除了 `08-simulator.sh`，其余十二个套件发的都是精简报文**——没有 `schemaVersion`、没有 `sequence`，
+**除了 `16-strict-contract.sh`（它发完整报文，且跑在自己的实例上），其余十五个套件发的都是精简报文**——没有 `schemaVersion`、没有 `sequence`，
 每轮新建的临时测点也没有与 `radar-001` 建立 `device_point` 绑定。而生产编排
 （`docker-compose.production.yml`）与 dev 编排（`docker-compose.yml`）都把
 `INGEST_STRICT_CONTRACT` 默认成 `true`，那套校验会依次拒收：
@@ -63,17 +63,19 @@ INGEST_STRICT_CONTRACT=false docker compose up -d backend
 cd backend && ./mvnw -o spring-boot:run -Dspring-boot.run.profiles=postgres
 ```
 
-**这里要说清一个缺口**：严格契约模式**目前没有任何自动化覆盖**。十三个套件里没有一个发
-`schemaVersion`/`sequence`，也没有一个断言过 `UNSUPPORTED_SCHEMA_VERSION` 之类的拒收原因
-（`grep -rn "UNSUPPORTED_SCHEMA_VERSION\|schemaVersion" tools/acceptance/*.sh` 零命中）；
-唯一的单测 `IngestServiceModeTest` 在 `setUp` 里显式把它按成 `false`
-（`ReflectionTestUtils.setField(service, "strictContract", false)`，其注释写明 `DevicePoint`
-"因 strictContract=false 走不到"）。也就是说这条路径只在**真跑生产/演示实例**时被执行。
+**这个缺口已于 2026-09-18 补上**（复查清单 P0-4）：`16-strict-contract.sh` 自带一个
+`strict-contract=true` 的空库实例（端口 18099），逐条断言五个拒收理由码
+（`UNSUPPORTED_SCHEMA_VERSION` / `INVALID_SEQUENCE` / `DEVICE_POINT_NOT_BOUND` /
+`DEVICE_POINT_NOT_CALIBRATED` / `POSITION_CALIBRATION_MISMATCH`）与三条正例。
+在此之前：十三个套件里没有一个发 `schemaVersion`/`sequence`，也没有一个断言过
+`UNSUPPORTED_SCHEMA_VERSION` 之类的拒收原因（`grep -rn "UNSUPPORTED_SCHEMA_VERSION\|schemaVersion"
+tools/acceptance/*.sh` 零命中）；唯一的单测 `IngestServiceModeTest` 在 `setUp` 里显式把它按成
+`false`（`ReflectionTestUtils.setField(service, "strictContract", false)`，其注释写明 `DevicePoint`
+"因 strictContract=false 走不到"）。也就是说那之前这条路径只在**真跑生产/演示实例**时被执行，
 上面那段「compose 的 PostgreSQL 形态：07 套件 26/26 …」的历史记录，必然也是在关掉严格契约的
-实例上取得的——那不是缺陷，但**别把「套件全绿」读成「严格契约验过了」**。要验严格契约，
-现在只有两条路：跑 `tools/production_simulator/`（它发的报文是完整的），或者手工发一条带
-`schemaVersion`/`sequence` 的报文。补一套 `14-strict-contract.sh` 是明确的待办（编号 12 已被
-`12-ingest-concurrency.sh` 占用）。
+实例上取得的——那不是缺陷，但**别把「套件全绿」读成「严格契约验过了」**。
+**注意 `16` 跑的不是 `BASE` 指向的实例**：它是唯一一个自带后端的套件（其余 15 个都跑在
+`BASE` 上），原因见该套件文件头——`--fresh` 开严格契约会把另外 15 个套件的前提一起改掉。
 
 ### 为什么 `--fresh` 是另开端口而不是重启 8080
 
@@ -94,7 +96,7 @@ cd backend && ./mvnw -o spring-boot:run -Dspring-boot.run.profiles=postgres
 |---|---|---|---|
 | `01-archive-auth.sh` | 31 | 第 7 条 | 档案可读（**5 项目 / 27 测点** / 每点 2 测项；V20 起含三个演示场景）、新建测点立即可见、鉴权与 404 边界、**档案时间带 `+08:00`**、**读出来的时间能原样写回去**、**⑨ 项目列表顺序确定**（首位恒为 id=1；3D 大屏默认项目依赖它——不排序时顺序由执行计划决定，实测曾把「没配数字孪生场景」的项目排在最前，大屏只剩离线底色） |
 | `02-ingest-idempotency.sh` | 43 | 第 1、2 条 | 双测项消息拆 2 行、同 messageId 重发整条去重、上报即可查、批量混装、未知设备/点号拒收、`X-Ingest-Key`、SUSPECT 不入告警、**带时区往返**、**collectTime 非法即拒收**、**latest 次排序键**、**长点号 33–64 字符能建也能收（B-13）**、**接入时间闸门（第 10 条）：`+2h` 拒收且原因码是 `COLLECT_TIME_IN_FUTURE`（不只看计数）、`+1min` 照收（反过拟合断言）、边界 `+4m59s` 收 / `+5m01s` 拒、未来的 `receiveTime` 被钳制而不是拒收（心跳不被钉到两小时后）** |
-| `03-query.sh` | 27 | 第 1 条 | latest 同刻测项重组、ISO 带时区、series 默认/指定测项、三种时间入参写法、hour/day 分桶、单位口径、400/404/401、**同刻多行时 latest 与 summary 取同一行**、**概览的最大形变只认 `defo_mm`（灌大速率不动它）** |
+| `03-query.sh` | 35 | 第 1 条 | latest 同刻测项重组、ISO 带时区、series 默认/指定测项、三种时间入参写法、hour/day 分桶、单位口径、400/404/401、**同刻多行时 latest 与 summary 取同一行**、**概览的最大形变只认 `defo_mm`（灌大速率不动它）**、**⑨ series 时间窗（P0-3）：不传 from/to 只取近 24 小时且回显 `windowDefaulted` 与生效窗口（跨度恰好 86400s）、只给 from 上界补 now、只给 to 下界取 to-24h、跨度 31 天放行 / 31 天零 2 秒 400、from 晚于 to 400** |
 | `04-alarm.sh` | 48 | 第 3、4 条 | 超限触发、警情详情与时间线、处置链 confirm→dispatch→research→resolve、终态拒处置、负向 lte 触发、自动恢复、**防刷屏**、**等级升级（escalate）**、规则类型收敛、鉴权、**角色 → 处置动作越权 403**、**处置人取登录身份（请求体里的 `operator` 被忽略）**、**跑完不留自建规则** |
 | `05-realtime.sh` | 12 | 第 1、3 条 | SSE `?token=` 订阅、measurement/alarm 事件、处置后状态推送、设备最近上报时间回写、SSE 鉴权 |
 | `06-media.sh` | 32 | 第 6 条 | 上传返不透明编码 mediaId、客户端文件名不落盘（防路径穿越）、拒收非图片、列表裸数组、内容读取与字节一致、`?token=` 取图、**删除走逻辑删除（盘上留文件）+ 角色边界 + 套件回收自传的图** |
@@ -102,13 +104,18 @@ cd backend && ./mvnw -o spring-boot:run -Dspring-boot.run.profiles=postgres
 | `08-simulator.sh` | 26 | 第 1、2、3 条 | **补上验收链的第一环**：`tools/radar_simulator` 造数 → 落库 → 立即可查、模拟时钟（`--step-minutes` 决定相邻间隔）、幂等、质量闸门（SUSPECT vs 对照组）、超限→升级→恢复全链、模拟器自身参数校验、**§⑦ 未来 `collectTime` 整批拒收（用 `--clock-anchor start` 故意造未来时间戳，第 10 条）** |
 | `09-data-quality.sh` | 49 | 第 5 条 | **数据可信度 / 数据延迟告警**：坏质量占比超阈值 → 开警情（快照成因与判据参数、触发备注写实际观测数）、恢复即自动解除、**判不了时（FAULT/掉线）不许动已有警情**、**两种成因互不掩盖**、延迟上报、**回补历史不算延迟**、鉴权 |
 | `13-calibration.sh` | 53 | 第 9 条 | **标定失效与重新标定**（两条闭环 + 各自的反面）：**闭环一 · 设备位姿**：绑定 `PENDING` → 标定 `ACTIVE`（**全仓此前对标定状态零断言**）→ 改航向 → 旧标定自动 `INVALID` 并留痕（`invalidatedAt`/`DEVICE_POSE_CHANGED`/`invalidatedBy=admin`）→ 重新标定回 `ACTIVE` 且痕迹清空；**闭环二 · 测点几何（§⑩，15 条，其中 1 条是日志 grep）**：移动测点（只提一个 `altitude`）→ 旧标定自动 `INVALID`，原因码 `POINT_MOVED`（走 `invalidateActiveOfPoint`，与设备位姿并列的**另一条位姿路径**——一个测点可被多台雷达同时观测）→ 重新标定回 `ACTIVE` 且痕迹清空。反面一：**GET 回来的 body 原样 PUT 回去仍是 `ACTIVE`**（`compareTo` vs `equals` 的端到端回归——用 `equals` 的话每次保存都会误伤全部标定）；反面二：**失效没有接进接入路径**（`INVALID` 之后照收报文、状态不被回写）；反面三：**`PUT /devices/{id}` 用 MAINTAINER 必须 403**（§⑦，覆盖 `update` 时漏 `@PreAuthorize` 的捕获网）；反面四：**`PUT /points/{id}` 用 MAINTAINER 必须 403**（§⑩，同款捕获网罩住 `MonitorPointController.update`——其余套件全用 admin 令牌跑，漏注解一处都不会红）；另有 **只改名字不碰几何不得误伤**（仍 `ACTIVE`）与 **超长点号被 `@Valid` 拦下 400**（均 §⑩）。另含 `valid_to` 清空回归、人工停用端点的幂等与角色。日志证据两条 grep：`设备几何变更使标定失效 … invalidated=1`（§⑨）、`测点位置变更使标定失效 … invalidated=1 reason=POINT_MOVED`（§⑩）——唯一能证明失效真的执行了、而不是从状态串反推的办法。**计数口径**：53 为 `--fresh`（带 `BACKEND_LOG`）实测；**不带日志时恰好少 3 条**——§⑨ 的两条 `check_grep` 与 §⑩ 的那一条都写在 `[ -n "$BACKEND_LOG" ]` 分支里（`13-calibration.sh:220,288`），不带日志就走进 `info` 分支、显示 50，其余 50 条与带日志时逐条相同。**API 级套件**：界面上点不出这个场景（前端尚无设备/测点档案编辑入口，那是第 14 条）。<br>**2026-09-17 更正：后半句已失效** —— 第 14、16 条同日落地（`AdminView.vue` 设备页签补齐 7 个几何字段、`DeviceDrawer.vue` 补上人工停用入口与 `validFrom`/`validTo` 输入控件），设备位姿现在**能从管理界面改**，所以本套件覆盖的那条路径已经**浏览器可达**，不再只能 curl。本套件本身**一字未改**（它仍是 API 级的），变的是「界面上点不出」这个前提；要浏览器验收请看 `docs/monitor-system_系统完善与改进清单.md` 第 09 行的更正与手动验证清单第 10–13 条。 |
-| `10-scope.sh` | 107 | 第 7 条（前半） | **项目数据范围隔离**：admin 全量 vs 李敏只见项目 1（列表/分页/详情/概览/latest/series/影像/维护记录逐条对照）、直达项目 B 全部 403、**警情按 point 与 device 两侧都滤**、处置动作也过范围、无归属设备只对 ADMIN 可见、`outsider` 对照组一切为 0（fail-closed）、**全局告警规则是刻意的例外**、**SSE 推送也按订阅者过滤（三条真实订阅 + 正反两侧）**、套件自身回收 |
+| `10-scope.sh` | 112 | 第 7 条（前半） | **项目数据范围隔离**：admin 全量 vs 李敏只见项目 1（列表/分页/详情/概览/latest/series/影像/维护记录逐条对照）、直达项目 B 全部 403、**警情按 point 与 device 两侧都滤**、处置动作也过范围、无归属设备只对 ADMIN 可见、`outsider` 对照组一切为 0（fail-closed）、**告警规则按作用域可见（V22）：种子的项目规则对 outsider 不可见、临时建的全局规则对它可见且只有它一条**、**SSE 推送也按订阅者过滤（三条真实订阅 + 正反两侧）**、套件自身回收（含自建规则）。**规则作用域带来的夹具变化**：项目 2 的临时点不再被项目 1 的种子规则覆盖，套件显式建了自己的项目 2 规则（warning + alarm 两条，跑完即删）——这也让"警情归属只由点属于哪个项目决定"这件事在两侧都成立 |
 | `11-concurrency.sh` | 18 | 第 3 条（**并发不变式**） | 唯一一个**造真并发**的套件（后台 curl + `wait`）：**并发上报同一测点同一测项** → 全部落库、无 5xx、**未解除警情恰好 1 条**、时间线只有 1 条 `trigger`；**并发处置同一条警情** → 恰好 1 个 200、其余 4xx（**不是 500**）、**其中至少 1 个是 409**（全 400 说明请求被串行化了，本节没测到并发路径）、终态唯一、时间线恰好 2 条；**手工 resolve 与引擎自动解除竞争** → 两条路径都以 `PENDING` 为前置条件，`recover` 留痕**不超过 1 条** |
 | `12-ingest-concurrency.sh` | 15 | 第 1、2 条（**并发不变式**） | 6 个并发请求各发一批 `[独有a, 共享, 独有b]`：**一条消息撞唯一键不该拖垮同批其它完全合法的消息** → 6 个 200、无 5xx、恰好 1 个完整落库（`accepted=3`）、其余 5 个各落 2 条判 1 条 `DUPLICATE`、**落库恰好 13 行**、共享那条**只 1 行**；顺序重发语义未变（回归：预取那条路不该被保存点碰到）；**整批全是重复** → 200 + `duplicates=3`、不写一行、不报错；鉴权 |
 | `14-password-change.sh` | 13（不带轮换时 6） | 第 7 条（**账号与凭据**） | **修改本人密码**：原密码不符 / 新密码不足 8 位 / 新旧相同 → 各自 400 且写明原因、被拒的请求不改口令；**真实轮换**（仅一次性实例）→ 改密返回新令牌、新令牌可用、**旧令牌随即 401**（清单第 12 条"递增 token_version 后旧令牌必须 401"一直缺的那条断言）、旧口令登录失效、审计留下「修改密码」、`/auth/me` 带回个人资料字段。**⚠ 计数与顺序**：轮换会真的改掉 admin 的口令，而新口令强制 ≥8 位、演示口令是 6 位（`123456`）——**改不回去**，所以本套件排在 `SUITES` 最末，且只在 `run-all.sh --fresh`（H2 随进程消失）时才做轮换；对着持久库跑时自动跳过，显示 6 条 |
 | `15-users.sh` | 32 | 第 7 条（**账号与凭据**） | **账号体系**（清单第 13 条，2026-09-17 按用户口径重写）：① 列表仅 ADMIN（非管理员 403、无令牌 401）、**不外泄 `password`/`tokenVersion`**、带公司名；② 管理员**没有建号端点**（POST /users → 405）；③ **自助注册**：弱口令 / 选 ADMIN / 重名 / 账号格式非法各自 400，成功则**注册即登录**、角色是所选的非管理员角色、公司自动落成组织、注册者访问 `/users` 仍 403；④ **本人改资料**（`PUT /auth/me`）可读回，且塞 `role`/`enabled` 也不生效（DTO 里根本没有这两个字段）；⑤ 管理员改**角色**生效、且**塞资料字段也不生效**（服务端只写 role/enabled）；停用后旧令牌随即 401、无法再登录；⑥ **删除后账号失效，同名可以重新注册**（逻辑删除的行还占着唯一索引，这条专门验复用墓碑行）；⑦ 三条自锁保护；⑧ 收尾删账号与注册时自动建的组织（**组织也要删**——10-scope 断言过「admin 比李敏多 1 个组织」，遗漏会打红它，实测撞过） |
+| `16-strict-contract.sh` | 11 | 生产契约（**自带后端**） | **严格契约模式**（P0-4）：自带一个 `strict-contract=true` 的空库实例（端口 18099，`STRICT_PORT` 可换）——因为 `--fresh` 开严格契约会把另外 15 个套件的前提一起改掉（它们发的报文没有 `schemaVersion`/`sequence`）。夹具：临时设备 + 项目 1 下的临时测点 + 绑定（PENDING）+ 补建 `defo_mm` 测项档案。断言：完整报文照收（种子 ACTIVE 标定 radar-001 → P-HK02）、五条拒收理由码各一条（`UNSUPPORTED_SCHEMA_VERSION` / `INVALID_SEQUENCE` / `DEVICE_POINT_NOT_BOUND` / `DEVICE_POINT_NOT_CALIBRATED` / `POSITION_CALIBRATION_MISMATCH`）、**标定值从接口读回再原样上报必须照收**（反过拟合，写死数字会在下一次重建 `device_point` 的迁移后静默过期）、相对角偏 3°（容差 2°）仍拒、以及**拒收不落库**（曲线点数不变）。进程只按进程组收，不用 `pkill -f`（理由见 `run-all.sh` 头注释） |
 
-合计 **15 套件 / 532 条断言**（2026-09-18 527 → 532：`01-archive-auth.sh` 新增 ⑩「系统运维接口」5 条——只读/仅 ADMIN/不回显密钥；更早 2026-09-17 晚 518 → 527：`15-users.sh` 按「注册 / 本人改资料 / 管理员只看删权限」的新口径重写，
+合计 **16 套件 / 556 条断言**（2026-09-18（P0 修复轮）532 → 556：新增 `16-strict-contract.sh` 11 条（P0-4）、
+`03-query.sh` 27 → 35 条（P0-3 的默认窗口/跨度上限）、`10-scope.sh` 107 → 112 条（V22 的规则作用域可见性 +
+项目 2 自建规则夹具）。当晚复跑逐套件：
+01→31 / 02→43 / 03→35 / 04→48 / 05→12 / 06→32 / 07→26 / 08→26 / 09→49 / 13→53 / 15→32 / 10→112 / 11→18 / 12→15 / 16→11 / 14→13，**0 失败**。
+更早 2026-09-18 527 → 532：`01-archive-auth.sh` 新增 ⑩「系统运维接口」5 条——只读/仅 ADMIN/不回显密钥；更早 2026-09-17 晚 518 → 527：`15-users.sh` 按「注册 / 本人改资料 / 管理员只看删权限」的新口径重写，
 23 → 32 条。更早 495 → 518：新增 `15-users.sh` 23 条
 「用户管理」——管理员建号 / 改资料 / 停用 / 自锁保护，清单第 13 条的后半。更早，493 → 495：`01-archive-auth.sh` 补 ⑨ 两条
 「项目列表顺序必须确定」——排序不稳会让 3D 大屏默认打开一个没配场景的项目，见该行。更早由 480 → 493：新增 `14-password-change.sh` 13 条

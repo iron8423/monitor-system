@@ -289,6 +289,90 @@ class AlarmEngineTest {
         assertEquals("rate_mm_d", inserted.getMetricCode());
     }
 
+    // ---------- ⑥ 项目作用域（V22，复查清单 P0-1） ----------
+
+    /**
+     * 项目档规则只对**本项目**的测点生效。
+     *
+     * <p>这条是 P0-1 的核心：V20 有 4 个场景之后，同一套 ±3mm 不能既管灰库又管桥梁。
+     * 断言写成"测点归属 3 → 规则(projectId=3) 命中"，反向断言在下一个用例。</p>
+     */
+    @Test
+    void projectScopedRuleAppliesWithinItsProject() {
+        AlarmRule projectRule = rule(20L, "warning", "5", "3");
+        projectRule.setProjectId(3L);
+        when(ruleMapper.selectList(any())).thenReturn(List.of(projectRule));
+        when(alarmMapper.selectOne(any())).thenReturn(null);
+        when(pointMapper.selectProjectIdOfPoint(POINT_ID)).thenReturn(3L);
+
+        engine.evaluate(POINT_ID, METRIC, 9.0, "VALID");
+
+        assertEquals(20L, captureInsertedAlarm().getRuleId());
+    }
+
+    /**
+     * 同一个测点、同一条规则，只把归属改成别的项目 → 不触发，且**不开锁、不开事务**
+     * （不命中就退回纯读路径，这条保护的是接入的连接开销）。
+     */
+    @Test
+    void projectScopedRuleOfAnotherProjectDoesNotApply() {
+        AlarmRule projectRule = rule(20L, "warning", "5", "3");
+        projectRule.setProjectId(3L);
+        when(ruleMapper.selectList(any())).thenReturn(List.of(projectRule));
+        when(pointMapper.selectProjectIdOfPoint(POINT_ID)).thenReturn(1L);
+
+        engine.evaluate(POINT_ID, METRIC, 9.0, "VALID");
+
+        verify(alarmMapper, never()).insert(any(Alarm.class));
+        verifyNoInteractions(keyLock);
+        verifyNoInteractions(alarmEvalTx);
+    }
+
+    /**
+     * 归属解析不出来（测点不存在 / 对象或场景被软删 / 项目列为空）时，项目档规则一律不参与——
+     * fail-closed：宁可少报，也不要把甲项目的阈值套到乙项目的测点上。
+     */
+    @Test
+    void projectScopedRuleIsSkippedWhenOwnershipIsUnknown() {
+        AlarmRule projectRule = rule(20L, "warning", "5", "3");
+        projectRule.setProjectId(3L);
+        when(ruleMapper.selectList(any())).thenReturn(List.of(projectRule));
+        when(pointMapper.selectProjectIdOfPoint(POINT_ID)).thenReturn(null);
+
+        engine.evaluate(POINT_ID, METRIC, 9.0, "VALID");
+
+        verify(alarmMapper, never()).insert(any(Alarm.class));
+        verifyNoInteractions(keyLock);
+    }
+
+    /** 点专属规则以**点**为准：即使 projectId 填的是别的项目，它仍然只按 pointId 命中。 */
+    @Test
+    void pointScopedRuleIgnoresProjectColumn() {
+        AlarmRule pointRule = rule(21L, "warning", "5", "3");
+        pointRule.setPointId(POINT_ID);
+        pointRule.setProjectId(999L);
+        when(ruleMapper.selectList(any())).thenReturn(List.of(pointRule));
+        when(alarmMapper.selectOne(any())).thenReturn(null);
+
+        engine.evaluate(POINT_ID, METRIC, 9.0, "VALID");
+
+        assertEquals(21L, captureInsertedAlarm().getRuleId());
+    }
+
+    /**
+     * 没有项目档规则时**不多查一次归属**：热路径（每条测值）的查询数必须与 V22 之前一致，
+     * 否则"多场景"这个功能会以每条测值三次额外查询的代价落地。
+     */
+    @Test
+    void ownershipIsNotResolvedWhenNoProjectScopedRuleExists() {
+        when(ruleMapper.selectList(any())).thenReturn(List.of(rule(10L, "warning", "5", "3")));
+        when(alarmMapper.selectOne(any())).thenReturn(null);
+
+        engine.evaluate(POINT_ID, METRIC, 1.0, "VALID");
+
+        verify(pointMapper, never()).selectProjectIdOfPoint(any());
+    }
+
     // ---------- 辅助 ----------
 
     private Alarm captureInsertedAlarm() {

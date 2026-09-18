@@ -99,7 +99,10 @@ section "⑩ collectTime 缺失/非法 -> 整条 REJECTED（不替设备编时�
 # 早期实现是「解析不了就取 now()」。那不只是数据不准：设备发坏时间戳、平台按「刚刚收到」盖章，
 # 而设备在线判定（DeviceStatusPolicy）只认 last_report_time —— 设备一直在报垃圾却永远显示在线，
 # 离线告警永远不会响。坏时间戳是设备的契约违约，应当明确拒收。
-BAD_BEFORE=$(curl -s "$BASE/points/$PID/series?metricCode=defo_mm" -H "$AUTH" \
+# 窗口显式给出（P0-3 起不传窗口只取近 24 小时，而本套件的造数是固定历史时间）：
+# 不写窗口的话，这两次计数都会恒等于 0，"拒收的那几条没有落库"就成了一条恒真的空断言。
+WIN="from=2026-08-27T00:00:00%2B08:00&to=2026-08-28T00:00:00%2B08:00"
+BAD_BEFORE=$(curl -s "$BASE/points/$PID/series?$WIN&metricCode=defo_mm" -H "$AUTH" \
              | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")
 for bad in "not-a-time" "" "2026-13-45T99:99:99+08:00"; do
   B=$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
@@ -112,7 +115,7 @@ NOC=$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
       -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-noc\",\"deviceId\":\"radar-001\",\"pointCode\":\"$POINT\",\"metrics\":{\"defo_mm\":1.0}}]}")
 check "未带 collectTime -> rejected=1" "1" "$(printf '%s' "$NOC" | data_of "['rejected']")"
 check "拒收的那几条没有落库" "$BAD_BEFORE" \
-  "$(curl -s "$BASE/points/$PID/series?metricCode=defo_mm" -H "$AUTH" \
+  "$(curl -s "$BASE/points/$PID/series?$WIN&metricCode=defo_mm" -H "$AUTH" \
      | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")"
 
 # ---- ⑩ 的第二半（清单第 10 条）：未来时间戳 ----

@@ -3,6 +3,7 @@ package com.monitor.telemetry.mapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.monitor.telemetry.dto.IngestMode;
+import com.monitor.telemetry.dto.MeasurementBucket;
 import com.monitor.telemetry.entity.Measurement;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -62,6 +63,45 @@ public interface MeasurementMapper extends BaseMapper<Measurement> {
             </script>
             """)
     List<Measurement> rowsByMessageIds(@Param("messageIds") List<String> messageIds);
+
+    /**
+     * 按时间桶取均值（P0-3 的 ③：分桶下沉到 SQL）。
+     *
+     * <p>{@code DATE_TRUNC} 在 H2（本地/验收）与 PostgreSQL（生产）上都有，
+     * 且 {@code collect_time} 是**不带时区**的 TIMESTAMP，两个库都只做字面截断、
+     * 不做时区换算——与改造前在 Java 里 {@code truncatedTo(HOURS/DAYS)} 的结果逐值一致。
+     * 这正是本项目一直遵守的"同一份 SQL 跑两个库"的做法（V14 的 open_key 也是一例）。</p>
+     *
+     * <p><b>为什么单位写成两段字面量而不是参数/占位符</b>（实测教训，2026-09-18）：
+     * H2 2.3.232 的 {@code DATE_TRUNC} **要求第一个参数是字面量**，写成 {@code DATE_TRUNC(?, ts)}
+     * 直接报 {@code Syntax error ... expected "date-time field"}（而 PostgreSQL 允许参数）。
+     * 所以这里用 MyBatis 的 choose 分支写死 {@code 'HOUR'}/{@code 'DAY'} 两个字面量，
+     * 由布尔参数选一支——既不引入 <code>${}</code> 拼接（那才是有注入面的写法），
+     * 也保证两个库上跑的是同一份 SQL。表达式因此出现两次（SELECT 与 GROUP BY），
+     * 这是聚合走索引的代价，不要"顺手"抽成一个别名。</p>
+     *
+     * <p>为什么不让数据库算平均、反而原来那样在内存里分组：生产基线 1000 点 × 5 秒，
+     * 一个月就是十亿级；一个"近 31 天、day 粒度"的请求如果先把原始行全拉回 JVM，
+     * 需要搬 50 万行来画 31 个点。聚合下推之后，搬回来的行数等于桶数。</p>
+     */
+    @Select("""
+            <script>
+            SELECT <choose><when test="daily">DATE_TRUNC('DAY', collect_time)</when><otherwise>DATE_TRUNC('HOUR', collect_time)</otherwise></choose> AS bucket_time,
+                   AVG(measure_value) AS bucket_value
+            FROM measurement
+            WHERE point_id = #{pointId}
+              AND metric_code = #{metricCode}
+              AND collect_time &gt;= #{from}
+              AND collect_time &lt;= #{to}
+            GROUP BY <choose><when test="daily">DATE_TRUNC('DAY', collect_time)</when><otherwise>DATE_TRUNC('HOUR', collect_time)</otherwise></choose>
+            ORDER BY 1
+            </script>
+            """)
+    List<MeasurementBucket> averageByBucket(@Param("pointId") Long pointId,
+                                            @Param("metricCode") String metricCode,
+                                            @Param("from") LocalDateTime from,
+                                            @Param("to") LocalDateTime to,
+                                            @Param("daily") boolean daily);
 
     /** 幂等：device_id + message_id 是否已存在。撞唯一键后用它区分「真重复」与「暂时失败」。 */
     @Select("SELECT COUNT(*) FROM measurement WHERE device_id = #{deviceId} AND message_id = #{messageId}")

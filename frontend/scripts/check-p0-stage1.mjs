@@ -269,25 +269,28 @@ try {
     assert.deepEqual(calls, ['/v1/points/1/series'], JSON.stringify(calls))
     assert.ok(callConfigs[0].params.to, 'series 必须带 to')
     assert.ok(callConfigs[0].params.from, 'series 必须带 from')
-    assert.equal(callConfigs[0].params.granularity, 'raw')
+    // P0-3 之后 24 小时窗口不再是 raw：后端对 raw 有 5000 点上限（5 秒采样 ≈ 6 小时），
+    // 24 小时 @raw 会被 400 掉、曲线整条消失。这条断言改成钉"降采到 hour"这个结论。
+    assert.equal(callConfigs[0].params.granularity, 'hour')
   })
 
-  await test('按天分段：7 天窗口切成 7 段，请求数 = 段数 × 本项目点数', async (s) => {
+  // P0-3 之后这条用例的口径变了：后端给 raw 加了 5000 点硬上限，7 天窗口即使只有
+  // 一个测点也装不下（168h × 720 行 = 12 万行），于是粒度落到 hour、**一次取回**，
+  // 逐段拼接那条路径不再被走到（分段函数本身仍在 selfcheck 里单测）。
+  // 这条断言钉的正是"不再分段"这个结论——否则下次有人把上限调大、
+  // 分段路径重新活过来时，这里会静默变成另一种形状。
+  await test('7 天窗口：raw 装不下 → 按小时一次取回（不再逐 24 小时分段）', async (s) => {
     const replay = useReplayStore()
     replay.rangeHours = 168
     responder = () => ({ points: [] })
     await replay.load()
-    assert.equal(calls.length, 7, JSON.stringify(calls))
-    // 相邻段边界必须差 1ms：后端 from/to 是**双闭区间**，不减这 1ms 边界那一行会落进两段
-    const segs = callConfigs
-      .map((c) => ({ from: Date.parse(c.params.from), to: Date.parse(c.params.to) }))
-      .sort((a, b) => a.from - b.from)
-    assert.equal(segs.length, 7)
-    for (let i = 1; i < segs.length; i += 1) {
-      assert.equal(segs[i].from, segs[i - 1].to + 1, `第 ${i} 段与上一段重叠或断开`)
-    }
-    // 最右一段贴着「现在」，否则时间轴右端会缺一块
-    assert.ok(Date.now() - segs.at(-1).to < 5000, '最后一段没有贴到当前时刻')
+    assert.equal(calls.length, 1, JSON.stringify(calls))
+    assert.equal(callConfigs[0].params.granularity, 'hour')
+    // 窗口右端仍贴到「现在」，否则时间轴右端会缺一块
+    assert.ok(Date.now() - Date.parse(callConfigs[0].params.to) < 5000, '窗口没有贴到当前时刻')
+    // 左端是 7 天前（不是被降采缩掉的更短窗口）
+    const span = Date.parse(callConfigs[0].params.to) - Date.parse(callConfigs[0].params.from)
+    assert.ok(Math.abs(span - 168 * 3600 * 1000) < 5000, `窗口应为 7 天，实得 ${span / 3600000}h`)
   })
 
   await test('切主测项后旧批次最后返回：不写帧、不改 metricCode、也不关掉新批次的 loading', async (s) => {

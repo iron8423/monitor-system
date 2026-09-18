@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 
 import { pointSeries } from '@/api/monitor'
 import { useMonitorStore } from '@/stores/monitor'
+import { RAW_ROWS_PER_HOUR, rawFitsInLimit } from '@/utils/seriesGranularity'
 import { getToken } from '@/utils/token'
 import { buildFrames, frameDataCount, frameFreshCount } from '@/utils/timeline'
 
@@ -38,11 +39,8 @@ let timer = null
  */
 const ROW_BUDGET = 200000
 
-/**
- * 最坏的采样密度：生产基线 5 秒/点（`tools/production_simulator/README.md`）。
- * 用来把「窗口 × 点数」换算成行数——**估的就是最坏情况**，估少了就会崩。
- */
-const RAW_ROWS_PER_HOUR = 720
+// RAW_ROWS_PER_HOUR / rawFitsInLimit 见 utils/seriesGranularity.js：
+// 采样密度与 raw 上限是同一件事的两面，写在两处迟早漂移。
 
 /**
  * `raw` 长窗口的请求分段长度（小时）。仅当粒度仍是 raw 且窗口更长时才切段。
@@ -67,7 +65,9 @@ const MAX_INFLIGHT = 4
 export function pickGranularity(rangeHours, pointCount) {
   const points = Math.max(1, Number(pointCount) || 1)
   const hours = Math.max(0, Number(rangeHours) || 0)
-  if (points * hours * RAW_ROWS_PER_HOUR <= ROW_BUDGET) return 'raw'
+  // 两个条件都要满足：**单点**装得进后端的 raw 上限（P0-3，超了直接 400，
+  // 一个 400 就会让那条曲线整条消失），且总行数在回放预算内。
+  if (rawFitsInLimit(hours) && points * hours * RAW_ROWS_PER_HOUR <= ROW_BUDGET) return 'raw'
   if (points * hours <= ROW_BUDGET) return 'hour'
   return 'day'
 }

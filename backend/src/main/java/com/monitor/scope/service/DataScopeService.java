@@ -449,23 +449,41 @@ public class DataScopeService implements SubscriberScope {
     }
 
     /**
-     * 告警规则的可见范围：**全局规则（{@code point_id IS NULL}）对所有登录用户可见**，
-     * 加上「挂在本用户可见测点上」的规则。
+     * 告警规则的可见范围（V22 起按作用域分三组取并集）：
+     * <ol>
+     *   <li><b>全局规则</b>（{@code point_id} 与 {@code project_id} 都为空）对所有登录用户可见；</li>
+     *   <li><b>项目规则</b>（{@code point_id} 空、{@code project_id} 非空）随项目可见性；</li>
+     *   <li><b>点专属规则</b>（{@code point_id} 非空）随测点可见性——以点为准，不看 {@code project_id}。</li>
+     * </ol>
      *
      * <p>全局规则刻意不藏：它同时作用于所有项目，某一类警情为什么触发，
      * 值班员看不到规则就无从解释。规则本体不含项目业务数据（只有阈值与等级）。</p>
+     *
+     * <p>项目档与点档**必须**在本方法里挡住：V22 之前所有规则都是全局的，过滤只需看
+     * {@code point_id}；现在「某项目一套阈值」本身就可能暴露该项目的存在与结构类型，
+     * 如果这里不挡，改完作用域只是把误报换成了越权可见。</p>
+     *
+     * <p>空集合的坑与 {@link #applyAlarmScope} 同源：{@code in(空集合)} 会丢掉整条条件，
+     * 于是「没有可见项目」会退化成「所有项目规则都可见」。三组条件都只在集合非空时才挂，
+     * 全空时只剩全局那一组——那正是应该的结果。</p>
      */
     public LambdaQueryWrapper<AlarmRule> alarmRuleFilter() {
         Set<Long> pointIds = visiblePointIdsOrNull();
         if (pointIds == null) {
             return null;
         }
+        Set<Long> projectIds = visibleProjectIdsOrNull();
         LambdaQueryWrapper<AlarmRule> wrapper = new LambdaQueryWrapper<>();
-        if (pointIds.isEmpty()) {
-            return wrapper.isNull(AlarmRule::getPointId);
-        }
-        return wrapper.and(w -> w.isNull(AlarmRule::getPointId)
-                .or().in(AlarmRule::getPointId, pointIds));
+        wrapper.and(w -> {
+            w.isNull(AlarmRule::getPointId).isNull(AlarmRule::getProjectId);
+            if (projectIds != null && !projectIds.isEmpty()) {
+                w.or(x -> x.isNull(AlarmRule::getPointId).in(AlarmRule::getProjectId, projectIds));
+            }
+            if (!pointIds.isEmpty()) {
+                w.or(x -> x.in(AlarmRule::getPointId, pointIds));
+            }
+        });
+        return wrapper;
     }
 
     // ==================== 内部 ====================

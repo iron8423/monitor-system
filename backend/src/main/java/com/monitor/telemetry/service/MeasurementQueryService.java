@@ -9,6 +9,7 @@ import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MetricMapper;
 import com.monitor.project.mapper.MonitorPointMapper;
 import com.monitor.scope.service.DataScopeService;
+import com.monitor.telemetry.dto.MeasurementBucket;
 import com.monitor.telemetry.dto.PointLatestVO;
 import com.monitor.telemetry.dto.PointSeriesVO;
 import com.monitor.telemetry.entity.Measurement;
@@ -18,7 +19,6 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -27,7 +27,6 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.TreeMap;
 
 /**
  * M1：测点数据查询（latest / series）。口径见 docs/message-contract.md 与《B侧接口契约_M0》§3：
@@ -158,57 +157,85 @@ public class MeasurementQueryService {
 
     /**
      * 测点时序曲线。
-     * @param granularity raw（默认，原样返回）/ hour / day（按桶取均值）
+     *
+     * <p>时间窗与规模上限见 {@link SeriesWindowPolicy}（P0-3）：{@code from}/{@code to}
+     * 均可省略，省略时**补默认窗口**（近 24 小时）而不是"不限时间"；跨度上限 31 天；
+     * {@code raw} 单次最多 {@value SeriesWindowPolicy#MAX_RAW_POINTS} 点，超过返回 400
+     * 并提示改用分桶——不静默截断，截断过的曲线看起来和真的一样。</p>
+     *
+     * @param granularity raw（默认，原样返回）/ hour / day（按桶取均值，聚合在 SQL 里完成）
      */
     public PointSeriesVO series(Long pointId, String metricCode, String from, String to, String granularity) {
         MonitorPoint p = requirePoint(pointId);
         String code = blank(metricCode) ? DEFAULT_METRIC : metricCode;
-        LocalDateTime f = Times.parse(from, "from");
-        LocalDateTime t = Times.parse(to, "to");
-
-        List<Measurement> rows = mapper.selectList(new LambdaQueryWrapper<Measurement>()
-                .eq(Measurement::getPointId, pointId)
-                .eq(Measurement::getMetricCode, code)
-                .ge(f != null, Measurement::getCollectTime, f)
-                .le(t != null, Measurement::getCollectTime, t)
-                .orderByAsc(Measurement::getCollectTime));
+        // 粒度先校验再查库：非法值不该先付一次全窗口扫描的代价
+        String g = granularityOf(granularity);
+        SeriesWindowPolicy.Window window = SeriesWindowPolicy.resolve(
+                Times.parse(from, "from"), Times.parse(to, "to"), LocalDateTime.now());
 
         PointSeriesVO vo = new PointSeriesVO();
         vo.setPointId(p.getId());
         vo.setPointCode(p.getCode());
         vo.setMetricCode(code);
         vo.setUnit(unitOf(pointId, code));
-        vo.setPoints(bucket(rows, granularity));
+        vo.setFrom(Times.iso(window.from()));
+        vo.setTo(Times.iso(window.to()));
+        vo.setWindowDefaulted(window.fromDefaulted() && window.toDefaulted());
+        vo.setPoints("raw".equals(g)
+                ? rawPoints(pointId, code, window)
+                : bucketedPoints(pointId, code, window, g));
         return vo;
     }
 
-    /** raw 原样输出；hour/day 按时间桶取均值。 */
-    private List<PointSeriesVO.Item> bucket(List<Measurement> rows, String granularity) {
+    /** {@code granularity} 白名单与归一化。 */
+    private static String granularityOf(String granularity) {
         String g = blank(granularity) ? "raw" : granularity.trim().toLowerCase();
-        List<PointSeriesVO.Item> out = new ArrayList<>();
-        if ("raw".equals(g)) {
-            for (Measurement r : rows) {
-                out.add(new PointSeriesVO.Item(Times.iso(r.getCollectTime()), r.getMeasureValue()));
-            }
-            return out;
-        }
-        if (!"hour".equals(g) && !"day".equals(g)) {
+        if (!"raw".equals(g) && !"hour".equals(g) && !"day".equals(g)) {
             throw new BizException("granularity 仅支持 raw / hour / day: " + granularity);
         }
+        return g;
+    }
 
-        Map<LocalDateTime, List<Double>> grouped = new TreeMap<>();
-        for (Measurement r : rows) {
-            if (r.getCollectTime() == null || r.getMeasureValue() == null) {
-                continue;
-            }
-            LocalDateTime key = "day".equals(g)
-                    ? r.getCollectTime().truncatedTo(ChronoUnit.DAYS)
-                    : r.getCollectTime().truncatedTo(ChronoUnit.HOURS);
-            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(r.getMeasureValue().doubleValue());
+    /**
+     * raw：逐行返回，用 {@code LIMIT 上限+1} 探测超限。
+     *
+     * <p>多取那一行的意义：拿满上限**恰好**等于 5000 行是合法请求，只有第 5001 行存在时
+     * 才说明被截断了。少了这个 +1，就只能靠"结果数 == 上限"去猜，而那种猜法会把
+     * 合法的边界请求误判成超限。</p>
+     */
+    private List<PointSeriesVO.Item> rawPoints(Long pointId, String code, SeriesWindowPolicy.Window w) {
+        List<Measurement> rows = mapper.selectList(new LambdaQueryWrapper<Measurement>()
+                .eq(Measurement::getPointId, pointId)
+                .eq(Measurement::getMetricCode, code)
+                .ge(Measurement::getCollectTime, w.from())
+                .le(Measurement::getCollectTime, w.to())
+                .orderByAsc(Measurement::getCollectTime)
+                .last("LIMIT " + (SeriesWindowPolicy.MAX_RAW_POINTS + 1)));
+        if (rows.size() > SeriesWindowPolicy.MAX_RAW_POINTS) {
+            throw new BizException("窗口内原始点数超过 " + SeriesWindowPolicy.MAX_RAW_POINTS
+                    + " 条：请缩小时间范围，或改用 granularity=hour / day 查看趋势");
         }
-        for (Map.Entry<LocalDateTime, List<Double>> e : grouped.entrySet()) {
-            double avg = e.getValue().stream().mapToDouble(Double::doubleValue).average().orElse(0d);
-            out.add(new PointSeriesVO.Item(Times.iso(e.getKey()), round(avg)));
+        List<PointSeriesVO.Item> out = new ArrayList<>();
+        for (Measurement r : rows) {
+            out.add(new PointSeriesVO.Item(Times.iso(r.getCollectTime()), r.getMeasureValue()));
+        }
+        return out;
+    }
+
+    /**
+     * hour/day：分桶与求均值都在 SQL 里做（{@link MeasurementMapper#averageByBucket}），
+     * 返回的行数等于桶数而不是原始行数。
+     */
+    private List<PointSeriesVO.Item> bucketedPoints(Long pointId, String code,
+                                                    SeriesWindowPolicy.Window w, String g) {
+        List<PointSeriesVO.Item> out = new ArrayList<>();
+        for (MeasurementBucket b : mapper.averageByBucket(pointId, code, w.from(), w.to(),
+                "day".equals(g))) {
+            if (b.getBucketTime() == null || b.getBucketValue() == null) {
+                continue;   // collect_time 为空的行会落进 NULL 桶，跳过（与改造前的行为一致）
+            }
+            out.add(new PointSeriesVO.Item(Times.iso(b.getBucketTime()),
+                    round(b.getBucketValue().doubleValue())));
         }
         return out;
     }

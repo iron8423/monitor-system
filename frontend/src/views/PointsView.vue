@@ -10,6 +10,12 @@ import SeriesChart from '@/components/SeriesChart.vue'
 import { useThresholds } from '@/composables/useThresholds'
 import { formatTime, fromNow } from '@/utils/format'
 import { createRequestGuard } from '@/utils/requestGuard'
+import {
+  MAX_RAW_POINTS,
+  RAW_SAFE_WINDOW_HOURS,
+  autoGranularity,
+  rawFitsInLimit,
+} from '@/utils/seriesGranularity'
 import { suggestRange } from '@/utils/timeline'
 
 /**
@@ -61,10 +67,30 @@ const metricOptions = computed(() => {
 })
 
 const GRANULARITIES = [
-  { value: 'raw', label: '原始' },
+  { value: 'raw', label: '原始', needsRawBudget: true },
   { value: 'hour', label: '按小时' },
   { value: 'day', label: '按天' },
 ]
+
+/**
+ * 「原始」这一档能不能选，取决于窗口装不装得进后端的 5000 点上限（P0-3）。
+ *
+ * 为什么是**禁用**而不是"选了再自动降级"：降级会让选择器显示「原始」而图上画的是
+ * 聚合点——用户拿它当原始曲线去判突跳，那就成了错误结论的来源。宁可当场说清
+ * 「原始粒度只支持 6 小时以内」，也不要给出一个名不副实的图。
+ */
+const rawDisabled = computed(() => !rawFitsInLimit(rangeHours.value))
+const rawDisabledHint = computed(
+  () => `原始点单次最多 ${MAX_RAW_POINTS} 点（生产 5 秒采样约 ${RAW_SAFE_WINDOW_HOURS} 小时）：`
+    + `请把窗口缩到 ${RAW_SAFE_WINDOW_HOURS} 小时以内，或改用按小时/按天。`,
+)
+
+/** 窗口变长到装不下 raw 时，把已经选中的「原始」降到「按小时」——只在用户的选择**过细**时降。 */
+const GRAN_RANK = { raw: 0, hour: 1, day: 2 }
+watch(rangeHours, (hours) => {
+  const auto = autoGranularity(hours)
+  if (GRAN_RANK[granularity.value] < GRAN_RANK[auto]) granularity.value = auto
+}, { immediate: true })
 
 const RANGES = [
   { value: 1, label: '近 1 小时' },
@@ -152,15 +178,19 @@ const emptyHint = computed(() => {
 })
 
 /**
- * 应用建议窗口。跨到 7 天及以上时顺手把粒度切到「按小时」：
- * 生产基线是 5 秒采样，7 天原始点 ≈ 12 万行/测项，接口和浏览器都会被拖垮
- * （大屏回放的同类取舍见清单第 18 条）。用户仍可手动改回「原始」。
+ * 应用建议窗口，并顺手把粒度切到与后端口径一致的那一档。
+ *
+ * 判据不是"感觉窗口大了"而是**后端的硬上限**（P0-3）：`raw` 单次最多 5000 点，
+ * 生产 5 秒采样下约 6 小时就是上限，超了直接 400。原来的阈值写在 7 天，
+ * 那是"接口会不会被拖垮"的预算——两者差着两个数量级，按它自动切换等于没切。
+ * 用户仍可手动改回「原始」，但那时窗口超过 6 小时就会被后端 400（这是刻意的：
+ * 宁可明确报错，也不要静默截断）。
  */
 function applySuggestedRange() {
   const r = emptyHint.value?.suggest
   if (!r) return
   rangeHours.value = r.value
-  if (r.value >= 24 * 7 && granularity.value === 'raw') granularity.value = 'hour'
+  granularity.value = autoGranularity(r.value)
 }
 
 /** latest 里这些不是测项，是元信息（契约 §3）——分开显示，别混进测项行 */
@@ -293,6 +323,8 @@ async function loadDetail() {
   const pointId = selectedId.value
   if (!pointId) return
   const code = metricCode.value
+  // 粒度与窗口的合法性由上面的 watch + 单选按钮禁用保证（装不下 raw 时它根本选不中），
+  // 这里直接取用户看到的那一档——不要再偷偷改，图上画的必须是选择器里写的那一档。
   const gran = granularity.value
   const from = new Date(Date.now() - rangeHours.value * 3600 * 1000).toISOString()
 
@@ -426,7 +458,13 @@ watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
               </el-radio-group>
 
               <el-radio-group v-model="granularity" size="small">
-                <el-radio-button v-for="g in GRANULARITIES" :key="g.value" :value="g.value">
+                <el-radio-button
+                  v-for="g in GRANULARITIES"
+                  :key="g.value"
+                  :value="g.value"
+                  :disabled="g.needsRawBudget === true && rawDisabled"
+                  :title="g.needsRawBudget === true && rawDisabled ? rawDisabledHint : ''"
+                >
                   {{ g.label }}
                 </el-radio-button>
               </el-radio-group>
