@@ -43,6 +43,8 @@ const menus = [
   { path: '/admin', title: '管理端', icon: 'Setting', ready: true, roles: ['ADMIN'] },
   { path: '/audit', title: '审计日志', icon: 'Document', ready: true, roles: ['ADMIN'] },
   { path: '/ops', title: '系统运维', icon: 'Monitor', ready: true, roles: ['ADMIN'] },
+  // 使用说明放最后：它是"随时可查"的东西，不是日常入口；所有角色都能看
+  { path: '/help', title: '使用说明', icon: 'QuestionFilled', ready: true },
 ]
 
 // 菜单里的角色收口只是界面引导，真正的边界在后端 @PreAuthorize

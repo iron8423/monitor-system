@@ -140,6 +140,14 @@ const routes = [
         meta: { title: '系统运维', icon: 'Monitor', roles: ['ADMIN'] },
       },
       {
+        // 使用说明：所有角色可见，放在菜单最后一项。
+        // 内容以「当前登录角色」开头（四个角色的落地页与可做动作不同），后面才是模块一览。
+        path: 'help',
+        name: 'help',
+        component: () => import('@/views/HelpView.vue'),
+        meta: { title: '使用说明', icon: 'QuestionFilled' },
+      },
+      {
         // 个人中心：**所有登录用户都有**，所以刻意不带 `meta.roles`
         // （带了就只有列进去的角色能进，而「看自己的资料」不该分岗位）。
         // 入口在顶栏头像下拉里，不进侧边栏——侧边栏列的是"页面"，
