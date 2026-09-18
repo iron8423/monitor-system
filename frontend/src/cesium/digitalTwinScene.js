@@ -211,11 +211,22 @@ function addRadar(viewer, radar, index = 0) {
       ]))
     }
   }
+  /*
+   * 视场扇面 = **理论视场**（复查清单 P1-11）。
+   *
+   * 它是按量程/水平半角/俯仰角**解析算出来**的：不打地形、不裁剪、不考虑山体与建筑。
+   * 所以它回答的是"这台雷达按参数覆盖到哪一片"，而不是"这一片真的看得到"。
+   * 界面上的表达必须让这两件事一眼可分：
+   *   · 面：极低 alpha（0.07）——它是提示层，不是结论；
+   *   · 轮廓：**虚线**——上一版是实线，看起来像一条已经成立的边界；
+   *   · 措辞：面板与图例都写"理论视场"，并在旁注里写明"未按地形裁剪"。
+   * 真正的"看得到"由目标连线表达：只有 ACTIVE + 程序化通视校验通过的目标才是实线。
+   */
   const sectorFace = add('sector', {
     polygon: {
       hierarchy: new Cesium.PolygonHierarchy(fan),
       perPositionHeight: true,
-      material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.12),
+      material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.07),
       outline: false,
     },
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
@@ -223,8 +234,11 @@ function addRadar(viewer, radar, index = 0) {
   const sectorOutline = add('sector-outline', {
     polyline: {
       positions: [start, ...arc, start],
-      width: 1.4,
-      material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.65),
+      width: 1.2,
+      material: new Cesium.PolylineDashMaterialProperty({
+        color: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.55),
+        dashLength: 14,
+      }),
     },
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
   })
@@ -233,7 +247,10 @@ function addRadar(viewer, radar, index = 0) {
     polyline: {
       positions: [start, ...upperArc, start],
       width: 1.0,
-      material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.34),
+      material: new Cesium.PolylineDashMaterialProperty({
+        color: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.3),
+        dashLength: 10,
+      }),
     },
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
   })
@@ -241,11 +258,22 @@ function addRadar(viewer, radar, index = 0) {
     polyline: {
       positions: [start, ...lowerArc, start],
       width: 1.0,
-      material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.34),
+      material: new Cesium.PolylineDashMaterialProperty({
+        color: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.3),
+        dashLength: 10,
+      }),
     },
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
   })
 
+  /*
+   * 目标连线 = **这座雷达对每个目标的核验状态**，三档各有各的说法（P1-11）：
+   *   · ACTIVE + 通视通过 → 实线绿：已核验（标定有效、视线成立）；
+   *   · 通视通过但标定不是 ACTIVE → 虚线黄：待核验（能看到，但没走完标定流程）；
+   *   · 程序化通视判定被遮挡 → 点线红：被遮挡（贴着屏幕的实话是"现在看不到"）。
+   * 上一版三档全是虚线、只差线宽，扫一眼分不出"已核验"与"待核验"——
+   * 而这两者的处置动作完全不同（一个可以直接采信，一个要先去标定）。
+   */
   for (const target of radar.targets || []) {
     const lon = Number(target.longitude)
     const lat = Number(target.latitude)
@@ -254,16 +282,20 @@ function addRadar(viewer, radar, index = 0) {
     const end = Cesium.Cartesian3.fromDegrees(lon, lat, altitude)
     const active = String(target.calibrationStatus || '').toUpperCase() === 'ACTIVE'
     const visible = target.lineOfSight === true
-    const color = active && visible ? '#55e6a5' : visible ? '#f4c95d' : '#ff6b6b'
+    const verified = active && visible
+    const color = verified ? '#55e6a5' : visible ? '#f4c95d' : '#ff6b6b'
     const line = add(`target-${target.bindingId ?? target.pointId}`, {
       show: false,
       polyline: {
         positions: [start, end],
-        width: active && visible ? 2.2 : 1.6,
-        material: new Cesium.PolylineDashMaterialProperty({
-          color: Cesium.Color.fromCssColorString(color).withAlpha(0.82),
-          dashLength: active && visible ? 18 : 10,
-        }),
+        width: verified ? 2.4 : 1.6,
+        // 已核验走实线（它是结论）；其余两档走虚线/点线（它们是待办与事实）。
+        material: verified
+          ? Cesium.Color.fromCssColorString(color).withAlpha(0.9)
+          : new Cesium.PolylineDashMaterialProperty({
+            color: Cesium.Color.fromCssColorString(color).withAlpha(0.8),
+            dashLength: visible ? 12 : 5,
+          }),
       },
       properties: {
         kind: 'radar-target',
@@ -351,9 +383,13 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
       const sector = group.sector
       if (sector) {
         const c = Cesium.Color.fromCssColorString(group.faceColor)
-        sector.face.polygon.material = c.withAlpha(active ? 0.26 : 0.08)
-        sector.outline.polyline.width = active ? 2.6 : 1.0
-        sector.outline.polyline.material = c.withAlpha(active ? 0.95 : 0.45)
+        // 理论视场始终是"提示层"：选中时也只是略微提亮（0.16），不能看着像已核验的覆盖。
+        sector.face.polygon.material = c.withAlpha(active ? 0.16 : 0.05)
+        sector.outline.polyline.width = active ? 2.2 : 1.0
+        sector.outline.polyline.material = new Cesium.PolylineDashMaterialProperty({
+          color: c.withAlpha(active ? 0.9 : 0.4),
+          dashLength: 14,
+        })
         sector.upper.polyline.width = active ? 1.6 : 0.8
         sector.lower.polyline.width = active ? 1.6 : 0.8
       }

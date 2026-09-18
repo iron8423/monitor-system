@@ -11,6 +11,10 @@
     python3 tools/terrain_asset/emit_scene_migration.py \
         --assets-root frontend/public/models \
         --out generated/terrain-asset/scene-migration-V20.sql
+
+两个产物（P2-6 起都是显式的）：`--out` 出迁移草稿，`--positions-out` 出
+`tools/radar_simulator/scene_positions.json`（模拟器按它发标定位置）；
+只想要迁移、不想动模拟器输入时加 `--no-positions`。
 """
 
 from __future__ import annotations
@@ -203,6 +207,14 @@ def main() -> int:
                         default=ROOT / "generated" / "terrain-asset" / "scene-migration-V20.sql")
     parser.add_argument("--force", action="store_true",
                         help="允许覆盖已存在的输出文件（默认拒绝，见下）")
+    # P2-6：位置文件此前是**写死路径**的隐式第二个产物——一次"生成迁移"会顺手改掉
+    # 模拟器的输入，而命令行里一个字都看不出来。现在它是显式参数：默认仍写在原处
+    # （向后兼容），要写到别处就给 --positions-out，不需要就 --no-positions。
+    parser.add_argument("--positions-out", type=Path,
+                        default=ROOT / "tools" / "radar_simulator" / "scene_positions.json",
+                        help="标定位置 JSON 的输出路径（模拟器读它）")
+    parser.add_argument("--no-positions", action="store_true",
+                        help="只出迁移、不动模拟器的位置文件")
     args = parser.parse_args()
     # 默认拒绝覆盖：2026-09-18 踩过一次——资产重建后重跑本脚本，把**已经执行过**的
     # V20 迁移文件改写了（哈希变了），开发库下一次启动直接报 Flyway checksum mismatch。
@@ -217,8 +229,12 @@ def main() -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(sql, encoding="utf-8")
     print(f"已写出 {args.out}（{len(sql.splitlines())} 行）")
+    if args.no_positions:
+        print("（--no-positions：未写出标定位置文件）")
+        return 0
     positions = emit_positions(load_sites(), args.assets_root)
-    positions_path = Path(__file__).resolve().parent.parent / "radar_simulator" / "scene_positions.json"
+    positions_path = args.positions_out
+    positions_path.parent.mkdir(parents=True, exist_ok=True)
     positions_path.write_text(
         json.dumps(positions, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8")

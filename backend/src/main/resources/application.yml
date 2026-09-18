@@ -60,6 +60,11 @@ monitor:
     secret: ${JWT_SECRET:monitor-system-demo-secret-key-please-change-in-prod-0123456789}
     # 过期时间（毫秒），默认 24h
     expiration: ${JWT_EXPIRATION:86400000}
+  # 登录失败限流（复查清单 P1-14）。口径与两条边界（进程内存、只挡猜口令不挡流量）
+  # 见 LoginAttemptGuard 的类注释；这里只放两个可调数字，判据本身是常量。
+  auth:
+    login-max-failures: ${LOGIN_MAX_FAILURES:5}
+    login-lock-seconds: ${LOGIN_LOCK_SECONDS:300}
   upload:
     dir: ${UPLOAD_DIR:./data/media}
   # 设备离线扫描（验收第 5 条：断连 -> 设备告警）。

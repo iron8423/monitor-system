@@ -10,6 +10,7 @@ import com.monitor.auth.dto.UserVO;
 import com.monitor.auth.entity.SysUser;
 import com.monitor.auth.mapper.SysUserMapper;
 import com.monitor.auth.security.JwtUtil;
+import com.monitor.auth.security.LoginAttemptGuard;
 import com.monitor.auth.security.SecurityUser;
 import com.monitor.common.constant.Role;
 import com.monitor.common.exception.BizException;
@@ -19,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -34,10 +36,21 @@ public class AuthService {
     private final SysUserMapper userMapper;
     private final OrganizationMapper organizationMapper;
     private final PasswordEncoder passwordEncoder;
+    private final LoginAttemptGuard loginAttemptGuard;
 
     public LoginResponse login(LoginRequest request) {
-        Authentication auth = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword()));
+        // 限流在认证**之前**：被锁定时不该再走一次 BCrypt（那正是攻击者想要的 CPU 消耗）
+        loginAttemptGuard.assertNotLocked(request.getUsername());
+        Authentication auth;
+        try {
+            auth = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword()));
+            loginAttemptGuard.recordSuccess(request.getUsername());
+        } catch (AuthenticationException e) {
+            // 只记失败；成功即清零（见 LoginAttemptGuard 的口径）
+            loginAttemptGuard.recordFailure(request.getUsername());
+            throw e;
+        }
         SecurityUser su = (SecurityUser) auth.getPrincipal();
         SysUser user = su.getUser();
         String token = jwtUtil.generateToken(su.getId(), su.getUsername(), su.getRole(),

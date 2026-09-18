@@ -345,7 +345,31 @@ const LEGEND = [
   { key: 'disappeared', label: '目标失联', color: '#8a94a6' },
   { key: 'stale', label: '数据过期（值为最后一次读数）', color: '#a3acbb' },
   { key: 'no-data', label: '暂无数据', color: '#c0c4cc' },
+  // 雷达侧的三档（P1-11）：与上面的测点状态并列但不混同——它们说的是**标定与通视**，
+  // 不是测值状态。颜色与 digitalTwinScene 里目标连线的三档一一对应。
+  { key: 'target-verified', label: '已核验目标（标定有效且通视）', color: '#55e6a5' },
+  { key: 'target-unverified', label: '待核验目标（通视但未标定）', color: '#f4c95d' },
+  { key: 'target-blocked', label: '被遮挡目标（通视校验未过）', color: '#ff6b6b' },
 ]
+
+/**
+ * 当前选中雷达的核验统计（P1-11）。
+ *
+ * 为什么值得单独算：面板上原来只写「N 个已绑定目标」——那是**绑定数**，
+ * 不是"有多少个真的能采信"。绑了 6 个、其中 2 个被山体挡住，看的人却以为 6 个都在监测。
+ * 三档的定义与目标连线的配色逐条对应（见 cesium/digitalTwinScene.js）。
+ */
+const radarTargetStats = computed(() => {
+  const targets = activeRadar.value?.targets || []
+  const verified = targets.filter((t) => String(t.calibrationStatus || '').toUpperCase() === 'ACTIVE' && t.lineOfSight === true)
+  const blocked = targets.filter((t) => t.lineOfSight !== true)
+  return {
+    total: targets.length,
+    verified: verified.length,
+    blocked: blocked.length,
+    pending: targets.length - verified.length - blocked.length,
+  }
+})
 
 function openPopup(pointId) {
   popup.pointId = pointId
@@ -861,9 +885,14 @@ onBeforeUnmount(() => {
       </div>
     </aside>
 
-    <!-- 雷达覆盖：选中一台后只显示该雷达到已标定目标的视线，避免规模场景出现千条连线。 -->
+    <!--
+      雷达与视场（P1-11）。两件事必须分开说，否则会被读成一件：
+        · 扇形 = **理论视场**：按量程/角度解析算出来的，不按地形裁剪；
+        · 连线 = **这座雷达看到的每个目标的核验状态**（已核验 / 待核验 / 被遮挡）。
+      选中一台才显示它的连线（规模场景上千条会糊住画面），覆盖面则两台都留。
+    -->
     <aside v-if="radars.length" class="hud radar-side">
-      <div class="panel-title">雷达覆盖（{{ radars.length }}）</div>
+      <div class="panel-title">雷达与视场（{{ radars.length }}）</div>
       <button
         v-for="radar in radars"
         :key="radar.deviceId"
@@ -881,6 +910,14 @@ onBeforeUnmount(() => {
         <span>量程 {{ formatNumber(activeRadar.detectionRangeM, 0) }}m</span>
         <span>水平 ±{{ formatNumber(activeRadar.halfAngleDegrees, 0) }}°</span>
         <span>垂直 ±{{ formatNumber(activeRadar.verticalHalfAngleDegrees, 0) }}°</span>
+      </div>
+      <div v-if="activeRadar" class="radar-verify">
+        <span class="vk verified">已核验 {{ radarTargetStats.verified }}</span>
+        <span class="vk pending">待核验 {{ radarTargetStats.pending }}</span>
+        <span class="vk blocked">被遮挡 {{ radarTargetStats.blocked }}</span>
+      </div>
+      <div v-if="activeRadar" class="radar-note">
+        扇面为理论视场（按量程与角度解析计算，未按地形裁剪）；连线才是逐目标的核验结果。
       </div>
     </aside>
 
@@ -908,7 +945,7 @@ onBeforeUnmount(() => {
         </label>
         <label class="heat-toggle">
           <input v-model="sectorOn" type="checkbox" />
-          雷达视场扇面
+          雷达理论视场
         </label>
       </div>
     </div>
@@ -1363,6 +1400,57 @@ onBeforeUnmount(() => {
   gap: 4px 10px;
   padding-top: 5px;
   font-size: 10px;
+  color: var(--mk-hud-muted);
+}
+
+/* 三档核验统计（P1-11）：颜色与目标连线一一对应，扫一眼就知道"绑定数"里有多少能采信 */
+.radar-verify {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding-top: 6px;
+  font-size: 10px;
+}
+
+.radar-verify .vk::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  vertical-align: middle;
+  content: '';
+  border-radius: 50%;
+}
+
+.radar-verify .verified {
+  color: #55e6a5;
+}
+
+.radar-verify .verified::before {
+  background: #55e6a5;
+}
+
+.radar-verify .pending {
+  color: #f4c95d;
+}
+
+.radar-verify .pending::before {
+  background: #f4c95d;
+}
+
+.radar-verify .blocked {
+  color: #ff6b6b;
+}
+
+.radar-verify .blocked::before {
+  background: #ff6b6b;
+}
+
+/* 口径说明：这一段不是装饰——"理论视场"与"已核验"的差别说不清就会变成误解 */
+.radar-note {
+  padding-top: 6px;
+  font-size: 10px;
+  line-height: 1.5;
   color: var(--mk-hud-muted);
 }
 

@@ -449,6 +449,29 @@ try {
     assert.deepEqual(missing, [], `这些菜单项在 HelpView 的 MODULES 里没有小节：${missing.join('、')}`)
   })
 
+  /**
+   * P1-11：**理论视场**与**已核验目标**必须分开表达。
+   *
+   * 这件事一旦回退，界面上是"看起来更干净了"——扇形变成实线、三档连线只差颜色深浅，
+   * 没有任何报错。所以用源码绊线把四条措辞与两处画法钉住：
+   *   · 开关文案叫「雷达理论视场」（不是"雷达视场扇面"）；
+   *   · 图例里有已核验 / 待核验 / 被遮挡三行；
+   *   · 面板旁注写明"未按地形裁剪"；
+   *   · 目标连线三档里，已核验走实线（不是虚线）、理论视场轮廓走虚线。
+   */
+  ok('绊线·P1-11：理论视场与已核验目标分开表达', () => {
+    const screen = src('views/ScreenView.vue')
+    const scene = src('cesium/digitalTwinScene.js')
+    assert.ok(screen.includes('雷达理论视场'), '开关文案必须写明"理论"')
+    for (const label of ['已核验目标', '待核验目标', '被遮挡目标']) {
+      assert.ok(screen.includes(label), `图例缺「${label}」`)
+    }
+    assert.ok(screen.includes('未按地形裁剪'), '面板缺口径说明（扇形不是真实覆盖）')
+    assert.ok(scene.includes('verified ?') || scene.includes('verified\n'), '目标连线没有区分已核验')
+    assert.ok(/sectorOutline[\s\S]{0,400}PolylineDashMaterialProperty/.test(scene),
+      '理论视场轮廓必须是虚线（实线看起来像已经成立的边界）')
+  })
+
   // 执行实际路由守卫和 onError；只替换浏览器 history、页面组件与对话框。
   const { default: router } = await server.ssrLoadModule('/src/router/index.js')
   const { useUserStore } = await server.ssrLoadModule('/src/stores/user.js')
