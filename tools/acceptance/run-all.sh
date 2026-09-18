@@ -16,6 +16,10 @@ FRESH=0
 [ "${1:-}" = "--fresh" ] && FRESH=1
 PORT="${FRESH_PORT:-18080}"
 MVNW_OPTS="${MVNW_OPTS:--o}"      # 默认离线（本仓 ~/.m2 已就绪）；无本地仓库时置空走在线
+# 后端日志留存路径（CI 与排障用）：默认不设 = 跑完就删（临时文件）。
+# 为什么需要：脚本原本把日志放 mktemp，失败时只在终端打最后 30 行——
+# 而 CI 的失败发生在哪一套、后端当时说了什么，往往要看完整日志才判得出来。
+KEEP_LOG="${KEEP_LOG:-}"
 
 # 非 fresh：跑在已经起来的后端上，地址可用 BASE 覆盖
 if [ "$FRESH" = 1 ]; then BASE="http://localhost:$PORT/api/v1"
@@ -52,7 +56,14 @@ stop_backend() {
 # 进程都会中招。实测把它写在 `bash -c` 里跑，它把**执行它的那个 shell** 也一起杀了
 # （`bash -c '... --server.port=18998 ...'` 的命令行自带这个串）。
 # 所以这条 pkill 只能在「我们已经起过后端、且准备收掉自己那一个」的语境下用。
-cleanup() { [ "$STARTED" = 1 ] && stop_backend; rm -f "$LOG"; }
+cleanup() {
+  [ "$STARTED" = 1 ] && stop_backend
+  if [ -n "$KEEP_LOG" ]; then
+    mkdir -p "$(dirname "$KEEP_LOG")" 2>/dev/null
+    cp "$LOG" "$KEEP_LOG" 2>/dev/null || true
+  fi
+  rm -f "$LOG"
+}
 trap cleanup EXIT
 
 if [ "$FRESH" = 1 ]; then
@@ -162,6 +173,7 @@ printf '\n%s================ 汇总 ================%s\n' "$C_DIM" "$C_OFF"
 if [ "$TOTAL_FAIL" -eq 0 ]; then FC="$C_GRN"; else FC="$C_RED"; fi
 printf '  套件 %d 个 · 断言通过 %s%d%s · 失败 %s%d%s\n' \
   "${#SUITES[@]}" "$C_GRN" "$TOTAL_PASS" "$C_OFF" "$FC" "$TOTAL_FAIL" "$C_OFF"
+[ -n "$KEEP_LOG" ] && printf '  后端日志已留存：%s\n' "$KEEP_LOG"
 if [ "$TOTAL_FAIL" -eq 0 ]; then
   printf '  %s全部通过%s\n' "$C_GRN" "$C_OFF"
   exit 0

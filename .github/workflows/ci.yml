@@ -48,8 +48,35 @@ jobs:
           cache: maven
       # run-all.sh 需要 ss（iproute2）与 curl；ubuntu-latest 自带，这里只做显式声明
       - name: 验收套件（H2 空库）
-        run: FRESH_PORT=18085 MVNW_OPTS="-B" tools/acceptance/run-all.sh --fresh
+        env:
+          # 后端日志留到固定路径：失败时 artifact 与 job summary 都靠它
+          KEEP_LOG: ${{ runner.temp }}/acceptance-backend.log
+        run: |
+          set -o pipefail
+          FRESH_PORT=18085 MVNW_OPTS="-B" tools/acceptance/run-all.sh --fresh 2>&1 \
+            | tee "$RUNNER_TEMP/acceptance-run.log"
         timeout-minutes: 30
+      - name: 结果写进 job summary（不必展开步骤就能看到哪一套红了）
+        if: always()
+        run: |
+          LOG="$RUNNER_TEMP/acceptance-run.log"
+          [ -f "$LOG" ] || exit 0
+          {
+            echo '## 验收结果'
+            echo '```'
+            grep -E '^(---- .*(通过|失败)|  ✗|  套件|  未通过|  全部通过)' "$LOG" | tail -60 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: 失败时上传日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-logs
+          path: |
+            ${{ runner.temp }}/acceptance-run.log
+            ${{ runner.temp }}/acceptance-backend.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   frontend:
     runs-on: ubuntu-latest

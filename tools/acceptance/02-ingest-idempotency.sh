@@ -129,11 +129,16 @@ check "拒收的那几条没有落库" "$BAD_BEFORE" \
 # DataQualityPolicy.ratio 的分母是窗口内全部行，任何不算延迟的行都同样稀释它，未来时间
 # 在延迟判据上没有独有的杀伤力。
 #
-# 边界两侧各留 2 秒余量：`ts` 生成时刻与后端 batchNow 之间隔着一次 curl 往返，
-# 卡在整 299/301 秒上会让结论取决于机器快慢。
+# **这里刻意不测 ±2 秒的"精确边界"**（2026-09-18 由 CI 抓出来的教训）：
+# 原来这两条是 now+298s / now+302s，只留 2 秒余量，而 `ts` 的生成时刻与后端判定的
+# batchNow 之间隔着一次 curl 往返与 JVM 调度——在负载高的 runner 上只要超过 2 秒，
+# "超容差"那条就会被**合法地**收下，断言随机变红（本机复现过，GitHub 上连红两次）。
+# 那种断言测的是机器快慢，不是策略。精确边界（299/300/301 秒）由纯函数单测
+# `IngestTimePolicyTest#boundaryBelongsToTheAcceptedSide` 覆盖——那里没有网络、没有时钟漂移。
+# 套件这一层改成两侧各留 20 秒余量：280s（明确在容差内）与 320s（明确超容差）。
 #
 # **本节独占一个测点**（同 08 ② 的做法，理由不同）：下面有两条断言要**收下**超前的时间戳
-# （+1min 与 +298s），而「收下」就是真的落库。本套件 ⑪ 断言 $POINT 的 latest 取同 collect_time
+# （+1min 与 +280s），而「收下」就是真的落库。本套件 ⑪ 断言 $POINT 的 latest 取同 collect_time
 # 里后写的那条 —— 那两条行的 collect_time 落在 2026-08-27 之后，会无条件成为 latest，
 # 于是 ⑪ 实得 1.0 而不是 2.22（第一次跑就是这么红的）。
 # 靠「反正会被拒收」蒙不过去：被拒的两条不写库，被收的三条写。
@@ -157,16 +162,16 @@ F1=$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
      -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-fut1m\",\"deviceId\":\"radar-001\",\"pointCode\":\"$FP\",\"collectTime\":\"$CT_SOON\",\"metrics\":{\"defo_mm\":1.0}}]}")
 check "collectTime=now+1min（容差内）-> accepted=1" "1" "$(printf '%s' "$F1" | data_of "['accepted']")"
 
-# 容差两侧：默认 300 秒（monitor.ingest.max-collect-ahead-seconds）
-CT_298=$(ts 4.9667)   # 298 秒
-CT_302=$(ts 5.0333)   # 302 秒
-check "collectTime=now+298s（容差内）-> accepted=1" "1" \
+# 容差（默认 300 秒，monitor.ingest.max-collect-ahead-seconds）两侧：各留 20 秒余量
+CT_280=$(ts 4.6667)   # 280 秒
+CT_320=$(ts 5.3333)   # 320 秒
+check "collectTime=now+280s（明确在容差内）-> accepted=1" "1" \
   "$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
-     -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-fut298\",\"deviceId\":\"radar-001\",\"pointCode\":\"$FP\",\"collectTime\":\"$CT_298\",\"metrics\":{\"defo_mm\":1.0}}]}" \
+     -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-fut280\",\"deviceId\":\"radar-001\",\"pointCode\":\"$FP\",\"collectTime\":\"$CT_280\",\"metrics\":{\"defo_mm\":1.0}}]}" \
      | data_of "['accepted']")"
-check "collectTime=now+302s（超容差）-> rejected=1" "1" \
+check "collectTime=now+320s（明确超容差）-> rejected=1" "1" \
   "$(curl -s -X POST "$BASE/ingest/measurements" -H "$JSON" -H "$KEY" \
-     -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-fut302\",\"deviceId\":\"radar-001\",\"pointCode\":\"$FP\",\"collectTime\":\"$CT_302\",\"metrics\":{\"defo_mm\":1.0}}]}" \
+     -d "{\"items\":[{\"messageId\":\"ing2-$RUN_ID-fut320\",\"deviceId\":\"radar-001\",\"pointCode\":\"$FP\",\"collectTime\":\"$CT_320\",\"metrics\":{\"defo_mm\":1.0}}]}" \
      | data_of "['rejected']")"
 
 # ---- 未来 receiveTime：**钳制**，不是拒收 ----
