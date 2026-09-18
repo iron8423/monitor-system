@@ -153,8 +153,9 @@ src/
   由 `npm install` 的 `postinstall` **自动执行**（也可手动 `npm run cesium:assets`）。
   `public/cesium/` 是构建产物，已由 `frontend/.gitignore` 忽略。
 - `vite.config.js` 里 `define: { CESIUM_BASE_URL: '"/cesium/"' }` 告诉 Cesium 去哪儿取这些文件。
-- `public/models/` 下有两份自持资产，运行期都不请求在线服务：
-  - `qingyuan-hillside/`（V18 起默认）真实地形资产：公开 DEM + 卫星影像烘焙成 GLB；
+- `public/models/` 下有几份自持资产，运行期都不请求在线服务：
+  - `qingyuan-hillside-v2/`（V19 起默认，1000×750m）与 `qingyuan-hillside/`（V18 首版，
+    320×240m）真实地形资产：公开 DEM + 卫星影像烘焙成 GLB；
     用 `tools/terrain_asset/` 的两个脚本生成，来源与「实测 vs 程序化」的边界见该目录的
     `ASSET_PROVENANCE.md`；
   - `mountain-demo/` 纯程序化生成的虚构山体（无外部输入、无纹理），
@@ -204,8 +205,9 @@ HUD 与数据列表并明确显示「山体加载失败」。`globe` 模式仍�
 
 本地模型以**项目配置里的锚点**（`digital_twin_scene.anchor_longitude/latitude/height`）
 建立 ENU（东-北-上）局部坐标系；GLB 的 `+X/+Y/+Z` 分别对应东/北/上。当前两份资产各自的
-锚点：`qingyuan-hillside` 为 `113.05133°E, 23.75946°N, 107m`（默认），
-`mountain-demo` 为 `113.0508°E, 23.7208°N, 2m`（回退）。测点与雷达的经纬度/高程由生成器
+锚点：`qingyuan-hillside-v2` 为 `113.05133°E, 23.75946°N, 43m`（默认），
+`qingyuan-hillside` 为同一锚点的 107m 基准（V18 首版），
+`mountain-demo` 为 `113.0508°E, 23.7208°N, 2m`（纯程序化，回退）。测点与雷达的经纬度/高程由生成器
 从同一份高程场采样并写进迁移，所以立柱直接落在 GLB 坡面上。
 Cesium 的 `CLAMP_TO_GROUND` 只能贴椭球/terrain，不能贴独立 GLB，所以山地模式不使用地形钳制。
 切到 `globe` 模式且真实地形就绪后，仍会采样在线地形高度。

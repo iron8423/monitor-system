@@ -49,11 +49,13 @@ from PIL import Image, ImageFilter
 # ---------------------------------------------------------------- 默认参数
 
 DEFAULT_ANCHOR = {"longitude": 113.05133, "latitude": 23.75946}
-DEFAULT_WIDTH = 320.0
-DEFAULT_DEPTH = 240.0
-DEFAULT_CELLS_X = 160
-DEFAULT_CELLS_Y = 120
-DEFAULT_TEXTURE = (2048, 1536)
+DEFAULT_WIDTH = 1000.0
+DEFAULT_DEPTH = 750.0
+# 4m 网格：960m 级场景再用 2m 网格会让三角形数与文件体积失控，
+# 而公开 DEM 本身只有 30m 采样，2m 网格并没有多出真实信息。
+DEFAULT_CELLS_X = 250
+DEFAULT_CELLS_Y = 188
+DEFAULT_TEXTURE = (4096, 3072)
 DEFAULT_ASSET_NAME = "qingyuan-hillside"
 DEFAULT_ASSET_VERSION = "qingyuan-hillside-1.0.0"
 DEFAULT_RADAR_HEAD_HEIGHT_M = 10.0
@@ -63,34 +65,34 @@ LUMA = np.array([0.2126, 0.7152, 0.0722])
 
 # 两台雷达与 7 个测点（本地米坐标：+X 东、+Y 北、+Z 上）。
 #
-# 与 V11 种子的**代码与叙事**一致（山脊 3 点 + 滑坡体 4 点、双雷达 4/3 目标），
-# 但本地坐标是按本资产的真实地形重新选的：V11 的坐标是为程序化山体设计的，
-# 直接套到真实坡形上会出现「雷达看不见自己负责的测点」。选点约束：
-#   · 每个点在其雷达 10m 天线高度下通视且净空 ≥ 0.6m；
-#   · 同一雷达的目标方位跨度 ≤ 50°、俯仰跨度 ≤ 24°（设备水平/垂直视场为 ±30°/±15°）；
-#   · 山脊组落在高带（相对高程 55–95m），滑坡组落在低带（30–50m），保持语义。
-# 分配也按地形调整：北侧雷达看守山脊 3 点 + 上部滑坡体 1 点，南侧雷达看守坡脚 3 点。
+# 2.0 版把场景从 320×240m 放大到 1000×750m（真实起伏约 237m），测点与雷达按整片坡面
+# 重新布置：北侧雷达架在坡体东北侧的稳定台地上，俯瞰山脊与上部坡面；南侧雷达架在
+# 坡脚谷地，仰视滑坡体与坡脚。两台雷达都在**监测区之外**（这才是现场做法：雷达不能
+# 自己站在会动的那块地上）。选点约束（生成器逐条校验，不满足即失败）：
+#   · 每个点在其雷达 10m 天线高度下通视、净空 > 0.5m、斜距 ≤ 620m；
+#   · 同一雷达的目标方位跨度 ≤ 58°、俯仰跨度 ≤ 24°（设备视场 ±30°/±15°，留 1° 余量）；
+#   · 山脊组落在高带（绝对高程约 180–215m），滑坡组落在低带（约 105–170m），保持语义。
 POINTS = [
-    {"id": 1, "code": "P-HK01", "name": "山脊测点1", "local": [-110.0, 95.0]},
-    {"id": 2, "code": "P-HK02", "name": "山脊测点2", "local": [-45.0, 90.0]},
-    {"id": 3, "code": "P-HK03", "name": "山脊测点3", "local": [0.0, 60.0]},
-    {"id": 4, "code": "P-BP01", "name": "滑坡体测点1", "local": [50.0, 80.0]},
-    {"id": 5, "code": "P-BP02", "name": "滑坡体测点2", "local": [40.0, -20.0]},
-    {"id": 6, "code": "P-BP03", "name": "滑坡体测点3", "local": [70.0, -20.0]},
-    {"id": 7, "code": "P-BP04", "name": "滑坡体测点4", "local": [100.0, -20.0]},
+    {"id": 1, "code": "P-HK01", "name": "山脊测点1", "local": [-150.0, 200.0]},
+    {"id": 2, "code": "P-HK02", "name": "山脊测点2", "local": [-100.0, 100.0]},
+    {"id": 3, "code": "P-HK03", "name": "山脊测点3", "local": [0.0, 50.0]},
+    {"id": 4, "code": "P-BP01", "name": "滑坡体测点1", "local": [50.0, 50.0]},
+    {"id": 5, "code": "P-BP02", "name": "滑坡体测点2", "local": [50.0, -50.0]},
+    {"id": 6, "code": "P-BP03", "name": "滑坡体测点3", "local": [50.0, -150.0]},
+    {"id": 7, "code": "P-BP04", "name": "滑坡体测点4", "local": [200.0, -150.0]},
 ]
 
 RADARS = [
     {
         "id": 1, "code": "radar-001", "name": "北侧山脊形变雷达",
-        "local": [100.0, 100.0], "headingDegrees": 232.0, "pitchDegrees": 10.0,
-        "range": 265.0, "halfAngleDegrees": 30.0, "verticalHalfAngleDegrees": 15.0,
+        "local": [150.0, 300.0], "headingDegrees": 232.0, "pitchDegrees": 10.0,
+        "range": 620.0, "halfAngleDegrees": 30.0, "verticalHalfAngleDegrees": 15.0,
         "points": ["P-HK01", "P-HK02", "P-HK03", "P-BP01"],
     },
     {
         "id": 2, "code": "radar-002", "name": "南侧滑坡形变雷达",
-        "local": [140.0, -100.0], "headingDegrees": 314.0, "pitchDegrees": 1.0,
-        "range": 265.0, "halfAngleDegrees": 30.0, "verticalHalfAngleDegrees": 15.0,
+        "local": [100.0, -300.0], "headingDegrees": 314.0, "pitchDegrees": 1.0,
+        "range": 620.0, "halfAngleDegrees": 30.0, "verticalHalfAngleDegrees": 15.0,
         "points": ["P-BP02", "P-BP03", "P-BP04"],
     },
 ]
@@ -579,6 +581,24 @@ def angular_difference(a: float, b: float) -> float:
     return (a - b + 180.0) % 360.0 - 180.0
 
 
+def covering_center(azimuths: list[float]) -> tuple[float, float]:
+    """目标方位的最小覆盖弧中点与其跨度。
+
+    **不能用圆均值**：目标跨 0° 时（例如 341.6°/348.7°/33.7°），圆均值会被密集的一侧
+    拉偏到 0.9°，于是"最远那个目标"的偏差变成 32.8°，白白超出 ±30° 视场——而这组目标
+    实际只占 52.1° 的弧。雷达该对准的是弧的中点（本例 7.65°），不是加权重心。
+    """
+    if not azimuths:
+        return 0.0, 0.0
+    s = sorted(a % 360.0 for a in azimuths)
+    n = len(s)
+    gaps = [(s[(i + 1) % n] - s[i]) % 360.0 for i in range(n)]
+    k = gaps.index(max(gaps))
+    start = s[(k + 1) % n]
+    span = 360.0 - max(gaps)
+    return (start + span / 2.0) % 360.0, span
+
+
 def line_of_sight(terrain: Heightfield, start: tuple[float, float, float],
                   end: tuple[float, float, float], margin: float = 0.25) -> tuple[bool, float]:
     """沿射线步进，返回（是否通视, 最小净空）。净空 = 射线高程 - 地面高程。"""
@@ -626,19 +646,18 @@ def solve_radar_pose(terrain: Heightfield, radar: dict, points: dict) -> dict:
                 azimuths.append(bearing_degrees(dx, dy))
                 elevations.append(math.degrees(math.atan2(dz, horizontal)))
                 ranges.append(math.sqrt(horizontal ** 2 + dz ** 2))
-            heading = math.degrees(math.atan2(
-                sum(math.sin(math.radians(a)) for a in azimuths),
-                sum(math.cos(math.radians(a)) for a in azimuths))) % 360.0
-            pitch = sum(elevations) / len(elevations)
+            heading, _ = covering_center(azimuths)
+            pitch = (min(elevations) + max(elevations)) / 2.0
             clearance_min = float("inf")
             ok = True
+            margin = 0.5  # 视场边缘留 0.5°，避免"贴边即算通过"
             for target, azimuth, elevation, slant in zip(targets, azimuths, elevations, ranges):
                 if slant > radar["range"]:
                     ok = False
                     continue
-                if abs(angular_difference(azimuth, heading)) > radar["halfAngleDegrees"] - 1.0:
+                if abs(angular_difference(azimuth, heading)) > radar["halfAngleDegrees"] - margin:
                     ok = False
-                if abs(elevation - pitch) > radar["verticalHalfAngleDegrees"] - 1.0:
+                if abs(elevation - pitch) > radar["verticalHalfAngleDegrees"] - margin:
                     ok = False
                 tx, ty = target["local"]
                 tz = (terrain.floor + terrain.sample(tx, ty)
@@ -666,6 +685,11 @@ def build_radars(terrain: Heightfield) -> tuple[list[dict], list[dict]]:
     radars, bindings_out = [], []
     for radar in RADARS:
         pose = solve_radar_pose(terrain, radar, point_lookup)
+        # pose["ground"] 是**绝对高程**（基准面 + 相对高度）。写进 localPosition 的必须是
+        # **相对高度**——ENU 本地坐标里 +Z 的零点就是基准面。V18 曾在这里写成绝对值，
+        # 迁移那边又加了一次基准面，结果两台雷达整整齐齐浮在场景上方 107m
+        # （雷达"飞到天上"的那个 bug）。绝对高程另存 absoluteAltitude，供 SQL/文档使用。
+        ground_relative = terrain.sample(pose["local"][0], pose["local"][1])
         bindings = []
         for code in radar["points"]:
             target = point_lookup[code]
@@ -698,8 +722,8 @@ def build_radars(terrain: Heightfield) -> tuple[list[dict], list[dict]]:
         radars.append({
             **{k: v for k, v in radar.items() if k != "points"},
             "points": list(radar["points"]),
-            "localPosition": [pose["local"][0], pose["local"][1], round(pose["ground"], 3)],
-            "localGroundHeight": round(pose["ground"], 3),
+            "localPosition": [pose["local"][0], pose["local"][1], round(ground_relative, 3)],
+            "absoluteAltitude": round(pose["ground"], 3),
             "headingDegrees": round(pose["heading"], 3),
             "pitchDegrees": round(pose["pitch"], 3),
             "antennaHeightM": pose["antenna"],
@@ -778,7 +802,7 @@ def write_metadata(out: Path, *, terrain: Heightfield, radars: list[dict],
         "generator": "tools/terrain_asset/build_terrain_asset.py",
         "glb": {"file": f"{out.name}.glb", "bytes": len(glb_bytes), "sha256": glb_sha},
         "texture": {"bytes": len(texture_bytes), "sha256": sha256_bytes(texture_bytes),
-                    "size": list(DEFAULT_TEXTURE)},
+                    "size": [args.texture_width, args.texture_height]},
         "sourceManifest": {
             "fetchedAt": source_manifest.get("fetchedAt"),
             "bbox": source_manifest.get("bbox"),
@@ -790,7 +814,7 @@ def write_metadata(out: Path, *, terrain: Heightfield, radars: list[dict],
             "anchor": terrain.anchor, "width": terrain.width, "depth": terrain.depth,
             "cells": [len(terrain.xs) - 1, len(terrain.ys) - 1],
             "detailAmplitude": args.detail_amplitude,
-            "textureSize": list(DEFAULT_TEXTURE),
+            "textureSize": [args.texture_width, args.texture_height],
         },
         "triangleCount": int(mesh["indices"].size // 3),
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -901,7 +925,7 @@ def write_provenance(out: Path, *, asset_version: str, glb_sha: str, terrain: He
         f"（清远市区以北约 4km 的模拟选址，非清远电厂真实厂址）",
         f"- 场景尺寸：{terrain.width:.0f}m × {terrain.depth:.0f}m，"
         f"网格 {len(terrain.xs) - 1} × {len(terrain.ys) - 1} 单元（2m）",
-        f"- 纹理：{DEFAULT_TEXTURE[0]}×{DEFAULT_TEXTURE[1]} JPEG，"
+        f"- 纹理：{args.texture_width}×{args.texture_height} JPEG，"
         f"{len(texture_bytes) / 1024:.0f} KiB，内嵌于 GLB",
         "",
         "## 哪些是量出来的、哪些是算出来的",
@@ -959,7 +983,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--detail-amplitude", type=float, default=1.6,
                         help="程序化地形细节基准幅度（米）；航测数据接进来时应传 0")
     parser.add_argument("--detail-seed", type=int, default=20260918)
-    parser.add_argument("--camera", type=float, nargs=3, default=[327.0, -34.0, 520.0],
+    parser.add_argument("--texture-width", type=int, default=DEFAULT_TEXTURE[0])
+    parser.add_argument("--texture-height", type=int, default=DEFAULT_TEXTURE[1])
+    parser.add_argument("--camera", type=float, nargs=3, default=[315.0, -30.0, 1650.0],
                         metavar=("HEADING", "PITCH", "RANGE"))
     return parser.parse_args(argv)
 
@@ -987,8 +1013,9 @@ def main(argv: list[str] | None = None) -> int:
         f"（基准面 {terrain.floor:.1f}m，起伏 {terrain.heights.max() - terrain.heights.min():.1f}m）")
 
     log("烘焙卫星纹理（曝光归一 + 山坡阴影 + 细节合成）...")
+    texture_size = (args.texture_width, args.texture_height)
     texture_bytes, preview = bake_texture(imagery, terrain, args.width, args.depth,
-                                          DEFAULT_TEXTURE, args.detail_seed)
+                                          texture_size, args.detail_seed)
     log(f"纹理 {len(texture_bytes) / 1024:.0f} KiB")
 
     log("生成网格...")
@@ -1011,7 +1038,7 @@ def main(argv: list[str] | None = None) -> int:
         "anchor": {"longitude": anchor["longitude"], "latitude": anchor["latitude"],
                    "height": terrain.floor},
         "dimensionsMetres": [terrain.width, terrain.depth],
-        "texture": {"width": DEFAULT_TEXTURE[0], "height": DEFAULT_TEXTURE[1],
+        "texture": {"width": args.texture_width, "height": args.texture_height,
                     "source": "Sentinel-2 cloudless 2023 (EOX, CC BY 4.0)",
                     "bakedLighting": "hillshade sun azimuth 315°, altitude 45°"},
         "elevationSource": "Mapzen/AWS terrarium tiles (SRTM-derived, ~30m)",
@@ -1030,7 +1057,7 @@ def main(argv: list[str] | None = None) -> int:
                      glb_sha=result["glbSha256"], terrain=terrain,
                      source_manifest=source_manifest, args=args,
                      texture_bytes=texture_bytes)
-    preview.resize((DEFAULT_TEXTURE[0] // 2, DEFAULT_TEXTURE[1] // 2),
+    preview.resize((args.texture_width // 2, args.texture_height // 2),
                    Image.LANCZOS).save(args.out / "preview.jpg", quality=88)
 
     log("")

@@ -1,0 +1,255 @@
+{
+  "assetVersion": "qingyuan-hillside-2.0.0",
+  "radarHeadHeightM": 10.0,
+  "reflectorHeightM": 2.5,
+  "radars": [
+    {
+      "id": 1,
+      "code": "radar-001",
+      "name": "北侧山脊形变雷达",
+      "local": [
+        150.0,
+        300.0
+      ],
+      "headingDegrees": 226.683,
+      "pitchDegrees": 9.484,
+      "range": 620.0,
+      "halfAngleDegrees": 30.0,
+      "verticalHalfAngleDegrees": 15.0,
+      "points": [
+        "P-HK01",
+        "P-HK02",
+        "P-HK03",
+        "P-BP01"
+      ],
+      "localPosition": [
+        150.0,
+        300.0,
+        88.001
+      ],
+      "absoluteAltitude": 131.001,
+      "antennaHeightM": 10.0,
+      "bindings": [
+        {
+          "pointId": 1,
+          "pointCode": "P-HK01",
+          "targetCode": "radar-001-P-HK01",
+          "azimuthDegrees": 251.565,
+          "elevationDegrees": 13.039,
+          "slantRangeM": 324.597,
+          "headingDeltaDegrees": 24.882,
+          "pitchDeltaDegrees": 3.555,
+          "lineOfSight": true,
+          "minimumClearanceM": 1.438,
+          "valid": true
+        },
+        {
+          "pointId": 2,
+          "pointCode": "P-HK02",
+          "targetCode": "radar-001-P-HK02",
+          "azimuthDegrees": 231.34,
+          "elevationDegrees": 10.659,
+          "slantRangeM": 325.777,
+          "headingDeltaDegrees": 4.657,
+          "pitchDeltaDegrees": 1.175,
+          "lineOfSight": true,
+          "minimumClearanceM": 1.15,
+          "valid": true
+        },
+        {
+          "pointId": 3,
+          "pointCode": "P-HK03",
+          "targetCode": "radar-001-P-HK03",
+          "azimuthDegrees": 210.964,
+          "elevationDegrees": 8.228,
+          "slantRangeM": 294.58,
+          "headingDeltaDegrees": -15.719,
+          "pitchDeltaDegrees": -1.256,
+          "lineOfSight": true,
+          "minimumClearanceM": 3.084,
+          "valid": true
+        },
+        {
+          "pointId": 4,
+          "pointCode": "P-BP01",
+          "targetCode": "radar-001-P-BP01",
+          "azimuthDegrees": 201.801,
+          "elevationDegrees": 6.884,
+          "slantRangeM": 271.213,
+          "headingDeltaDegrees": -24.882,
+          "pitchDeltaDegrees": -2.6,
+          "lineOfSight": true,
+          "minimumClearanceM": 2.883,
+          "valid": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "code": "radar-002",
+      "name": "南侧滑坡形变雷达",
+      "local": [
+        100.0,
+        -300.0
+      ],
+      "headingDegrees": 7.628,
+      "pitchDegrees": 10.74,
+      "range": 620.0,
+      "halfAngleDegrees": 30.0,
+      "verticalHalfAngleDegrees": 15.0,
+      "points": [
+        "P-BP02",
+        "P-BP03",
+        "P-BP04"
+      ],
+      "localPosition": [
+        100.0,
+        -300.0,
+        28.275
+      ],
+      "absoluteAltitude": 71.275,
+      "antennaHeightM": 10.0,
+      "bindings": [
+        {
+          "pointId": 5,
+          "pointCode": "P-BP02",
+          "targetCode": "radar-002-P-BP02",
+          "azimuthDegrees": 348.69,
+          "elevationDegrees": 13.875,
+          "slantRangeM": 262.614,
+          "headingDeltaDegrees": -18.937,
+          "pitchDeltaDegrees": 3.135,
+          "lineOfSight": true,
+          "minimumClearanceM": 2.869,
+          "valid": true
+        },
+        {
+          "pointId": 6,
+          "pointCode": "P-BP03",
+          "targetCode": "radar-002-P-BP03",
+          "azimuthDegrees": 341.565,
+          "elevationDegrees": 10.256,
+          "slantRangeM": 160.681,
+          "headingDeltaDegrees": -26.063,
+          "pitchDeltaDegrees": -0.484,
+          "lineOfSight": true,
+          "minimumClearanceM": 2.839,
+          "valid": true
+        },
+        {
+          "pointId": 7,
+          "pointCode": "P-BP04",
+          "targetCode": "radar-002-P-BP04",
+          "azimuthDegrees": 33.69,
+          "elevationDegrees": 8.912,
+          "slantRangeM": 182.481,
+          "headingDeltaDegrees": 26.063,
+          "pitchDeltaDegrees": -1.828,
+          "lineOfSight": true,
+          "minimumClearanceM": 1.577,
+          "valid": true
+        }
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "radarCode": "radar-001",
+      "pointId": 1,
+      "pointCode": "P-HK01",
+      "targetCode": "radar-001-P-HK01",
+      "azimuthDegrees": 251.565,
+      "elevationDegrees": 13.039,
+      "slantRangeM": 324.597,
+      "headingDeltaDegrees": 24.882,
+      "pitchDeltaDegrees": 3.555,
+      "lineOfSight": true,
+      "minimumClearanceM": 1.438,
+      "valid": true
+    },
+    {
+      "radarCode": "radar-001",
+      "pointId": 2,
+      "pointCode": "P-HK02",
+      "targetCode": "radar-001-P-HK02",
+      "azimuthDegrees": 231.34,
+      "elevationDegrees": 10.659,
+      "slantRangeM": 325.777,
+      "headingDeltaDegrees": 4.657,
+      "pitchDeltaDegrees": 1.175,
+      "lineOfSight": true,
+      "minimumClearanceM": 1.15,
+      "valid": true
+    },
+    {
+      "radarCode": "radar-001",
+      "pointId": 3,
+      "pointCode": "P-HK03",
+      "targetCode": "radar-001-P-HK03",
+      "azimuthDegrees": 210.964,
+      "elevationDegrees": 8.228,
+      "slantRangeM": 294.58,
+      "headingDeltaDegrees": -15.719,
+      "pitchDeltaDegrees": -1.256,
+      "lineOfSight": true,
+      "minimumClearanceM": 3.084,
+      "valid": true
+    },
+    {
+      "radarCode": "radar-001",
+      "pointId": 4,
+      "pointCode": "P-BP01",
+      "targetCode": "radar-001-P-BP01",
+      "azimuthDegrees": 201.801,
+      "elevationDegrees": 6.884,
+      "slantRangeM": 271.213,
+      "headingDeltaDegrees": -24.882,
+      "pitchDeltaDegrees": -2.6,
+      "lineOfSight": true,
+      "minimumClearanceM": 2.883,
+      "valid": true
+    },
+    {
+      "radarCode": "radar-002",
+      "pointId": 5,
+      "pointCode": "P-BP02",
+      "targetCode": "radar-002-P-BP02",
+      "azimuthDegrees": 348.69,
+      "elevationDegrees": 13.875,
+      "slantRangeM": 262.614,
+      "headingDeltaDegrees": -18.937,
+      "pitchDeltaDegrees": 3.135,
+      "lineOfSight": true,
+      "minimumClearanceM": 2.869,
+      "valid": true
+    },
+    {
+      "radarCode": "radar-002",
+      "pointId": 6,
+      "pointCode": "P-BP03",
+      "targetCode": "radar-002-P-BP03",
+      "azimuthDegrees": 341.565,
+      "elevationDegrees": 10.256,
+      "slantRangeM": 160.681,
+      "headingDeltaDegrees": -26.063,
+      "pitchDeltaDegrees": -0.484,
+      "lineOfSight": true,
+      "minimumClearanceM": 2.839,
+      "valid": true
+    },
+    {
+      "radarCode": "radar-002",
+      "pointId": 7,
+      "pointCode": "P-BP04",
+      "targetCode": "radar-002-P-BP04",
+      "azimuthDegrees": 33.69,
+      "elevationDegrees": 8.912,
+      "slantRangeM": 182.481,
+      "headingDeltaDegrees": 26.063,
+      "pitchDeltaDegrees": -1.828,
+      "lineOfSight": true,
+      "minimumClearanceM": 1.577,
+      "valid": true
+    }
+  ]
+}

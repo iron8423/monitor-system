@@ -81,7 +81,7 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 
 | 层 | 选型 |
 |---|---|
-| 后端 | Spring Boot 3.5.16 · Java 21 · MyBatis-Plus 3.5.17 · Flyway（V1–V18）· JJWT · springdoc-openapi |
+| 后端 | Spring Boot 3.5.16 · Java 21 · MyBatis-Plus 3.5.17 · Flyway（V1–V19）· JJWT · springdoc-openapi |
 | 数据库 | PostgreSQL 16（部署）/ H2 2.3（本地与验收 `--fresh`） |
 | 前端 | Vue 3.5 · Vite 6 · Pinia · Element Plus · ECharts 6 · CesiumJS 1.145 |
 | 鉴权 | JWT（`Authorization: Bearer`）；例外两处：ingest 用 `X-Ingest-Key` 头，SSE 与影像内容用 `?token=` |
@@ -115,8 +115,8 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 ## 3D 数字孪生（V2 · 双雷达）
 
 - **自持模型，不依赖在线服务**：仓库内自带两份地形资产，运行期都不请求 Cesium ion 或在线底图；设 `VITE_SCENE_MODE=globe` 可切回 ion 真实地形 + 卫星影像模式。
-  - **默认（V18 起）= `qingyuan-hillside-1.0.0`**：离线「真实地形」资产。几何骨架来自公开 DEM（SRTM 派生，30m 级）、色彩底来自公开卫星影像（Sentinel-2 cloudless，10m 级、CC BY 4.0），中高频细节由生成器程序化补充并**逐条写在资产的 `ASSET_PROVENANCE.md` 里**；320m × 240m、38,400 三角面、真实起伏约 96m。数据来源、复现方式与「实测 vs 程序化」的边界见 [`tools/terrain_asset/README.md`](tools/terrain_asset/README.md) 与 [`docs/3D数字孪生_离线真实地形资产_20260918.md`](docs/3D数字孪生_离线真实地形资产_20260918.md)。
-  - **保留 = `mountain-demo-2.0.0`**：纯程序化生成的虚构山体（无外部输入、无纹理），作为回退与「零依赖」对照；V18 只切换默认项目的 `asset_url`，旧资产文件与迁移都不删。
+  - **默认（V19 起）= `qingyuan-hillside-2.0.0`**：离线「真实地形」资产。几何骨架来自公开 DEM（SRTM 派生，30m 级）、色彩底来自公开卫星影像（Sentinel-2 cloudless，10m 级、CC BY 4.0），中高频细节由生成器程序化补充并**逐条写在资产的 `ASSET_PROVENANCE.md` 里**；1000m × 750m、94,000 三角面、真实起伏约 237m、4096×3072 内嵌纹理。两台雷达放在**监测区之外的稳定地面**（量程 620m，分别看守 4/3 个目标）。数据来源、复现方式与「实测 vs 程序化」的边界见 [`tools/terrain_asset/README.md`](tools/terrain_asset/README.md) 与 [`docs/3D数字孪生_离线真实地形资产_20260918.md`](docs/3D数字孪生_离线真实地形资产_20260918.md)。
+  - **保留（回退）= `qingyuan-hillside-1.0.0`（320×240m 首版）与 `mountain-demo-2.0.0`（纯程序化虚构山体）**：只切换默认项目的 `asset_url`，旧资产文件与历史迁移都不删。
   - 后续接入无人机航测时，用同一条流水线（`--detail-amplitude 0`）替换输入即可，前端零改动。
 - **双雷达标定**：北/南两台雷达分别覆盖 4/3 个可见目标，一条 `device_point` 关系带目标号、方位、俯仰、斜距、反射器高度、LOS、净空、标定状态与有效期；大屏可切换当前雷达并显示其三维视场、目标 LOS 与浮窗标定信息。
 - **标定失效闭环**：设备位姿或测点几何一变，旧标定自动转 `INVALID` 并留痕（成因码 `DEVICE_POSE_CHANGED` / `POINT_MOVED`），可重新标定回 `ACTIVE`。管理端已能改雷达位姿、绑定测点、激活/人工停用标定（含有效期）。
@@ -157,7 +157,7 @@ tools/backup/selftest.sh                      # 实测一遍整条链（需要 c
 - **备份必须带媒体卷**：附件是卷里的文件，不在库里；只备库的话恢复后 `media` 行回来了、点开图却是碎的。
 - **恢复是破坏性操作**（先 `DROP SCHEMA public CASCADE` 再灌），默认要交互敲 `yes`，只有 `--yes` 才跳过；它会先停后端、恢复后等后端真的健康才收工。
 - 库名/用户/项目名一律从 `.env` 读（读不到才退回 compose 默认值）——写死的话，`.env` 一改就会去备份/清空**另一个库**。
-- **迁移**：Flyway V1–V18，容器启动时自动执行，升级不要删数据卷。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`（`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`）。
+- **迁移**：Flyway V1–V19，容器启动时自动执行，升级不要删数据卷。切库只需 profile：`./mvnw spring-boot:run -Dspring-boot.run.profiles=postgres`（`PG_HOST/PG_PORT/PG_DB/PG_USER/PG_PASSWORD`）。
 - 生产上线流程与验收步骤见 [`docs/交付说明_双雷达精细山体_V2_20260916.md`](docs/交付说明_双雷达精细山体_V2_20260916.md) 与 [`docs/3D数字孪生_生产候选部署与验收.md`](docs/3D数字孪生_生产候选部署与验收.md)。
 
 ## 已知限制与后续

@@ -46,11 +46,12 @@ python3 tools/terrain_asset/build_terrain_asset.py \
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `--anchor-lon/--anchor-lat` | 113.05133 / 23.75946 | 场景中心；由 `fetch_sources.py` 写入清单，生成时沿用 |
-| `--width/--depth` | 320 / 240 | 场景米数（东西 × 南北） |
-| `--cells-x/--cells-y` | 160 / 120 | 网格单元数（2m 间距，38,400 三角形） |
+| `--width/--depth` | 1000 / 750 | 场景米数（东西 × 南北） |
+| `--cells-x/--cells-y` | 250 / 188 | 网格单元数（4m 间距，94,000 三角形） |
 | `--detail-amplitude` | 1.6 | 程序化地形细节基准幅度（米）；**接航测数据时传 0** |
 | `--detail-seed` | 20260918 | 细节噪声种子（固定种子 ⇒ 逐字节可复现） |
-| `--camera` | 327 -34 520 | 初始相机（方位 / 俯仰 / 距离） |
+| `--texture-width/--texture-height` | 4096 / 3072 | 内嵌 JPEG 纹理尺寸 |
+| `--camera` | 315 -30 1650 | 初始相机（方位 / 俯仰 / 距离） |
 
 ### 输出（写入 `--out` 目录）
 
@@ -107,7 +108,11 @@ python3 tools/terrain_asset/build_terrain_asset.py \
 
 ## 当前默认资产
 
-`frontend/public/models/qingyuan-hillside/`（版本 `qingyuan-hillside-1.0.0`）：
+`frontend/public/models/qingyuan-hillside-v2/`（版本 `qingyuan-hillside-2.0.0`，迁移 `V19`）：
 清远市区以北约 4km 的一处模拟边坡选址（**非清远电厂真实厂址**），
-场景 320m × 240m、真实起伏约 96m、两台模拟雷达 4/3 目标。
-来源与边界见该目录下的 `ASSET_PROVENANCE.md`。
+场景 1000m × 750m、真实起伏约 237m、两台模拟雷达（量程 620m）分别看守 4/3 个目标，
+雷达都放在监测区之外的稳定地面上。
+
+首版 `frontend/public/models/qingyuan-hillside/`（`qingyuan-hillside-1.0.0`，迁移 `V18`）与更早的
+`mountain-demo-2.0.0` 都保留作回退。各目录下的 `ASSET_PROVENANCE.md` 记录该版资产的
+数据来源、许可与「实测 vs 程序化」的边界。
