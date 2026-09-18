@@ -30,6 +30,22 @@ python3 radar_simulator.py
 python3 radar_simulator.py --interval 1 --count 10
 ```
 
+### 四个演示场景的保活（多场景演示时用这个）
+
+```bash
+# 每 60s 给四个场景各补一轮实时数据（Ctrl-C 停）
+tools/radar_simulator/keepalive_all_scenes.sh
+# 打生产栈（8088）
+BASE=http://localhost:8088/api/v1 tools/radar_simulator/keepalive_all_scenes.sh
+# 只跑一轮（手动补一次数据）
+tools/radar_simulator/keepalive_all_scenes.sh --once
+```
+
+为什么需要它：`seed_all_scenes.sh` 是一次性播种，灌完就退出；而设备在线判据是「5 分钟内
+收到过数据」（`DeviceStatusPolicy.OFFLINE_MINUTES`），所以播完 5 分钟后五台雷达会**正确地**
+一起判离线、告警中心冒出若干条 OFFLINE。那不是 bug，是数据真的停了——
+要常驻演示就用保活脚本，或者接受这些离线告警（它们会被设备重新上报自动解除）。
+
 跑起来长这样：
 
 ```
