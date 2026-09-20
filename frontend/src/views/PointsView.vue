@@ -437,7 +437,8 @@ watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
                 { k: '启用', v: selected.enabled ? '是' : '否' },
                 { k: '所属对象', v: chain?.object?.name },
                 { k: '所属场景', v: chain?.scene?.name },
-                { k: '建档时间', v: selected.createdAt, mono: true },
+                // 建档时间也走展示层格式化：后端是带纳秒的 ISO8601，直接贴出来没法读
+                { k: '建档时间', v: formatTime(selected.createdAt), mono: true },
               ]" :key="row.k" class="field">
                 <span class="mk-muted field-k">{{ row.k }}</span>
                 <span :class="{ 'mk-mono': row.mono, empty: row.v === null || row.v === undefined }">

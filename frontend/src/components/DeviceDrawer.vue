@@ -5,6 +5,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as api from '@/api/monitor'
 import { useUserStore } from '@/stores/user'
 import { DEVICE_STATUS_LABELS, DEVICE_STATUS_TAG, label } from '@/utils/labels'
+// 时间一律走展示层格式化：后端给的是带纳秒的 ISO8601，直接贴进提示/时间线里没人读得下去
+import { formatTime, formatTimeShort } from '@/utils/format'
 
 /**
  * 设备详情抽屉：基本信息 / 绑定测点 / 维护记录。
@@ -108,12 +110,16 @@ function calibrationTag(row) {
   const from = row.validFrom ? Date.parse(row.validFrom) : null
   const to = row.validTo ? Date.parse(row.validTo) : null
   if (from != null && now < from) {
-    return { text: '未生效', type: 'info', tip: `有效期自 ${row.validFrom} 起，当前尚未生效。` }
+    return { text: '未生效', type: 'info', tip: `有效期自 ${formatTime(row.validFrom)} 起，当前尚未生效。` }
   }
   if (to != null && now > to) {
-    return { text: '已过期', type: 'warning', tip: `有效期已于 ${row.validTo} 结束，需要重新标定。` }
+    return { text: '已过期', type: 'warning', tip: `有效期已于 ${formatTime(row.validTo)} 结束，需要重新标定。` }
   }
-  return { text: '有效', type: 'success', tip: row.validTo ? `有效期至 ${row.validTo}。` : '长期有效。' }
+  return {
+    text: '有效',
+    type: 'success',
+    tip: row.validTo ? `有效期至 ${formatTime(row.validTo)}。` : '长期有效。',
+  }
 }
 
 /**
@@ -395,7 +401,9 @@ watch(
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="最后上报">
-            <span class="mk-mono">{{ device.lastReportTime || '从未上报' }}</span>
+            <span class="mk-mono">
+              {{ device.lastReportTime ? formatTime(device.lastReportTime) : '从未上报' }}
+            </span>
           </el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="DEVICE_STATUS_TAG[device.status] || 'info'" size="small">
@@ -563,7 +571,7 @@ watch(
             <el-timeline-item
               v-for="r in records"
               :key="r.id"
-              :timestamp="r.createdAt"
+              :timestamp="formatTimeShort(r.createdAt)"
               placement="top"
             >
               <div class="rec-item">

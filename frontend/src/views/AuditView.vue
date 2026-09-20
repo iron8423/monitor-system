@@ -4,7 +4,7 @@ import { onMounted, ref, watch } from 'vue'
 import * as api from '@/api/monitor'
 // 只取配色表：动作名本身就是中文（`@AuditAction` 里写的），直接显示即可，不走 label()
 import { AUDIT_ACTION_TAG } from '@/utils/labels'
-import { fromNow } from '@/utils/format'
+import { formatTime, fromNow } from '@/utils/format'
 
 /**
  * 审计日志（验收第 7 条后半：操作留痕可查）。
@@ -187,7 +187,12 @@ function fmt(v) {
       <el-table :data="rows" v-loading="loading" size="small" class="audit-table">
         <el-table-column label="时间" width="180">
           <template #default="{ row }">
-            <div class="mk-mono time">{{ row.createdAt }}</div>
+            <!--
+              时间要格式化再显示：后端给的是带纳秒的 ISO8601（如
+              2026-09-17T15:00:38.411855+08:00），原样贴出来在 180px 的列里会折成三行，
+              而且没人会去读那六位小数。与其余页面统一走 formatTime。
+            -->
+            <div class="mk-mono time">{{ formatTime(row.createdAt) }}</div>
             <div class="mk-muted ago">{{ fromNow(row.createdAt) }}</div>
           </template>
         </el-table-column>
@@ -304,6 +309,8 @@ function fmt(v) {
 
 .time {
   font-size: 12px;
+  /* 格式化后是「2026-09-17 15:00:38」，禁止折行——这一列的价值就是一眼能读 */
+  white-space: nowrap;
 }
 
 .ago {

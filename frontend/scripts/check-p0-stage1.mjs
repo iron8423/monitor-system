@@ -472,6 +472,37 @@ try {
       '理论视场轮廓必须是虚线（实线看起来像已经成立的边界）')
   })
 
+  /**
+   * 时间展示绊线：后端给的是**带纳秒的 ISO8601**（如 2026-09-17T15:00:38.411855+08:00），
+   * 直接渲染会折行、也没人读那六位小数。所有时间字段必须先过 formatTime /
+   * formatTimeShort / fromNow。
+   *
+   * 这条的来源是一次真实的用户反馈（2026-09-20）：审计日志的时间列窄，原样贴出来折成三行。
+   * 修的时候顺手发现告警中心、告警队列、设备列表、维护记录时间线都有同样的问题——
+   * 所以绊线覆盖的是一组文件，而不只是被投诉的那一列。
+   */
+  ok('绊线·时间展示：视图不直接渲染后端 ISO（带纳秒）串', () => {
+    const files = [
+      'views/AuditView.vue', 'views/AlarmView.vue', 'views/DeviceView.vue',
+      'components/AlarmQueue.vue', 'components/DeviceDrawer.vue', 'views/PointsView.vue',
+    ]
+    const fieldRe = /\.(createdAt|updatedAt|triggeredAt|resolvedAt|collectTime|receiveTime|lastReportTime|validFrom|validTo|installedOn)/
+    for (const f of files) {
+      const text = src(f)
+      const tpl = text.slice(text.indexOf('</script>'))
+      // 先把三种格式化调用抹掉，剩下的才是"没经过格式化"的引用
+      const stripped = tpl.replace(/(formatTime|formatTimeShort|fromNow)\([^)]*\)/g, 'FMT')
+      const bad = stripped
+        .split('\n')
+        // 同一行里出现过 FMT 就算"这个时间字段是格式化过的"——三元表达式
+        // （`{{ row.lastReportTime ? FMT : '—' }}`）里字段名会留在条件位，不能算漏。
+        // 这一条是绊线不是证明：一行里两个字段、只格式化了一个的情况它看不出来。
+        .filter((line) => line.includes('{{') || line.includes(':timestamp='))
+        .filter((line) => fieldRe.test(line) && !line.includes('FMT'))
+      assert.equal(bad.length, 0, `${f} 里还在直接渲染原始时间串：${bad[0] || ''}`)
+    }
+  })
+
   // 执行实际路由守卫和 onError；只替换浏览器 history、页面组件与对话框。
   const { default: router } = await server.ssrLoadModule('/src/router/index.js')
   const { useUserStore } = await server.ssrLoadModule('/src/stores/user.js')

@@ -9,6 +9,7 @@ import {
   ACTION_LABELS, ACTIONS_BY_ROLE, ALARM_REASON_LABELS, ALARM_TYPE_LABELS, LEVEL_LABELS, LEVEL_TAG,
   STATUS_LABELS, STATUS_TAG, TERMINAL_STATUSES, label,
 } from '@/utils/labels'
+import { formatTime } from '@/utils/format'
 
 /**
  * 告警中心（阶段 4 / 验收第 3、4 条的操作面）。
@@ -172,7 +173,8 @@ function onFilterChange() {
         </el-table-column>
         <el-table-column label="触发时间" min-width="180">
           <template #default="{ row }">
-            <span class="mk-mono time">{{ row.triggeredAt }}</span>
+            <!-- 同上：后端是带纳秒的 ISO8601，展示层统一 formatTime（2026-09-17 15:00:38） -->
+            <span class="mk-mono time">{{ formatTime(row.triggeredAt) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="最近动作" width="100">
@@ -215,10 +217,10 @@ function onFilterChange() {
               {{ label(ALARM_REASON_LABELS, detail.alarmReason) }}
             </el-descriptions-item>
             <el-descriptions-item label="触发时间" :span="2">
-              <span class="mk-mono">{{ detail.triggeredAt }}</span>
+              <span class="mk-mono">{{ formatTime(detail.triggeredAt) }}</span>
             </el-descriptions-item>
             <el-descriptions-item v-if="detail.resolvedAt" label="解除时间" :span="2">
-              <span class="mk-mono">{{ detail.resolvedAt }}</span>
+              <span class="mk-mono">{{ formatTime(detail.resolvedAt) }}</span>
             </el-descriptions-item>
           </el-descriptions>
 
@@ -235,7 +237,7 @@ function onFilterChange() {
             <el-timeline-item
               v-for="(t, i) in detail.timeline"
               :key="i"
-              :timestamp="t.time"
+              :timestamp="formatTime(t.time)"
               placement="top"
             >
               <div class="tl-action">{{ label(ACTION_LABELS, t.action) }}</div>

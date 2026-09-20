@@ -5,6 +5,7 @@ import * as api from '@/api/monitor'
 import DeviceDrawer from '@/components/DeviceDrawer.vue'
 import { usePolling } from '@/composables/usePolling'
 import { DEVICE_STATUS_LABELS, DEVICE_STATUS_TAG, label } from '@/utils/labels'
+import { formatTime } from '@/utils/format'
 
 /**
  * 设备状态（验收第 5 条的操作面：断开模拟器 → 设备标为离线并生成设备告警）。
@@ -93,7 +94,8 @@ function batteryClass(v) {
         </el-table-column>
         <el-table-column label="最后上报" min-width="180">
           <template #default="{ row }">
-            <span class="mk-mono time">{{ row.lastReportTime || '—' }}</span>
+            <!-- 设备最后上报时间：后端是带纳秒的 ISO8601，展示层统一格式化 -->
+            <span class="mk-mono time">{{ row.lastReportTime ? formatTime(row.lastReportTime) : '—' }}</span>
           </template>
         </el-table-column>
       </el-table>

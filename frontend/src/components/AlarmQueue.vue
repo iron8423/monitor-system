@@ -2,6 +2,8 @@
 import {
   ALARM_REASON_LABELS, ALARM_TYPE_LABELS, LEVEL_LABELS, LEVEL_TAG, STATUS_LABELS, STATUS_TAG, label,
 } from '@/utils/labels'
+// 队列列窄，用短格式（MM-DD HH:mm:ss）——但同样不能直接贴后端那串带纳秒的 ISO
+import { formatTimeShort } from '@/utils/format'
 
 /**
  * 紧凑警情队列表格。三个角色工作台共用同一张表，区别只在喂进来的 `status`：
@@ -65,7 +67,7 @@ const emit = defineEmits(['row-click'])
     </el-table-column>
     <el-table-column min-width="170">
       <template #default="{ row }">
-        <span class="mk-mono mk-muted time">{{ row.triggeredAt }}</span>
+        <span class="mk-mono mk-muted time">{{ formatTimeShort(row.triggeredAt) }}</span>
       </template>
     </el-table-column>
     <template #empty>
