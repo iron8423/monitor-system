@@ -80,8 +80,14 @@ jobs:
         run: |
           LOG="$RUNNER_TEMP/acceptance-run.log"
           [ -f "$LOG" ] || exit 0
-          grep -E '^---- .*(通过|失败)|^  ✗|^  未通过|^  套件' "$LOG" | tail -25 | while IFS= read -r line; do
+          # ① 失败断言与它的「期望/实得」明细 ② 失败套件汇总
+          { grep -E '^  ✗|^      |^  未通过|^  套件' "$LOG" || true; } | head -20 | while IFS= read -r line; do
             echo "::error title=验收失败::${line}"
+          done
+          # ③ 日志最后 15 行：进程若被中途杀掉（OOM/磁盘满），套件汇总根本没有机会打印，
+          #    那时只有"日志停在哪儿"能告诉排查的人发生了什么（2026-09-20 实测）
+          tail -15 "$LOG" | while IFS= read -r line; do
+            echo "::error title=日志尾部::${line}"
           done
       - name: 失败时上传日志
         if: failure()
