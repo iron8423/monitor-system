@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 
 import * as api from '@/api/monitor'
 import AlarmQueue from '@/components/AlarmQueue.vue'
@@ -8,6 +9,7 @@ import MediaGallery from '@/components/MediaGallery.vue'
 import MediaUploader from '@/components/MediaUploader.vue'
 import SeriesChart from '@/components/SeriesChart.vue'
 import { useThresholds } from '@/composables/useThresholds'
+import { useUserStore } from '@/stores/user'
 import { formatTime, fromNow } from '@/utils/format'
 import { createRequestGuard } from '@/utils/requestGuard'
 import {
@@ -33,11 +35,26 @@ import { suggestRange } from '@/utils/timeline'
 defineOptions({ name: 'PointsView' })
 
 const router = useRouter()
+const user = useUserStore()
 
 const points = ref([])
 const selectedId = ref(null)
 const latest = ref(null)
 const series = ref(null)
+/**
+ * 当前生效的测量基准（P1-4）。没有登记过时为 null——那是正常状态，
+ * 不是"加载失败"（界面上要写成「未登记」，而不是留空让人以为坏了）。
+ */
+const baseline = ref(null)
+const baselineReasons = ref({})
+/** 能不能登记基准：与后端 @PreAuthorize 同口径（界面隐藏只是不让你白点，边界在后端） */
+const canEditBaseline = computed(() => ['ADMIN', 'MAINTAINER'].includes(user.role))
+/** 资料页那一行要显示的文字（在脚本里拼，别塞进模板的属性表达式） */
+const baselineText = computed(() => (baseline.value
+  ? `${baseline.value.reasonLabel} · ${formatTime(baseline.value.effectiveFrom)}`
+  : '未登记（累计形变按设备自身基准）'))
+
+const baselineDialog = reactive({ visible: false, reason: '', effectiveFrom: '', note: '', saving: false })
 
 const metricCode = ref('defo_mm')
 const granularity = ref('raw')
@@ -331,19 +348,63 @@ async function loadDetail() {
   const token = detailGuard.next()
   loading.value = true
   try {
-    const [l, s] = await Promise.all([
+    // 基准与 reasons 单独发（不参与 loading 的成败判定）：它们拿不到时，
+    // 曲线与最新值照常显示——基准只是"多一层解释"，不该拖垮整页。
+    const [l, s, b] = await Promise.all([
       api.pointLatest(pointId).catch(() => null),
       api.pointSeries(pointId, { metricCode: code, granularity: gran, from }),
+      api.pointCurrentBaseline(pointId).catch(() => null),
     ])
     if (!detailGuard.isCurrent(token)) return // 迟到的旧响应：一个字都不许写
     latest.value = l
     series.value = s
+    baseline.value = b
   } catch {
     if (!detailGuard.isCurrent(token)) return // 旧请求的失败不许把新测点的数据清空
     latest.value = null
     series.value = null
+    baseline.value = null
   } finally {
     if (detailGuard.isCurrent(token)) loading.value = false
+  }
+}
+
+/** 登记基准变更（P1-4）：原因白名单由后端给，前端不抄标签 */
+async function openBaselineDialog() {
+  const pointId = selectedId.value
+  if (!pointId) return
+  if (!Object.keys(baselineReasons.value).length) {
+    baselineReasons.value = (await api.pointBaselineReasons(pointId).catch(() => ({}))) || {}
+  }
+  baselineDialog.reason = Object.keys(baselineReasons.value)[0] || ''
+  // 默认"现在"：绝大多数场景就是"我刚换完，从现在起算"。用本地时间字符串喂给
+  // datetime 选择器（后端接受不带时区的 ISO，按平台时区解释）
+  const now = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+  baselineDialog.effectiveFrom = now.toISOString().slice(0, 16)
+  baselineDialog.note = ''
+  baselineDialog.visible = true
+}
+
+async function submitBaseline() {
+  const pointId = selectedId.value
+  if (!pointId || !baselineDialog.reason) return
+  baselineDialog.saving = true
+  try {
+    await api.createPointBaseline(pointId, {
+      // 空字符串要变成"不传"（后端把 null 当"现在"）；带 'Z' 的串会被后端按 UTC 解析，
+      // 而选择器里填的是本地时间——所以这里原样传本地时间字符串，不加时区后缀。
+      effectiveFrom: baselineDialog.effectiveFrom || undefined,
+      reason: baselineDialog.reason,
+      note: baselineDialog.note || undefined,
+    })
+    ElMessage.success('已登记基准变更')
+    baselineDialog.visible = false
+    await loadDetail()
+  } catch (e) {
+    // 后端的校验文案（白名单/未来时间/重复时刻）在这里原样透出来
+    ElMessage.error(e?.message || '登记失败')
+  } finally {
+    baselineDialog.saving = false
   }
 }
 
@@ -439,10 +500,22 @@ watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
                 { k: '所属场景', v: chain?.scene?.name },
                 // 建档时间也走展示层格式化：后端是带纳秒的 ISO8601，直接贴出来没法读
                 { k: '建档时间', v: formatTime(selected.createdAt), mono: true },
+                // 测量基准（P1-4）：反映「这套累计形变是相对哪次基准的」。
+                // 从未登记过要写成「未登记」——留空会让人以为加载失败
+                { k: '测量基准', v: baselineText },
               ]" :key="row.k" class="field">
                 <span class="mk-muted field-k">{{ row.k }}</span>
                 <span :class="{ 'mk-mono': row.mono, empty: row.v === null || row.v === undefined }">
                   {{ row.v ?? '—' }}
+                </span>
+              </div>
+              <!-- 基准登记入口（P1-4）。放在「资料」页签：它是档案事实，不是曲线操作 -->
+              <div v-if="canEditBaseline" class="baseline-actions">
+                <el-button size="small" type="primary" plain @click="openBaselineDialog">
+                  登记基准变更
+                </el-button>
+                <span class="mk-muted baseline-hint">
+                  换反射器 / 重装设备之后，累计形变会从 0 重来——登记一次，曲线会在那里画一条分界线。
                 </span>
               </div>
             </div>
@@ -513,6 +586,7 @@ watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
                 :unit="series?.unit || currentMetric?.unit || ''"
                 :metric-label="currentMetric?.label || ''"
                 :thresholds="thresholds"
+                :baselines="series?.baselines || []"
                 :loading="loading"
                 height="320px"
               />
@@ -587,6 +661,55 @@ watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
         </el-tabs>
       </div>
     </div>
+
+    <!--
+      登记测量基准变更（P1-4）。原因用后端白名单（前端不抄标签）；
+      生效时间默认"现在"——绝大多数场景就是"我刚换完，从现在起算"。
+      后端的校验文案（白名单 / 未来时间 / 同一时刻重复登记）由对话框原样透出。
+    -->
+    <el-dialog v-model="baselineDialog.visible" title="登记测量基准变更" width="480px">
+      <el-form label-width="90px">
+        <el-form-item label="变更原因">
+          <el-select v-model="baselineDialog.reason" style="width: 100%">
+            <el-option
+              v-for="(label, code) in baselineReasons"
+              :key="code"
+              :label="label"
+              :value="code"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="生效时间">
+          <el-date-picker
+            v-model="baselineDialog.effectiveFrom"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            placeholder="默认现在"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="baselineDialog.note"
+            type="textarea"
+            :rows="2"
+            maxlength="512"
+            show-word-limit
+            placeholder="例如：2 号反射器被车辆撞歪，已更换并复测"
+          />
+        </el-form-item>
+      </el-form>
+      <div class="mk-muted baseline-dialog-note">
+        登记只是「记录事实」：历史数据不会被改写。曲线会在新基准生效处画一条分界线，
+        提醒"这之前与之后不是同一个基准"。
+      </div>
+      <template #footer>
+        <el-button @click="baselineDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="baselineDialog.saving" @click="submitBaseline">
+          登记
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -740,6 +863,27 @@ watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
 
 .empty {
   color: var(--mk-text-sub);
+}
+
+/* 基准登记的入口与说明：跨整行（grid 里默认只占一格，按钮会挤在字段中间） */
+.baseline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  grid-column: 1 / -1;
+  padding-top: 4px;
+}
+
+.baseline-hint {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.baseline-dialog-note {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 /* 表格与说明之间留白；表格自带边框，不再套面板 */

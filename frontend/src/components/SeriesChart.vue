@@ -22,6 +22,12 @@ const props = defineProps({
    * 组件本身不关心规则怎么来的，只负责画。
    */
   thresholds: { type: Array, default: () => [] },
+  /**
+   * 窗口内的**测量基准变更**（P1-4）：`[{ effectiveFrom, reasonLabel, note }]`。
+   * 画成竖虚线——换基准之后累计形变从 0 重来，图上那一段陡降/陡升必须能被读成
+   * 「换过基准」而不是「稳定了」。
+   */
+  baselines: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   height: { type: String, default: '320px' },
 })
@@ -60,6 +66,29 @@ const option = computed(() => {
   const times = props.points.map((p) => p.t)
   const values = props.points.map((p) => p.v)
 
+  /*
+   * 基准标记画在「新基准生效后的第一个数据点」上：
+   * markLine 在类目轴上要精确落在某个类目（时间字符串）上，而基准的生效时刻很少
+   * 恰好等于某个采样点——所以取第一个不早于它的点，用**索引**定位（比字符串匹配稳，
+   * 分桶粒度下也不会因为"桶起点"与生效时刻对不上而整条线消失）。
+   */
+  const baselineMarks = props.baselines.map((b) => {
+    const at = Date.parse(b.effectiveFrom)
+    let idx = times.findIndex((t) => Date.parse(t) >= at)
+    if (idx < 0) idx = times.length - 1   // 基准晚于最后一个点（理论上窗口内不会）→ 标在末端
+    return {
+      name: b.reasonLabel || b.reason || '基准变更',
+      xAxis: idx,
+      lineStyle: { color: '#a065e8', type: 'dashed', width: 1.4 },
+    }
+  })
+  const thresholdMarks = props.thresholds.map((t) => ({
+    name: t.label,
+    yAxis: t.value,
+    lineStyle: { color: t.color || '#e6a23c', type: 'dashed', width: 1 },
+  }))
+  const marks = [...thresholdMarks, ...baselineMarks]
+
   return {
     backgroundColor: 'transparent',
     grid: { left: 56, right: 24, top: 36, bottom: 32 },
@@ -68,7 +97,8 @@ const option = computed(() => {
       valueFormatter: (v) => (v === null || v === undefined ? '—' : `${v} ${props.unit}`),
     },
     legend: {
-      show: props.thresholds.length > 0,
+      // 阈值线与基准标记都会在图例里出现，任一种存在就显示图例
+      show: marks.length > 0,
       right: 16,
       top: 4,
       itemWidth: 14,
@@ -107,17 +137,13 @@ const option = computed(() => {
             { offset: 1, color: 'rgba(31, 111, 235, 0)' },
           ]),
         },
-        ...(props.thresholds.length
+        ...(marks.length
           ? {
               markLine: {
                 silent: true,
                 symbol: 'none',
                 label: { fontSize: 10, formatter: '{b}' },
-                data: props.thresholds.map((t) => ({
-                  name: t.label,
-                  yAxis: t.value,
-                  lineStyle: { color: t.color || '#e6a23c', type: 'dashed', width: 1 },
-                })),
+                data: marks,
               },
             }
           : {}),

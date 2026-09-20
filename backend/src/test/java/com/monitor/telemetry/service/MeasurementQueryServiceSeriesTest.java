@@ -50,6 +50,7 @@ class MeasurementQueryServiceSeriesTest {
     private MonitorPointMapper pointMapper;
     private MetricMapper metricMapper;
     private DataScopeService dataScope;
+    private MeasurementBaselineService baselineService;
     private MeasurementQueryService service;
 
     @BeforeAll
@@ -63,13 +64,15 @@ class MeasurementQueryServiceSeriesTest {
         pointMapper = mock(MonitorPointMapper.class);
         metricMapper = mock(MetricMapper.class);
         dataScope = mock(DataScopeService.class);
-        service = new MeasurementQueryService(mapper, pointMapper, metricMapper, dataScope);
+        baselineService = mock(MeasurementBaselineService.class);
+        service = new MeasurementQueryService(mapper, pointMapper, metricMapper, dataScope, baselineService);
 
         MonitorPoint p = new MonitorPoint();
         p.setId(POINT_ID);
         p.setCode("P-TEST");
         when(pointMapper.selectById(POINT_ID)).thenReturn(p);
         when(metricMapper.selectOne(any())).thenReturn(null);
+        when(baselineService.inWindow(any(), any(), any())).thenReturn(List.of());
     }
 
     @Test

@@ -32,6 +32,29 @@ export function pointSeries(pointId, params = {}) {
   return http.get(`/v1/points/${pointId}/series`, { params })
 }
 
+/**
+ * 测量基准（P1-4）：换反射器 / 重装设备之后累计形变会从 0 重来，
+ * 曲线会把两段接在一起——基准记录就是给这件事留痕，让图上能标出来。
+ */
+export function pointCurrentBaseline(pointId) {
+  return http.get(`/v1/points/${pointId}/baseline`)
+}
+
+/** 基准变更历史（新的在前） */
+export function pointBaselineHistory(pointId) {
+  return http.get(`/v1/points/${pointId}/baseline/history`)
+}
+
+/** 原因白名单（短码 → 中文标签）：由后端给，避免前端抄一份标签 */
+export function pointBaselineReasons(pointId) {
+  return http.get(`/v1/points/${pointId}/baseline/reasons`)
+}
+
+/** 登记一次基准变更（ADMIN / MAINTAINER）。body: { effectiveFrom?, reason, note? } */
+export function createPointBaseline(pointId, payload) {
+  return http.post(`/v1/points/${pointId}/baseline`, payload)
+}
+
 /** GET /api/v1/projects/{projectId}/summary → { pointCount, alertCount, onlineDeviceCount, maxDeformationMm } */
 export function projectSummary(projectId) {
   return http.get(`/v1/projects/${projectId}/summary`)

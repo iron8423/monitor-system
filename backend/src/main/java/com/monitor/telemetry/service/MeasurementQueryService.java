@@ -41,16 +41,20 @@ public class MeasurementQueryService {
     private final MonitorPointMapper pointMapper;
     private final MetricMapper metricMapper;
     private final DataScopeService dataScope;
+    /** 窗口内的基准变更加进 series 响应（P1-4）：曲线要能标出"这里换过基准" */
+    private final MeasurementBaselineService baselineService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public MeasurementQueryService(MeasurementMapper mapper,
                                    MonitorPointMapper pointMapper,
                                    MetricMapper metricMapper,
-                                   DataScopeService dataScope) {
+                                   DataScopeService dataScope,
+                                   MeasurementBaselineService baselineService) {
         this.mapper = mapper;
         this.pointMapper = pointMapper;
         this.metricMapper = metricMapper;
         this.dataScope = dataScope;
+        this.baselineService = baselineService;
     }
 
     /**
@@ -180,6 +184,7 @@ public class MeasurementQueryService {
         vo.setFrom(Times.iso(window.from()));
         vo.setTo(Times.iso(window.to()));
         vo.setWindowDefaulted(window.fromDefaulted() && window.toDefaulted());
+        vo.setBaselines(baselineService.inWindow(pointId, window.from(), window.to()));
         vo.setPoints("raw".equals(g)
                 ? rawPoints(pointId, code, window)
                 : bucketedPoints(pointId, code, window, g));

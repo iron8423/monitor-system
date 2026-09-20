@@ -143,7 +143,7 @@ printf '\n%s验收目标：%s%s\n' "$C_DIM" "$BASE" "$C_OFF"
 #
 # 17-audit 排在 16 之后、14 之前：它也自己造数（临时测点/设备）并回收，
 # 但审计行按设计**不回收**（只增不减），所以放在末尾一带，尽量不影响别的套件的计数断言。
-SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh 08-simulator.sh 09-data-quality.sh 13-calibration.sh 15-users.sh 10-scope.sh 11-concurrency.sh 12-ingest-concurrency.sh 16-strict-contract.sh 17-audit.sh 18-login-limit.sh 19-retention.sh 14-password-change.sh)
+SUITES=(01-archive-auth.sh 02-ingest-idempotency.sh 03-query.sh 04-alarm.sh 05-realtime.sh 06-media.sh 07-device-alarm.sh 08-simulator.sh 09-data-quality.sh 13-calibration.sh 15-users.sh 20-baseline.sh 10-scope.sh 11-concurrency.sh 12-ingest-concurrency.sh 16-strict-contract.sh 17-audit.sh 18-login-limit.sh 19-retention.sh 14-password-change.sh)
 TOTAL_PASS=0; TOTAL_FAIL=0; FAILED_SUITES=()
 
 # 后端日志路径：--fresh 时是本脚本自己起的那个进程的输出，可以让套件去 grep 证据行；
