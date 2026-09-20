@@ -486,8 +486,7 @@ async function loadProjectScene(projectId) {
     scene.setVerticalVisible(verticalOn.value)
     mountainState.value = 'ok'
     pointLayer?.setLabelDistance(config.labelDistance)
-    heatLayer?.setMaxPoints(config.maxHeatPoints)
-    heatLayer?.sync(displayPoints.value, { visible: heatOn.value })
+    heatLayer?.sync(displayPoints.value, { visible: heatOn.value, selectedId: popup.pointId })
     scene.flyHome({ duration: 1.8 })
     window.__digitalTwinScene = scene
     return scene
@@ -696,12 +695,21 @@ watch(
   (list) => {
     pointLayer?.sync(list)
     // 标度由热力层自己按这批测点算（见 heatmapLayer.sync 的注释：传参漏传过一次，全部被清掉）
-    heatLayer?.sync(list, { visible: heatOn.value })
+    heatLayer?.sync(list, { visible: heatOn.value, selectedId: popup.pointId })
   },
   { deep: true, immediate: true },
 )
 
 watch(heatOn, (on) => heatLayer?.setVisible(on))
+/**
+ * 换选中测点要**重新同步热力层**：它现在只画选中那一个（见 heatmapLayer 的类注释），
+ * 而 `displayPoints` 那条 watch 只在数据变化时触发——不补这一条，点了测点要等到下一次
+ * 数据刷新（最长 60 秒）才看到晕圈跟着换。
+ */
+watch(
+  () => popup.pointId,
+  (pointId) => heatLayer?.sync(displayPoints.value, { visible: heatOn.value, selectedId: pointId }),
+)
 watch(sectorOn, (on) => mountainScene?.setSectorVisible(on))
 watch(verticalOn, (on) => mountainScene?.setVerticalVisible(on))
 
@@ -967,6 +975,7 @@ onBeforeUnmount(() => {
         </div>
         <span class="legend-note">
           颜色＝测值大小（刻度取当前测点最大绝对值）；晕圈大小只表示相对大小，不是影响半径。
+          只显示「当前选中测点」的晕圈——点左侧列表或 3D 里的测点即可切换（与垂直视场边界的口径一致）。
         </span>
       </div>
       <span class="legend-note">场景：{{ sceneDescription }}</span>
@@ -978,7 +987,7 @@ onBeforeUnmount(() => {
       <div class="layer-toggles">
         <label class="heat-toggle">
           <input v-model="heatOn" type="checkbox" />
-          地面热力图
+          地面热力图（选中测点）
         </label>
         <label class="heat-toggle">
           <input v-model="sectorOn" type="checkbox" />

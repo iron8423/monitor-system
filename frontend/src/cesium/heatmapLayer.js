@@ -12,6 +12,13 @@ import { heatColorBucketOf, heatExtentOf, heatRadiusOf } from '@/utils/heatScale
  * **半径 = 相对大小的视觉强调**（把 |值| 归一化到 [24m, 90m]）。半径没有物理含义，
  * 不是"影响半径"，图例里也是这么写的。
  *
+ * <h3>只画选中的那一个测点（2026-09-20 用户要求）</h3>
+ * 一开始是"所有测点各铺一片"，在 7 个点的演示场景上已经把山体盖成一片花斑，到了上百个点
+ * 更是没法看（那时只能按 |值| 取前 N 个，等于把"哪一片形变大"交给了一个看不见的排序）。
+ * 现在的口径与「垂直视场边界」一致：**只给当前选中的测点画**——没选中就不画。
+ * 好处是任何时候屏幕上最多一片，位置与大小都跟"你正在看的那个点"对应得上；
+ * 代价是失去"一眼扫全场的分布"，那一步等真有面状数据/等值线再说。
+ *
  * <h3>上一版为什么看不出来</h3>
  * 颜色取的是**状态色**（正常=绿）→ 演示场景里测点普遍正常，所有圈同一个绿；
  * 半径 = 12m + |值| × 每单位米数，而形变速率只有 ±1mm/d → 全部贴在下限上，
@@ -68,7 +75,9 @@ function gradientTexture(color, alpha) {
   return canvas
 }
 
-export function createHeatmapLayer(viewer, { maxPoints = 200 } = {}) {
+// 不再需要「最多画 N 个」的预算参数：任何时候最多只画**一个**（当前选中的测点），见类注释。
+// 原来的数字孪生配置项 maxHeatPoints 随之失效——后端字段保留是为兼容既有数据，前端不再读它。
+export function createHeatmapLayer(viewer) {
   /** pointId -> entity */
   const handles = new Map()
   /** 当前这一轮的颜色标度上界（当前测点集合的最大绝对值）；由 sync 传进来 */
@@ -131,7 +140,12 @@ export function createHeatmapLayer(viewer, { maxPoints = 200 } = {}) {
      * 全量同步。`visible` 为 false 时整层隐藏（但实体保留，开回来不用重建）。
      * 拾取要穿透这层：热力实体也带 pointId，点上去应当当普通测点处理 —— 见 pickId 的过滤。
      */
-    sync(items, { visible = true } = {}) {
+    /**
+     * @param items      当前屏幕上的测点
+     * @param visible    图层开关
+     * @param selectedId 当前选中的测点 id；为空则**一片都不画**（见类注释"只画选中的那一个"）
+     */
+    sync(items, { visible = true, selectedId = null } = {}) {
       /*
        * 标度上界**在这一层自己算**，不由调用方传（2026-09-20 踩过的坑）：
        * 原先签名里带 `max`，而有一个调用点忘了传 → `extent = 0` →
@@ -140,13 +154,14 @@ export function createHeatmapLayer(viewer, { maxPoints = 200 } = {}) {
        * 标度只依赖 items，就让它只依赖 items——少一个能传错的东西。
        */
       extent = heatExtentOf(items)
-      // 大规模项目只绘制绝对值最大的 N 个有效点。热力圈是辅助表达，不能让
-      // 1000 个半透明椭圆拖垮主测点与告警渲染；N 由项目数字孪生配置控制。
+      // 只保留选中那一个：见类注释——铺全场在山体上就是一层花斑，而且没法解释"为什么这块大那块小"。
+      // 没选中时 selected 为空集，下面的循环会把已有实体全部清掉（这正是要的：不选中就不显示）。
+      const wanted = selectedId == null
+        ? []
+        : (items || []).filter((item) => String(item.id) === String(selectedId))
       const selected = new Set(
-        [...(items || [])]
+        wanted
           .filter((item) => heatRadiusOf(item.value, extent) > 0)
-          .sort((a, b) => Math.abs(Number(b.value)) - Math.abs(Number(a.value)))
-          .slice(0, Math.max(0, maxPoints))
           .map((item) => item.id),
       )
       const seen = new Set()
@@ -185,12 +200,6 @@ export function createHeatmapLayer(viewer, { maxPoints = 200 } = {}) {
       for (const handle of handles.values()) {
         handle.entity.show = visible && heatRadiusOf(handle.item?.value, extent) > 0
       }
-    },
-
-    /** 按项目调整热力实体预算；下一次 sync 时立即收敛到新上限。 */
-    setMaxPoints(limit) {
-      const value = Number(limit)
-      if (Number.isFinite(value) && value >= 0) maxPoints = Math.floor(value)
     },
 
     destroy() {
