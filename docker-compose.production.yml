@@ -52,6 +52,13 @@ services:
       # 演示账号初始化：postgres profile 已默认关闭（application-postgres.yml），
       # 这里再显式写一遍是为了让「这个部署不建演示账号」在编排文件里就能读到。
       MONITOR_DEMO_ACCOUNTS: ${MONITOR_DEMO_ACCOUNTS:-false}
+      # 测量值保留（P1-1）：**默认关闭**——删数据不可逆，打开这件事必须由部署的人显式决定。
+      # 打开方式（把下面两行取消注释并填好天数）：
+      #   MONITOR_RETENTION_ENABLED: "true"
+      #   MONITOR_RETENTION_RAW_DAYS: "90"
+      # 口径与取舍（分批、单轮上限、只删 measurement、可观测）见
+      # backend/src/main/java/com/monitor/telemetry/service/MeasurementRetentionJob.java 与
+      # docs/容量与保留策略_20260920.md；打开后 /ops 的「运行配置」会显示保留天数与上轮删除行数。
       UPLOAD_DIR: /app/data/media
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError}
     volumes:
