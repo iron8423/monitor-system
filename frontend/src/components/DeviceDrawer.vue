@@ -146,6 +146,40 @@ const selectablePoints = computed(() => {
   return allPoints.value.filter((p) => !taken.has(p.id))
 })
 
+/**
+ * 来源优先级的可选档（V25，P1-2）。刻意只给四档而不是自由输入：
+ * 现场真正要表达的是"这台是主 / 这台是备 / 别动它 / 降它一级"，
+ * 数字随便填只会让"谁更权威"变成一道算术题。
+ */
+const PRIORITY_OPTIONS = [
+  { value: 10, label: '主来源（10）' },
+  { value: 50, label: '备来源（50）' },
+  { value: 100, label: '默认（100）' },
+  { value: 200, label: '降级（200）' },
+]
+
+function priorityLabel(value) {
+  const v = value ?? 100
+  return PRIORITY_OPTIONS.find((o) => o.value === v)?.label || String(v)
+}
+
+function priorityHint(row) {
+  const v = row.sourcePriority ?? 100
+  if (v < 100) return '这台是权威来源：只要它有数据，当前值就取它的（哪怕别的来源时间更新）。'
+  if (v === 100) return '默认档：与其他默认来源按时间先后竞争。'
+  return '比默认档更差：只有在没有更权威的来源有数据时才会被取用。'
+}
+
+async function changePriority(row, value) {
+  try {
+    await api.setDevicePointSourcePriority(props.device.id, row.pointId, value)
+    ElMessage.success(`「${row.code}」的来源优先级已设为 ${priorityLabel(value)}`)
+    await loadBindings()
+  } catch (e) {
+    ElMessage.error(e?.message || '设置失败')
+  }
+}
+
 function openCalibration(row) {
   calibrationRow.value = row
   calibrationForm.value = {
@@ -467,6 +501,27 @@ watch(
                   <el-tag size="small" :type="calibrationTag(row).type">
                     {{ calibrationTag(row).text }}
                   </el-tag>
+                </el-tooltip>
+              </template>
+            </el-table-column>
+            <!--
+              来源优先级（V25，P1-2）：多台设备看同一个测点时，决定"当前值"取谁。
+              数值越小越权威；默认 100。放在绑定表里是因为它是**绑定关系**的属性，
+              与"这条视线成不成立"（标定）是两件事。
+            -->
+            <el-table-column label="优先级" width="120">
+              <template #default="{ row }">
+                <el-select
+                  v-if="canWrite"
+                  :model-value="row.sourcePriority ?? 100"
+                  size="small"
+                  style="width: 104px"
+                  @update:model-value="(v) => changePriority(row, v)"
+                >
+                  <el-option v-for="opt in PRIORITY_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+                </el-select>
+                <el-tooltip v-else :content="priorityHint(row)" placement="top" :show-after="200">
+                  <span class="mk-mono">{{ priorityLabel(row.sourcePriority) }}</span>
                 </el-tooltip>
               </template>
             </el-table-column>

@@ -5,6 +5,7 @@ import com.monitor.project.entity.Metric;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.project.mapper.MetricMapper;
 import com.monitor.project.mapper.MonitorPointMapper;
+import com.monitor.asset.mapper.DevicePointMapper;
 import com.monitor.scope.service.DataScopeService;
 import com.monitor.support.MybatisPlusLambdaCache;
 import com.monitor.telemetry.dto.MeasurementBucket;
@@ -51,6 +52,7 @@ class MeasurementQueryServiceSeriesTest {
     private MetricMapper metricMapper;
     private DataScopeService dataScope;
     private MeasurementBaselineService baselineService;
+    private DevicePointMapper devicePointMapper;
     private MeasurementQueryService service;
 
     @BeforeAll
@@ -65,7 +67,9 @@ class MeasurementQueryServiceSeriesTest {
         metricMapper = mock(MetricMapper.class);
         dataScope = mock(DataScopeService.class);
         baselineService = mock(MeasurementBaselineService.class);
-        service = new MeasurementQueryService(mapper, pointMapper, metricMapper, dataScope, baselineService);
+        devicePointMapper = mock(DevicePointMapper.class);
+        service = new MeasurementQueryService(mapper, pointMapper, metricMapper, dataScope,
+                baselineService, devicePointMapper);
 
         MonitorPoint p = new MonitorPoint();
         p.setId(POINT_ID);

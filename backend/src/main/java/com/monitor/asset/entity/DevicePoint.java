@@ -22,6 +22,14 @@ public class DevicePoint implements Identifiable {
     private Long deviceId;
     private Long pointId;
     private String targetCode;
+    /**
+     * 来源优先级（V25，复查清单 P1-2）：数值**越小越优先**，默认 100。
+     *
+     * <p>一个测点可以被多台设备观测，而"当前值"只能有一个。判据是
+     * 「优先级最小的来源里、时间最新的一条」——所有来源都是默认值时退化为纯按时间，
+     * 与加这一列之前的行为完全一致。详见 {@code MeasurementQueryService#resolveLatestRow}。</p>
+     */
+    private Integer sourcePriority;
     private BigDecimal azimuthDegrees;
     private BigDecimal elevationDegrees;
     private BigDecimal slantRangeM;

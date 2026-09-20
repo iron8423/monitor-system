@@ -369,6 +369,21 @@ async function loadDetail() {
   }
 }
 
+/**
+ * 「当前值来源」（V25，P1-2）：多台设备看同一个点时，这个值是哪台报的、它是不是权威来源。
+ * 单来源时也显示（"这个数来自哪台设备"本来就是有用的信息），多来源再列出其它来源。
+ */
+const sourceText = computed(() => {
+  const l = latest.value
+  if (!l?.sourceDeviceCode) return '—'
+  const rank = l.sourcePriority ?? 100
+  const tag = rank < 100 ? '权威来源' : rank === 100 ? '默认档' : '降级来源'
+  const others = (l.sources || []).map((s) => s.deviceCode).filter((c) => c && c !== l.sourceDeviceCode)
+  return others.length
+    ? `${l.sourceDeviceCode}（${tag}）；同点其它来源：${others.join('、')}`
+    : `${l.sourceDeviceCode}（${tag}）`
+})
+
 /** 登记基准变更（P1-4）：原因白名单由后端给，前端不抄标签 */
 async function openBaselineDialog() {
   const pointId = selectedId.value
@@ -503,6 +518,7 @@ watch([selectedId, metricCode, granularity, rangeHours], reloadForSelection)
                 // 测量基准（P1-4）：反映「这套累计形变是相对哪次基准的」。
                 // 从未登记过要写成「未登记」——留空会让人以为加载失败
                 { k: '测量基准', v: baselineText },
+                { k: '当前值来源', v: sourceText },
               ]" :key="row.k" class="field">
                 <span class="mk-muted field-k">{{ row.k }}</span>
                 <span :class="{ 'mk-mono': row.mono, empty: row.v === null || row.v === undefined }">

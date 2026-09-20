@@ -67,6 +67,8 @@ public class ProjectSummaryService {
     private final DeviceMapper deviceMapper;
     private final DevicePointMapper devicePointMapper;
     private final MeasurementMapper measurementMapper;
+    /** 取「当前值」的唯一入口（含多源优先级，V25）：概览的最大形变必须与它同判据 */
+    private final MeasurementQueryService measurementQueryService;
     private final DataScopeService dataScope;
 
     public ProjectSummaryVO summary(Long projectId) {
@@ -167,9 +169,9 @@ public class ProjectSummaryService {
      *
      * <p>只扫 {@code defo_mm} 一行是有意的——理由见 {@link #DEFO_METRIC} 的注释。</p>
      *
-     * <p>「最新一行」的判据走 {@link MeasurementMapper#latestRowOf}，与
-     * {@link MeasurementQueryService#latest} 是同一个方法——两处若各写一份排序，
-     * 同刻多行时 {@code /points/{id}/latest} 与本端点的最大形变会取到不同行。
+     * <p>「最新一行」的判据**委托给** {@link MeasurementQueryService#resolveLatestRow}：
+     * 那里同时管着时间排序（{@code collect_time DESC, id DESC}）与多源优先级（V25，P1-2）。
+     * 两处若各写一份，同刻多行时会取到不同行、多来源时更会一个按时间一个按优先级——
      * 本方法此前正是漏了 id 兜底的那一处。</p>
      */
     private Double maxDeformation(List<Long> pointIds) {
@@ -178,8 +180,7 @@ public class ProjectSummaryService {
         LocalDateTime ceiling = LocalDateTime.now();
         Double max = null;
         for (Long pointId : pointIds) {
-            Measurement last = measurementMapper.selectOne(
-                    measurementMapper.latestRowOf(pointId, DEFO_METRIC, ceiling).last("LIMIT 1"));
+            Measurement last = measurementQueryService.resolveLatestRow(pointId, DEFO_METRIC, ceiling);
             if (last == null || last.getMeasureValue() == null) {
                 continue;
             }

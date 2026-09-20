@@ -170,6 +170,15 @@ export function calibrateDevicePoint(deviceId, pointId, payload) {
 }
 
 /** DELETE /api/v1/devices/{id}/points/{pointId} → 空。**幂等**：没绑过也返回 200，不是 404。角色 ADMIN/MAINTAINER */
+/**
+ * PUT /devices/{id}/points/{pointId}/source-priority → 「来源优先级」（V25，P1-2）。
+ * 数值越小越权威；100 是"未特别指定"的默认档。多台设备看同一个点时，
+ * 当前值取"优先级最小的来源里、时间最新的一条"。
+ */
+export function setDevicePointSourcePriority(deviceId, pointId, sourcePriority) {
+  return http.put(`/v1/devices/${deviceId}/points/${pointId}/source-priority`, { sourcePriority })
+}
+
 export function unbindDevicePoint(deviceId, pointId) {
   return http.delete(`/v1/devices/${deviceId}/points/${pointId}`)
 }

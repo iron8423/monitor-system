@@ -1,12 +1,15 @@
 package com.monitor.asset.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.monitor.asset.dto.PointSourceRow;
 import com.monitor.asset.entity.DevicePoint;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface DevicePointMapper extends BaseMapper<DevicePoint> {
@@ -122,4 +125,37 @@ public interface DevicePointMapper extends BaseMapper<DevicePoint> {
                       @Param("reason") String reason,
                       @Param("invalidatedAt") LocalDateTime invalidatedAt,
                       @Param("operator") String operator);
+
+    /**
+     * 一批测点各自的观测来源（设备），按「优先级升序、绑定 id 升序」（V25，P1-2）。
+     *
+     * <p>取值时先拿这份清单、再按优先级去挑"当前值"——见
+     * {@code MeasurementQueryService#resolveLatestRow}。刻意做成**批**查询：
+     * 项目级批量 latest 一次要处理上千个测点，逐点查会把"批量端点"的意义抹掉。</p>
+     *
+     * <p>{@code JOIN device ... AND d.deleted = 0}：设备是逻辑删除的，软删掉的设备不该再作为
+     * 权威来源参与取值（{{@code device_point} 行还留着，那是历史绑定记录）。</p>
+     */
+    @Select("""
+            <script>
+            SELECT dp.point_id          AS pointId,
+                   dp.device_id         AS deviceId,
+                   d.code               AS deviceCode,
+                   d.name               AS deviceName,
+                   dp.source_priority   AS sourcePriority,
+                   dp.calibration_status AS calibrationStatus,
+                   dp.line_of_sight     AS lineOfSight
+            FROM device_point dp
+            JOIN device d ON d.id = dp.device_id AND d.deleted = 0
+            WHERE dp.point_id IN
+              <foreach collection="pointIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            ORDER BY dp.point_id, dp.source_priority, dp.id
+            </script>
+            """)
+    List<PointSourceRow> selectSourcesByPointIds(@Param("pointIds") List<Long> pointIds);
+
+    /** 单个测点的观测来源（同上，供单点路径用）。 */
+    default List<PointSourceRow> selectSourcesByPointId(Long pointId) {
+        return pointId == null ? List.of() : selectSourcesByPointIds(List.of(pointId));
+    }
 }

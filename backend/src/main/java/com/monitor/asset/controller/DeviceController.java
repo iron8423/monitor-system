@@ -6,6 +6,7 @@ import com.monitor.asset.DeviceStatusPolicy;
 import com.monitor.asset.RadarCoveragePolicy;
 import com.monitor.asset.dto.DevicePointCalibrationRequest;
 import com.monitor.asset.dto.DeviceStatusVO;
+import com.monitor.asset.dto.SourcePriorityRequest;
 import com.monitor.asset.entity.Device;
 import com.monitor.asset.entity.DevicePoint;
 import com.monitor.asset.mapper.DeviceMapper;
@@ -243,6 +244,37 @@ public class DeviceController extends BaseCrudController<Device> {
         // invalidated_at/reason 清成 NULL，而这个对象里还留着旧值——于是「重新标定成功」
         // 的响应体是 `calibrationStatus=ACTIVE` 外加一个 `invalidatedAt`。
         // 一把 INVALID 的标定重新标定就会复现。
+        return Result.ok(devicePointMapper.selectById(binding.getId()));
+    }
+
+    /**
+     * 设置某条绑定的**来源优先级**（V25，复查清单 P1-2）。
+     *
+     * <p>为什么单独一个端点、而不是塞进标定请求：优先级是**绑定关系**的属性
+     * （"这台设备在这个点上的话语权"），与"这条视线现在成不成立"是两件事；
+     * 塞进标定会强迫调用方为了改优先级重传一遍方位/斜距/视线。
+     * 反过来，标定也不该顺手改优先级——那会让"我刚重标定完，当前值怎么换来源了"变成谜。</p>
+     *
+     * <p>角色与绑定/标定/解绑一致（ADMIN / MAINTAINER），并写审计（谁把哪台的优先级改了）。</p>
+     */
+    @PutMapping("/{id}/points/{pointId}/source-priority")
+    @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER')")
+    @AuditAction(action = "设置来源优先级")
+    public Result<DevicePoint> updateSourcePriority(@PathVariable Long id,
+                                                    @PathVariable Long pointId,
+                                                    @Valid @RequestBody SourcePriorityRequest request) {
+        requireDevice(id);
+        requirePoint(pointId);
+        dataScope.assertPointVisible(pointId);
+        DevicePoint binding = devicePointMapper.selectOne(new LambdaQueryWrapper<DevicePoint>()
+                .eq(DevicePoint::getDeviceId, id)
+                .eq(DevicePoint::getPointId, pointId)
+                .last("LIMIT 1"));
+        if (binding == null) {
+            throw new BizException(404, "设备与测点尚未绑定");
+        }
+        binding.setSourcePriority(request.getSourcePriority());
+        devicePointMapper.updateById(binding);
         return Result.ok(devicePointMapper.selectById(binding.getId()));
     }
 
