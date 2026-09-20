@@ -920,6 +920,13 @@ onBeforeUnmount(() => {
         · 连线 = **这座雷达看到的每个目标的核验状态**（已核验 / 待核验 / 被遮挡）。
       选中一台才显示它的连线（规模场景上千条会糊住画面），覆盖面则两台都留。
     -->
+    <!--
+      右侧竖栏（2026-09-20 用户要求）：雷达面板与图例原来一个在右上、一个在底部居中，
+      图例横铺一行、内容一多就压到时间轴上。现在两块都收进这个竖栏里：
+      雷达在上、图例在下，图例内部也改成**竖排**，右侧留白被用起来、底部那条时间轴不再被压。
+      空白处 pointer-events: none，不影响在 3D 场景里拖动/拾取。
+    -->
+    <div class="right-rail">
     <aside v-if="radars.length" class="hud radar-side">
       <div class="panel-title">雷达与视场（{{ radars.length }}）</div>
       <button
@@ -974,8 +981,8 @@ onBeforeUnmount(() => {
           <span>{{ formatSigned(heatMax, 2) }} {{ heatUnit }}</span>
         </div>
         <span class="legend-note">
-          颜色＝测值大小（刻度取当前测点最大绝对值）；晕圈大小只表示相对大小，不是影响半径。
-          只显示「当前选中测点」的晕圈——点左侧列表或 3D 里的测点即可切换（与垂直视场边界的口径一致）。
+          颜色＝测值大小（刻度取当前最大绝对值）；晕圈大小只是相对大小，不是影响半径。
+          只显示选中测点的晕圈（与垂直视场同口径），点列表或 3D 里的测点即可切换。
         </span>
       </div>
       <span class="legend-note">场景：{{ sceneDescription }}</span>
@@ -998,6 +1005,7 @@ onBeforeUnmount(() => {
           垂直视场边界
         </label>
       </div>
+    </div>
     </div>
 
     <!-- 底部时间轴：回放历史 / 退回实时 -->
@@ -1387,10 +1395,31 @@ onBeforeUnmount(() => {
   padding: 12px;
 }
 
-.radar-side {
+.right-rail {
+  position: absolute;
+  z-index: 10;
   top: 68px;
-  right: 72px;
-  width: 238px;
+  right: 16px;
+  /* 让开底部时间轴（它 left/right 都是 16px、高约 52px + 16px 边距） */
+  bottom: 84px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  width: 296px;
+  /* 内容多时自己滚，不顶出屏幕；空白处不挡 3D 交互 */
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.right-rail > * {
+  pointer-events: auto;
+}
+
+.radar-side {
+  /* 从"绝对定位在右上角"改成竖栏里的普通块（位置由 .right-rail 决定） */
+  position: static;
+  width: auto;
   padding: 12px;
 }
 
@@ -1510,8 +1539,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 2px;
   width: 100%;
-  max-width: 260px;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .heat-legend-bar {
@@ -1610,17 +1638,19 @@ onBeforeUnmount(() => {
 }
 
 .legend {
-  /* 必须高于底部时间轴（那条 left/right:16px 的整条，高约 52px） */
-  bottom: 84px;
-  left: 50%;
+  /* 2026-09-20：从"底部居中横排"改成"右侧竖栏里的一块竖排面板"（用户要求）。
+     位置/宽度交给 .right-rail，这里只负责内部排版。 */
+  position: static;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  max-width: calc(100% - 32px);
-  gap: 16px;
-  align-items: center;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
   padding: 8px 16px;
-  transform: translateX(-50%);
+  /* 注意：原来这里还有 transform: translateX(-50%)（配合 left:50% 居中）。
+     改成静态定位后它不会消失——left 失效但 transform 照旧生效，
+     于是整块面板被左移半个宽度、内容在竖栏左边被裁掉（实测偏了 148px）。
+     居中改竖排时**两处都要清**：left/right 与 transform。 */
+  transform: none;
 }
 
 /* 图例是竖排的，行间距收紧一点，别把大屏占掉半屏 */
@@ -1630,9 +1660,12 @@ onBeforeUnmount(() => {
 }
 
 .layer-toggles {
+  /* 竖栏里横排三个复选框会挤成两行，改成竖排——本来右侧就是"一条一条读"的排版 */
   display: flex;
-  gap: 16px;
-  align-items: center;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  margin-top: 2px;
 }
 
 .legend .panel-title {
@@ -1649,10 +1682,11 @@ onBeforeUnmount(() => {
 }
 
 .legend-note {
-  padding-left: 8px;
+  padding-top: 4px;
   font-size: 11px;
+  line-height: 1.5;
   color: var(--mk-hud-muted);
-  border-left: 1px solid rgba(90, 170, 255, 0.25);
+  border-top: 1px solid rgba(90, 170, 255, 0.18);
 }
 
 /* 浮窗以测点位置为锚点，向左上偏移，避免挡住标点本身 */
