@@ -70,6 +70,8 @@ public class OpsController {
     private final Flyway flyway;
     private final SseBroadcaster broadcaster;
     private final Environment environment;
+    /** 只读地读保留任务的开关与最近一轮统计（写入路径不在这里，见该任务类注释）。 */
+    private final com.monitor.telemetry.service.MeasurementRetentionJob retentionJob;
 
     @Value("${monitor.ingest.strict-contract:false}")
     private boolean strictContract;
@@ -258,7 +260,21 @@ public class OpsController {
         data.put("securityHint", DEV_DEFAULT_INGEST_KEY.equals(ingestKey)
                 ? "接入密钥仍是开发默认值：生产部署必须用 MONITOR_INGEST_KEY 覆盖"
                 : "接入密钥已按环境变量覆盖");
+        // 保留任务的开关也在这里：它是"会不会删数据"的第一现场，与其它运行时开关同列
+        data.put("retention", retentionJob.stats());
         return Result.ok(data);
+    }
+
+    /**
+     * 测量值保留任务的**只读**视图（P1-1）：开关、参数与最近一轮统计。
+     *
+     * <p>刻意不提供"立即执行一轮"的按钮：那是删数据，属于配置与命令行的事，
+     * 与运维页"只读"的边界一致（见类注释）。要看真结果，开 {@code MONITOR_RETENTION_ENABLED}
+     * 并等一轮，或直接用验收套件 {@code 19-retention.sh} 的驱动方式。</p>
+     */
+    @GetMapping("/retention")
+    public Result<Map<String, Object>> retention() {
+        return Result.ok(retentionJob.stats());
     }
 
     // ---------------------------------------------------------------- 内部工具

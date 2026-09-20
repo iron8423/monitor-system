@@ -77,6 +77,19 @@ monitor:
   # 常量不进配置，是因为它们同时被告警快照读去展示——判据两处各写一份迟早漂移。
   data-quality:
     sweep-ms: ${DATA_QUALITY_SWEEP_MS:10000}
+  # 测量值保留（复查清单 P1-1：容量与保留策略）。
+  # **默认关闭**：删数据不可逆，默认打开意味着任何一次本地启动、任何一套演示库都可能真删。
+  # 开启方式：MONITOR_RETENTION_ENABLED=true（生产编排里显式打开并给出保留天数）。
+  # 口径与取舍（分批删、每轮上限、只删测量值）见 MeasurementRetentionJob 的类注释；
+  # 容量预算与分区演进的完整算法见 docs/容量与保留策略_20260920.md。
+  retention:
+    enabled: ${MONITOR_RETENTION_ENABLED:false}
+    raw-days: ${MONITOR_RETENTION_RAW_DAYS:90}
+    batch-size: ${MONITOR_RETENTION_BATCH_SIZE:5000}
+    max-rows-per-sweep: ${MONITOR_RETENTION_MAX_ROWS_PER_SWEEP:200000}
+    batch-pause-ms: ${MONITOR_RETENTION_BATCH_PAUSE_MS:200}
+    sweep-ms: ${MONITOR_RETENTION_SWEEP_MS:3600000}
+    initial-delay-ms: ${MONITOR_RETENTION_INITIAL_DELAY_MS:60000}
   # ingest 接入共享密钥（M0-D7）：无网关，/api/v1/ingest/** 校验 X-Ingest-Key 头
   # dev 默认值已与 B 统一为 dev-ingest-key（B 上报脚本默认同此值，见 B 答复 2026-09-09）；
   # 联调/生产用环境变量 MONITOR_INGEST_KEY 覆盖此默认值（与 B 协商一致的密钥）

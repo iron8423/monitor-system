@@ -149,6 +149,22 @@ const configRows = computed(() => {
     { label: '演示账号初始化', value: c.demoAccountsEnabled ? '开启' : '关闭（生产默认）' },
     { label: '令牌有效期', value: `${c.jwtExpirationHours} 小时` },
     {
+      // 时间口径（2026-09-18 的真 bug 之后加的）：JVM 默认时区由应用钉死，
+      // 与宿主机 TZ 无关。放在这一页是因为"这台机器的时间基准是什么"是排障第一问——
+      // 裸机漏配 TZ 时，接入会整批被判成"未来"。
+      label: '时间口径',
+      value: `${c.timeZone}（与宿主机 TZ 无关）`,
+    },
+    {
+      // 保留任务（P1-1）：这是"会不会删数据"的第一现场，必须出现在运行时开关里。
+      // 开着的时候把保留天数与最近一轮删了多少一起写出来——只看"开启"两个字说明不了任何事。
+      label: '测量值保留',
+      value: c.retention?.enabled
+        ? `开启 · 保留 ${c.retention.rawDays} 天`
+          + (c.retention.lastRun ? ` · 上轮删除 ${formatNumber(c.retention.lastRun.deleted, 0)} 行` : ' · 尚未执行')
+        : '关闭（默认，不会删除任何数据）',
+    },
+    {
       label: '接入密钥',
       value: `长度 ${c.ingestKeyLength} 位 · ${c.ingestKeyIsDevDefault ? '开发默认值（需覆盖）' : '已按环境变量覆盖'}`,
     },

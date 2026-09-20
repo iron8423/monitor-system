@@ -156,6 +156,10 @@ check "admin 可读 /ops/stats" "200" "$(http_code "$BASE/ops/stats" -H "$AUTH")
 # （容器镜像里有 TZ=Asia/Shanghai 盖着，所以这条只在裸机/CI/k8s 上才会红。）
 check "平台时区钉定为 Asia/Shanghai（与宿主机无关）" "Asia/Shanghai" \
   "$(curl -s "$BASE/ops/config" -H "$AUTH" | data_of "['timeZone']")"
+# 保留任务**默认必须是关闭的**（P1-1）：删数据不可逆，任何一次本地启动、任何一套演示库
+# 都不该在没人配置的情况下真删测量值。开着的实例由 19-retention 自带后端单独验。
+check "保留任务默认关闭（演示/开发库不会被悄悄删数据）" "False" \
+  "$(curl -s "$BASE/ops/config" -H "$AUTH" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['retention']['enabled'])")"
 check "stats 列出了走近似计数的表" "True" \
   "$(curl -s "$BASE/ops/stats" -H "$AUTH" | python3 -c "import sys,json;print('measurement' in (json.load(sys.stdin)['data'].get('approximateTables') or []))")"
 curl -s -o /dev/null "$BASE/ops/stats" -H "$AUTH"
