@@ -1,0 +1,33 @@
+{
+  "assetVersion": "qingyuan-railway-1.0.0",
+  "generatedAt": "2026-09-20T06:18:08+00:00",
+  "generator": "tools/terrain_asset/export_heightfield.py",
+  "sceneDir": "frontend/public/models/qingyuan-railway",
+  "anchor": {
+    "longitude": 113.0219,
+    "latitude": 23.7205
+  },
+  "floor": 8.0,
+  "width": 600.0,
+  "depth": 450.0,
+  "cellsX": 240,
+  "cellsY": 180,
+  "mPerLon": 101970.32609000744,
+  "mPerLat": 110754.20063084904,
+  "detailAmplitude": 1.2,
+  "detailSeed": 20260918,
+  "minRelativeHeight": 1.8617413129210565,
+  "maxRelativeHeight": 23.932112545217592,
+  "grid": {
+    "file": "qingyuan-railway-1.0.0.bin",
+    "encoding": "float32-le",
+    "layout": "row-major, i (x) fastest, j (y) slowest",
+    "bytes": 174484,
+    "sha256": "be87d03b7de58c72cab092f79fa4a1e8625dcdd06b1acb03263fc16a3e821a3f"
+  },
+  "verified": {
+    "bindings": 6,
+    "maxClearanceDeltaM": 0.000818,
+    "reflectorHeightM": 2.5
+  }
+}

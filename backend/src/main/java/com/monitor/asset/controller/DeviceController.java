@@ -19,7 +19,11 @@ import com.monitor.common.base.BaseCrudController;
 import com.monitor.common.exception.BizException;
 import com.monitor.common.util.Times;
 import com.monitor.project.mapper.MonitorPointMapper;
+import com.monitor.project.entity.MonitorPoint;
 import com.monitor.scope.service.DataScopeService;
+import com.monitor.twin.TerrainSightService;
+import com.monitor.twin.dto.CalibrationPreviewRequest;
+import com.monitor.twin.dto.CalibrationPreviewVO;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +56,7 @@ public class DeviceController extends BaseCrudController<Device> {
     private final MonitorPointMapper pointMapper;
     private final DataScopeService dataScope;
     private final CalibrationService calibrationService;
+    private final TerrainSightService terrainSight;
 
     @Override
     protected BaseMapper<Device> mapper() {
@@ -210,7 +215,7 @@ public class DeviceController extends BaseCrudController<Device> {
                                          @PathVariable Long pointId,
                                          @Valid @RequestBody DevicePointCalibrationRequest request) {
         Device device = requireDevice(id);
-        requirePoint(pointId);
+        MonitorPoint point = requirePoint(pointId);
         dataScope.assertPointVisible(pointId);
         DevicePoint binding = devicePointMapper.selectOne(new LambdaQueryWrapper<DevicePoint>()
                 .eq(DevicePoint::getDeviceId, id)
@@ -223,6 +228,13 @@ public class DeviceController extends BaseCrudController<Device> {
         // 边界结论取决于这几行之间过了多久。
         LocalDateTime now = LocalDateTime.now();
         RadarCoveragePolicy.validateCalibration(device, request, now);
+        // 声称"通视"时，用离线地形高程场复核一次（P1-10）：模型判定被遮挡就拒收。
+        // 只在"有高程场 + 两端点都在模型范围内 + 档案坐标齐全"时才拦，判据写在
+        // TerrainSightService#lineOfSightBlockReason 的注释里。
+        String blocked = terrainSight.lineOfSightBlockReason(device, point, request.getReflectorHeightM());
+        if (blocked != null) {
+            throw new BizException(blocked);
+        }
         binding.setTargetCode(request.getTargetCode().trim());
         binding.setAzimuthDegrees(request.getAzimuthDegrees());
         binding.setElevationDegrees(request.getElevationDegrees());
@@ -245,6 +257,37 @@ public class DeviceController extends BaseCrudController<Device> {
         // 的响应体是 `calibrationStatus=ACTIVE` 外加一个 `invalidatedAt`。
         // 一把 INVALID 的标定重新标定就会复现。
         return Result.ok(devicePointMapper.selectById(binding.getId()));
+    }
+
+    /**
+     * 按离线地形模型**试算**一次标定（复查清单 P1-10）：只算不写。
+     *
+     * <p>它回答的是现场最需要先知道的那个问题——「按你现在的设备位置、测点位置和这片地形，
+     * 这条视线成不成立、净空多少、方位/俯仰/斜距各是多少」。结论由后端从档案几何重算，
+     * 不是把请求里填的数再回显一遍；因此这个端点也是「人工填错」在提交前能自查的唯一手段。</p>
+     *
+     * <p>权限沿用它兄弟 {@code GET /{id}/points} 的口径：只是一个读操作，按数据范围
+     * （{@code assertDeviceVisible} / {@code assertPointVisible}）判可见性，不加角色限制——
+     * 现场工程师本来就该能在标定前试算。</p>
+     *
+     * <p>请求体可以整个省略（此时天线高取设备档案、反射器高取绑定上的值）；
+     * 也可以只覆盖这两个高度做"天线抬到 14m 行不行"这类试算。</p>
+     */
+    @PostMapping("/{id}/points/{pointId}/calibration/preview")
+    public Result<CalibrationPreviewVO> previewCalibration(
+            @PathVariable Long id,
+            @PathVariable Long pointId,
+            @RequestBody(required = false) @Valid CalibrationPreviewRequest request) {
+        Device device = requireDevice(id);
+        MonitorPoint point = requirePoint(pointId);
+        dataScope.assertPointVisible(pointId);
+        DevicePoint binding = devicePointMapper.selectOne(new LambdaQueryWrapper<DevicePoint>()
+                .eq(DevicePoint::getDeviceId, id)
+                .eq(DevicePoint::getPointId, pointId)
+                .last("LIMIT 1"));
+        // 没绑定也允许试算：现场最常见的一步就是"先看看这个点能不能被这台雷达看到，
+        // 行的话再绑"。绑定与否只影响"与现有标定值的对比"那一组字段。
+        return Result.ok(terrainSight.preview(device, point, binding, request));
     }
 
     /**
@@ -331,9 +374,12 @@ public class DeviceController extends BaseCrudController<Device> {
         return device;
     }
 
-    private void requirePoint(Long id) {
-        if (id == null || pointMapper.selectById(id) == null) {
+    /** 返回实体而不只是判存在：地形试算与标定校核都要用它的经纬度/高程。 */
+    private MonitorPoint requirePoint(Long id) {
+        MonitorPoint point = id == null ? null : pointMapper.selectById(id);
+        if (point == null) {
             throw new BizException(404, "测点不存在: " + id);
         }
+        return point;
     }
 }

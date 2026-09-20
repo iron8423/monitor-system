@@ -53,6 +53,15 @@ const calibrationVisible = ref(false)
 const calibrationSaving = ref(false)
 const calibrationRow = ref(null)
 const calibrationForm = ref({})
+/**
+ * 地形试算（P1-10）：`preview` 是后端按档案几何 + 离线高程场算出来的结果，
+ * 只算不写；`previewing` 是它的加载态。
+ * `previewAntenna` 单独一个输入框而不是复用雷达档案：试算的意义就是"换个高度会怎样"，
+ * 而改雷达档案会连带把全部标定打成失效（第 09 条），两者不能共用一个入口。
+ */
+const previewing = ref(false)
+const preview = ref(null)
+const previewAntenna = ref(null)
 
 /** pointId → 测点对象。绑定表本身不带点号，界面要显示就得自己 join 一次 */
 const pointById = computed(() => Object.fromEntries(allPoints.value.map((p) => [p.id, p])))
@@ -182,6 +191,8 @@ async function changePriority(row, value) {
 
 function openCalibration(row) {
   calibrationRow.value = row
+  preview.value = null
+  previewAntenna.value = props.device?.antennaHeightM ?? null
   calibrationForm.value = {
     targetCode: row.targetCode || `${props.device.code}-${row.code}`,
     azimuthDegrees: row.azimuthDegrees ?? props.device.headingDegrees ?? 0,
@@ -196,6 +207,58 @@ function openCalibration(row) {
   }
   calibrationVisible.value = true
 }
+
+/**
+ * 按地形试算：把设备/测点档案里的坐标交给后端，由它用离线高程场逐米步进重算这条视线。
+ *
+ * 为什么值得单独一个按钮：标定表单里的方位角/斜距是**人填的**，填错没有任何东西会拦；
+ * 而试算给的是「按你现在的设备位置、测点位置和这片地形，这条视线成不成立」。
+ * 两个数对不上时，至少看得出是哪一边出了问题。
+ */
+async function runPreview() {
+  const row = calibrationRow.value
+  if (!row) return
+  previewing.value = true
+  try {
+    preview.value = await api.previewDevicePointCalibration(props.device.id, row.pointId, {
+      antennaHeightM: previewAntenna.value ?? undefined,
+      reflectorHeightM: calibrationForm.value.reflectorHeightM ?? undefined,
+    })
+  } catch {
+    /* 拦截器已提示原因 */
+  } finally {
+    previewing.value = false
+  }
+}
+
+/**
+ * 把试算结果填进表单。
+ *
+ * 只填模型能算出来的那四个（方位/俯仰/斜距/净空）与视线结论；目标编号、有效期、
+ * 备注一律不碰——那些不是几何量，模型对它们没有发言权。填完仍要点「校验并激活」，
+ * 这里不直接提交：让人在提交前看一眼「跟我心里那个数差多少」，本身就是这一步的价值。
+ */
+function applyPreview() {
+  const p = preview.value
+  if (!p || p.computedAzimuthDegrees == null) return
+  calibrationForm.value.azimuthDegrees = p.computedAzimuthDegrees
+  calibrationForm.value.elevationDegrees = p.computedElevationDegrees
+  calibrationForm.value.slantRangeM = p.computedSlantRangeM
+  calibrationForm.value.minimumClearanceM = p.minimumClearanceM
+  calibrationForm.value.lineOfSight = p.terrainLineOfSight
+  ElMessage.success('已按地形试算结果填入几何字段')
+}
+
+/** 试算结论 → 标签样式（模板里的文案不写 Markdown 记号，会原样显示）。 */
+const previewVerdict = computed(() => {
+  const v = preview.value?.verdict
+  if (v === 'VISIBLE') return { text: '模型判定：通视', type: 'success' }
+  if (v === 'BLOCKED') return { text: '模型判定：被遮挡', type: 'danger' }
+  if (v === 'OUTSIDE_MODEL') return { text: '超出模型范围', type: 'info' }
+  if (v === 'NO_TERRAIN') return { text: '该项目无地形高程场', type: 'info' }
+  if (v === 'GEOMETRY_MISSING') return { text: '档案坐标不全', type: 'warning' }
+  return { text: '未试算', type: 'info' }
+})
 
 async function saveCalibration() {
   const row = calibrationRow.value
@@ -674,6 +737,37 @@ watch(
         <el-input-number v-model="calibrationForm.minimumClearanceM" :precision="3" />
       </el-form-item>
       <!--
+        地形试算（P1-10）：后端用离线地形高程场逐米步进重算这条视线，只算不写。
+        天线高在这里是**假设值**，不是改雷达档案——改档案会把全部标定打成失效，两者不能共用一个入口。
+      -->
+      <el-form-item label="地形试算">
+        <div class="preview-line">
+          <el-input-number v-model="previewAntenna" :min="0" :max="64" :precision="2" size="small" />
+          <span class="mk-muted">天线高（m，不改档案）</span>
+          <el-button size="small" :loading="previewing" @click="runPreview">按地形试算</el-button>
+        </div>
+      </el-form-item>
+      <el-form-item v-if="preview" label="试算结果">
+        <div class="preview-box">
+          <el-tag :type="previewVerdict.type" size="small">{{ previewVerdict.text }}</el-tag>
+          <div class="preview-row">{{ preview.summary }}</div>
+          <div v-if="preview.computedAzimuthDegrees != null" class="preview-row mk-mono">
+            方位 {{ preview.computedAzimuthDegrees }}° · 俯仰 {{ preview.computedElevationDegrees }}° ·
+            斜距 {{ preview.computedSlantRangeM }} m
+            <template v-if="preview.minimumClearanceM != null"> · 净空 {{ preview.minimumClearanceM }} m</template>
+          </div>
+          <div v-if="preview.azimuthDeltaDegrees != null" class="preview-row mk-muted">
+            与当前绑定相比：方位 {{ preview.azimuthDeltaDegrees }}°，斜距 {{ preview.slantRangeDeltaM }} m
+          </div>
+          <ul v-if="preview.notes && preview.notes.length" class="preview-notes">
+            <li v-for="(note, i) in preview.notes" :key="i">{{ note }}</li>
+          </ul>
+          <el-button v-if="preview.computedAzimuthDegrees != null" size="small" @click="applyPreview">
+            按试算结果填入
+          </el-button>
+        </div>
+      </el-form-item>
+      <!--
         有效期（清单第 16 条）。**这个对话框以前没有这两项**，而 openCalibration 会把
         行里已有的 validFrom/validTo 带进表单、saveCalibration 把整个对象发出去——
         于是「从界面重新标定」会**不知不觉沿用上一次的有效期**：上一轮填的是「年底到期」，
@@ -833,5 +927,37 @@ watch(
   margin: 0 0 12px;
   font-size: 13px;
   line-height: 1.6;
+}
+
+/* 地形试算：一行里放天线高与按钮，结果块单独一块（宽度吃满，长文案才折得开） */
+.preview-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.preview-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--mk-surface-2, rgba(127, 127, 127, 0.08));
+}
+
+.preview-row {
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.preview-notes {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0.85;
 }
 </style>

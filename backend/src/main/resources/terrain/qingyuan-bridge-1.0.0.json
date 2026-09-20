@@ -1,0 +1,33 @@
+{
+  "assetVersion": "qingyuan-bridge-1.0.0",
+  "generatedAt": "2026-09-20T06:18:07+00:00",
+  "generator": "tools/terrain_asset/export_heightfield.py",
+  "sceneDir": "frontend/public/models/qingyuan-bridge",
+  "anchor": {
+    "longitude": 113.0755,
+    "latitude": 23.7956
+  },
+  "floor": 243.0,
+  "width": 400.0,
+  "depth": 300.0,
+  "cellsX": 160,
+  "cellsY": 120,
+  "mPerLon": 101911.84031923965,
+  "mPerLat": 110755.2768381571,
+  "detailAmplitude": 1.4,
+  "detailSeed": 20260918,
+  "minRelativeHeight": 1.7292866246868641,
+  "maxRelativeHeight": 96.63179070391271,
+  "grid": {
+    "file": "qingyuan-bridge-1.0.0.bin",
+    "encoding": "float32-le",
+    "layout": "row-major, i (x) fastest, j (y) slowest",
+    "bytes": 77924,
+    "sha256": "48b78ad8b96f98c6fc0f2e316f2605885b5f7bc22080f90ae4a659f69be5f0d4"
+  },
+  "verified": {
+    "bindings": 6,
+    "maxClearanceDeltaM": 0.000524,
+    "reflectorHeightM": 2.5
+  }
+}

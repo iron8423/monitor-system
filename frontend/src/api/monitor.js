@@ -169,6 +169,18 @@ export function calibrateDevicePoint(deviceId, pointId, payload) {
   return http.put(`/v1/devices/${deviceId}/points/${pointId}/calibration`, payload)
 }
 
+/**
+ * POST /api/v1/devices/{id}/points/{pointId}/calibration/preview → 标定试算（P1-10）。
+ *
+ * **只算不写**：后端按档案里的设备坐标、测点坐标和该项目的离线地形高程场，
+ * 逐米步进重算这条视线，回出方位角/俯仰角/斜距/最小净空与判定。
+ * 传 `{ antennaHeightM, reflectorHeightM }` 可以试「天线架到 14m 行不行」这类假设，
+ * 不传就用档案现况。未绑定也能调——先试算再绑定是正常的现场顺序。
+ */
+export function previewDevicePointCalibration(deviceId, pointId, payload) {
+  return http.post(`/v1/devices/${deviceId}/points/${pointId}/calibration/preview`, payload ?? {})
+}
+
 /** DELETE /api/v1/devices/{id}/points/{pointId} → 空。**幂等**：没绑过也返回 200，不是 404。角色 ADMIN/MAINTAINER */
 /**
  * PUT /devices/{id}/points/{pointId}/source-priority → 「来源优先级」（V25，P1-2）。

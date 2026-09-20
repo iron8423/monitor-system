@@ -1,0 +1,33 @@
+{
+  "assetVersion": "qingyuan-hillside-2.0.0",
+  "generatedAt": "2026-09-20T06:18:07+00:00",
+  "generator": "tools/terrain_asset/export_heightfield.py",
+  "sceneDir": "frontend/public/models/qingyuan-hillside-v2",
+  "anchor": {
+    "longitude": 113.05133,
+    "latitude": 23.75946
+  },
+  "floor": 43.0,
+  "width": 1000.0,
+  "depth": 750.0,
+  "cellsX": 250,
+  "cellsY": 188,
+  "mPerLon": 101940.00694591916,
+  "mPerLat": 110754.75861557598,
+  "detailAmplitude": 1.6,
+  "detailSeed": 20260918,
+  "minRelativeHeight": 1.3363293915934875,
+  "maxRelativeHeight": 238.33631905393582,
+  "grid": {
+    "file": "qingyuan-hillside-2.0.0.bin",
+    "encoding": "float32-le",
+    "layout": "row-major, i (x) fastest, j (y) slowest",
+    "bytes": 189756,
+    "sha256": "b9c197ae56c41102e43f796c4c4bf89fdb251bd244b4be5b13a6673655875298"
+  },
+  "verified": {
+    "bindings": 7,
+    "maxClearanceDeltaM": 0.000548,
+    "reflectorHeightM": 2.5
+  }
+}

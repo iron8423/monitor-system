@@ -1,0 +1,33 @@
+{
+  "assetVersion": "qingyuan-factory-1.0.0",
+  "generatedAt": "2026-09-20T06:18:08+00:00",
+  "generator": "tools/terrain_asset/export_heightfield.py",
+  "sceneDir": "frontend/public/models/qingyuan-factory",
+  "anchor": {
+    "longitude": 113.078,
+    "latitude": 23.694
+  },
+  "floor": 10.0,
+  "width": 500.0,
+  "depth": 375.0,
+  "cellsX": 200,
+  "cellsY": 150,
+  "mPerLon": 101990.92183468468,
+  "mPerLat": 110753.82149863409,
+  "detailAmplitude": 1.0,
+  "detailSeed": 20260918,
+  "minRelativeHeight": 1.9630030973181487,
+  "maxRelativeHeight": 8.255155660878064,
+  "grid": {
+    "file": "qingyuan-factory-1.0.0.bin",
+    "encoding": "float32-le",
+    "layout": "row-major, i (x) fastest, j (y) slowest",
+    "bytes": 121404,
+    "sha256": "954bd0595b4b7a3d73aa18a470063acebef023ba1562801c05e5e732062aef4f"
+  },
+  "verified": {
+    "bindings": 6,
+    "maxClearanceDeltaM": 0.000505,
+    "reflectorHeightM": 2.5
+  }
+}

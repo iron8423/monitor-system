@@ -522,6 +522,28 @@ try {
       '图例里要给出色标刻度（否则"颜色深一点"没有可解释的含义）')
   })
 
+  /**
+   * 地形试算的绊线（P1-10）。这一步的意义全在"接上了没有"：
+   *   · 后端端点 `/calibration/preview` 存在但界面没入口 -> 现场还是要靠人填数；
+   *   · 界面有按钮但传的是自己填的方位角/斜距 -> 变成了"用填的数校验填的数"，
+   *     什么也证明不了；所以断言必须钉住"调用时只传两个高度"。
+   * 判据本身（净空、逐米步进、遮挡拒收）在后台单测与 22-line-of-sight 套件里验，
+   * 这里只保证前端没有把这条通路接错。
+   */
+  ok('绊线·地形试算：入口接上且只传高度（不把填的方位角再喂回去）', () => {
+    const drawer = src('components/DeviceDrawer.vue')
+    const api = src('api/monitor.js')
+    assert.ok(drawer.includes('按地形试算'), '标定对话框里要有试算按钮')
+    assert.ok(drawer.includes('previewDevicePointCalibration'),
+      '要调用试算接口，而不是只在界面上写一行说明')
+    assert.ok(/previewDevicePointCalibration\([\s\S]{0,240}?antennaHeightM/.test(drawer),
+      '试算请求里必须带上天线高（试算的核心就是"换个高度会怎样"）')
+    assert.ok(!/previewDevicePointCalibration\([\s\S]{0,240}?azimuthDegrees/.test(drawer),
+      '试算请求里不能带方位角/斜距：那是人填的，拿它去校验它自己等于没校验')
+    assert.ok(/calibration\/preview/.test(api), 'API 层要指向 /calibration/preview')
+    assert.ok(drawer.includes('按试算结果填入'), '试算结果要能一键填进表单（否则人还得手抄）')
+  })
+
   // 执行实际路由守卫和 onError；只替换浏览器 history、页面组件与对话框。
   const { default: router } = await server.ssrLoadModule('/src/router/index.js')
   const { useUserStore } = await server.ssrLoadModule('/src/stores/user.js')
