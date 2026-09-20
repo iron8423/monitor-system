@@ -221,6 +221,11 @@ function addRadar(viewer, radar, index = 0) {
    *   · 轮廓：**虚线**——上一版是实线，看起来像一条已经成立的边界；
    *   · 措辞：面板与图例都写"理论视场"，并在旁注里写明"未按地形裁剪"。
    * 真正的"看得到"由目标连线表达：只有 ACTIVE + 程序化通视校验通过的目标才是实线。
+   *
+   * **默认只画水平扇面这一片**（2026-09-20 用户反馈"为什么有三个区域"）：
+   * 上一版每台雷达同时画出扇面 + 垂直上边界楔形 + 下边界楔形，三片轮廓叠在一起，
+   * 看上去像三块不同区域，而它们其实只是同一台雷达同一个视场在水平、垂直两个方向上的边界。
+   * 现在垂直边界默认隐藏，**选中那一台时才出现**——需要细节时点一下，平时一眼就是"一台雷达一片"。
    */
   const sectorFace = add('sector', {
     polygon: {
@@ -252,6 +257,7 @@ function addRadar(viewer, radar, index = 0) {
         dashLength: 10,
       }),
     },
+    show: false,   // 默认隐藏：见上面"每台只画一片"的说明
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
   })
   const sectorLower = add('frustum-lower-outline', {
@@ -263,6 +269,7 @@ function addRadar(viewer, radar, index = 0) {
         dashLength: 10,
       }),
     },
+    show: false,   // 默认隐藏：同上
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
   })
 
@@ -333,6 +340,10 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
   const asset = await loadAsset(viewer, config, modelMatrix)
   const decorations = []
   const radarGroups = new Map()
+  // 两个图层开关与当前选中：每台雷达四片形状的可见性由它们合成（见 applyRadarVisibility）
+  let sectorVisible = true
+  let verticalVisible = false
+  let activeRadarKey = null
   // 下标用于配色：RADAR_COLORS 按声明顺序分配，保证「同一台雷达每次打开都是同一个颜色」
   ;(config.radars || []).forEach((radar, index) => {
     const group = addRadar(viewer, radar, index)
@@ -374,12 +385,13 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
   }
 
   function setActiveRadar(deviceId) {
+    activeRadarKey = deviceId == null ? null : String(deviceId)
     for (const [id, group] of radarGroups.entries()) {
-      const active = String(id) === String(deviceId)
-      // 视线只显示选中那台的（场景大时上千条线会把画面糊住），覆盖面则两台都留
+      const active = String(id) === activeRadarKey
+      // 视线只显示选中那台的（场景大时上千条线会把画面糊住），水平扇面则两台都留
       for (const entity of group.targetEntities) entity.show = active
 
-      // 覆盖面：选中的提亮、其余压暗。同色面叠在一起时，「谁在看哪片」只能靠这个区分。
+      // 水平扇面：选中的提亮、其余压暗。同色面叠在一起时，「谁在看哪片」只能靠这个区分。
       const sector = group.sector
       if (sector) {
         const c = Cesium.Color.fromCssColorString(group.faceColor)
@@ -393,17 +405,45 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
         sector.upper.polyline.width = active ? 1.6 : 0.8
         sector.lower.polyline.width = active ? 1.6 : 0.8
       }
+      applyRadarVisibility(group, active)
     }
   }
 
-  /** 覆盖面整体显隐（大屏上的「雷达视场扇面」开关）。与 setActiveRadar 互不干扰。 */
+  /**
+   * 理论视场图层的整体显隐（大屏上的「雷达理论视场」开关）。
+   *
+   * <p>它与「垂直视场边界」两个开关各自独立，所以可见性是**两处的合取**，
+   * 统一在这里算——分别写在两个函数里迟早会出现"开了图层但没刷新"的漂移。</p>
+   */
   function setSectorVisible(show) {
-    for (const group of radarGroups.values()) {
-      for (const key of ['face', 'outline', 'upper', 'lower']) {
-        const entity = group.sector?.[key]
-        if (entity) entity.show = !!show
-      }
+    sectorVisible = !!show
+    for (const [id, group] of radarGroups.entries()) {
+      applyRadarVisibility(group, String(id) === activeRadarKey)
     }
+  }
+
+  /**
+   * 垂直视场上下边界（±verticalHalfAngle）的显隐，默认关闭。
+   *
+   * <p>为什么默认关：它和水平扇面叠在一起时会被读成"另一块覆盖区"（2026-09-20 用户反馈
+   * 「为什么有三个区域」）。需要看垂直范围时再打开；打开后也**只画选中那一台**，
+   * 否则两台雷达的四片轮廓同时铺开，又回到同一个误会。</p>
+   */
+  function setVerticalVisible(show) {
+    verticalVisible = !!show
+    for (const [id, group] of radarGroups.entries()) {
+      applyRadarVisibility(group, String(id) === activeRadarKey)
+    }
+  }
+
+  /** 两处开关 + 是否选中，合成每台雷达四片形状的可见性。 */
+  function applyRadarVisibility(group, active) {
+    const sector = group.sector
+    if (!sector) return
+    sector.face.show = sectorVisible
+    sector.outline.show = sectorVisible
+    sector.upper.show = sectorVisible && verticalVisible && active
+    sector.lower.show = sectorVisible && verticalVisible && active
   }
 
   function pickRadarId(picked) {
@@ -422,6 +462,7 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
     flyHome,
     setActiveRadar,
     setSectorVisible,
+    setVerticalVisible,
     pickRadarId,
     destroy() {
       for (const entity of decorations) viewer.entities.remove(entity)

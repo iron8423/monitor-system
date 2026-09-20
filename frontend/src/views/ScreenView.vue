@@ -316,6 +316,12 @@ const dataStatus = computed(() => {
 const heatOn = ref(true)
 /** 雷达视场扇面（每台雷达一个颜色，选中那台提亮）。与热力图一样属于「图层」，可单独关掉。 */
 const sectorOn = ref(true)
+/**
+ * 垂直视场上下边界（±verticalHalfAngle）默认关闭（2026-09-20 用户反馈「为什么有三个区域」）。
+ * 它和水平扇面叠在一起会被读成另一块覆盖区——需要看垂直范围时再打开，
+ * 打开后也只画选中的那一台（见 digitalTwinScene 的 setVerticalVisible）。
+ */
+const verticalOn = ref(false)
 
 /** 当前主测项是不是「速率」类——点符号用它区分（见 pointLayer.js 的说明） */
 const isRateMetric = computed(() => String(store.primaryMetricCode || '').includes('rate'))
@@ -465,6 +471,7 @@ async function loadProjectScene(projectId) {
     // 新场景要继承当前的图层开关状态：关掉「视场扇面」后切项目，
     // 不该因为新建了场景就自己又亮回来
     scene.setSectorVisible(sectorOn.value)
+    scene.setVerticalVisible(verticalOn.value)
     mountainState.value = 'ok'
     pointLayer?.setLabelDistance(config.labelDistance)
     heatLayer?.setMaxPoints(config.maxHeatPoints)
@@ -683,6 +690,7 @@ watch(
 
 watch(heatOn, (on) => heatLayer?.setVisible(on))
 watch(sectorOn, (on) => mountainScene?.setSectorVisible(on))
+watch(verticalOn, (on) => mountainScene?.setVerticalVisible(on))
 
 // 主题切换要把 3D 场景底色一起换掉（影像与地形本身不动——那是数据，不是主题装饰）
 watch(isDark, () => applyViewerTheme(viewer))
@@ -917,7 +925,8 @@ onBeforeUnmount(() => {
         <span class="vk blocked">被遮挡 {{ radarTargetStats.blocked }}</span>
       </div>
       <div v-if="activeRadar" class="radar-note">
-        扇面为理论视场（按量程与角度解析计算，未按地形裁剪）；连线才是逐目标的核验结果。
+        扇面是水平理论视场（按量程与角度解析算出，未按地形裁剪）；垂直上下边界在图例里打开后才显示，
+        且只显示选中的这一台；连线才是逐目标的核验结果。
       </div>
     </aside>
 
@@ -946,6 +955,10 @@ onBeforeUnmount(() => {
         <label class="heat-toggle">
           <input v-model="sectorOn" type="checkbox" />
           雷达理论视场
+        </label>
+        <label class="heat-toggle">
+          <input v-model="verticalOn" type="checkbox" />
+          垂直视场边界
         </label>
       </div>
     </div>
