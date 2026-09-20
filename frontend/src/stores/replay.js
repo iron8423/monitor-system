@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 
-import { pointSeries } from '@/api/monitor'
+import { pointSeries, pointsSeries } from '@/api/monitor'
 import { useMonitorStore } from '@/stores/monitor'
 import { RAW_ROWS_PER_HOUR, rawFitsInLimit } from '@/utils/seriesGranularity'
 import { getToken } from '@/utils/token'
@@ -14,14 +14,19 @@ import { buildFrames, frameDataCount, frameFreshCount } from '@/utils/timeline'
  *   - 回放只是在大屏这一层**换个数据源**：`enabled` 时点位显示历史帧的值，
  *     退出回放立刻回到实时——不是「暂停订阅」，这样退出时不会等下一次推送才更新。
  *
- * 数据来自 `/points/{id}/series`（逐点各一份），合并成帧的逻辑在 `utils/timeline.js`，
- * 是纯函数（有断言），这里只负责取数、播放节拍和状态。
+ * 数据来自 `/points/series`（**批量**，一次多个测点；P2-4），合并成帧的逻辑在
+ * `utils/timeline.js`，是纯函数（有断言），这里只负责取数、播放节拍和状态。
  *
  * **取数规模**（清单第 18 条）：`/series` 没有条数上限、`raw` 分支不抽稀，而生产基线是
  * 5 秒采样——单点 7 天就是 12 万行，7 个点合起来 85 万行 ≈ 38MB JSON。原来的写法是
  * 「对**全部可见点**逐个 `Promise.all` 发 raw、不传 `to`、无守卫」，在 1000 点项目上
- * 是 1.2 亿行。现在三道闸：**粒度降采样**（总量）、**并发池**（瞬时压力）、
- * **代际守卫**（切项目/测项时不串数据）。
+ * 是 1.2 亿行。现在四道闸：**粒度降采样**（总量）、**批量取数**（请求数，P2-4）、
+ * **并发池**（瞬时压力）、**代际守卫**（切项目/测项时不串数据）。
+ *
+ * 批量那一道是最后补的，也是唯一直接减**请求数**的一道：并发池只决定"同时几个"，
+ * 1000 个点仍然是 1000 次查询。按 100 个点一批之后，1000 点项目首屏从 1000 次变 10 次。
+ * **批量失败会退化成逐点**（见 loadChunk）：后端还没升级到有批量端点时，
+ * 行为与改造前一致，只是每批多一次失败请求。
  */
 
 /** 播放节拍（毫秒）。回放的是历史采样，比采样间隔更快只会闪；这个值肉眼能跟上 */
@@ -53,6 +58,28 @@ const SEGMENT_HOURS = 24
 
 /** 同时在途的 series 请求上限。浏览器对同域并发本来就有上限，显式限流是为了让首屏可预期 */
 const MAX_INFLIGHT = 4
+
+/**
+ * 一次批量请求携带的测点数。取 100 而不是后端上限 200：留一半余量，
+ * 让"某个项目的点特别多"和"后端把上限收紧"都不至于立刻撞墙。
+ */
+export const SERIES_BATCH_SIZE = 100
+
+/**
+ * 把测点 id 切成每段最多 `size` 个。**纯函数**，自检里直接钉住
+ * （含边界：空数组、恰好整除、最后一个残段）。
+ */
+export function chunkPointIds(ids, size = SERIES_BATCH_SIZE) {
+  const list = Array.from(ids || [])
+  if (list.length === 0) return []
+  // 非正数 / NaN 一律回落到默认批量，而不是退化成"逐点"——后者等于悄悄取消了批量，
+  // 而且调用方从一个错误参数得到 100 倍请求数，是那种"能跑但把后端打穿"的坏默认。
+  const requested = Math.floor(Number(size))
+  const step = Number.isFinite(requested) && requested > 0 ? requested : SERIES_BATCH_SIZE
+  const out = []
+  for (let i = 0; i < list.length; i += step) out.push(list.slice(i, i + step))
+  return out
+}
 
 /**
  * 选粒度：**先用最坏采样密度估行数，超预算就换更粗的桶**。
@@ -237,8 +264,10 @@ export const useReplayStore = defineStore('replay', {
           granularity === 'raw' && this.rangeHours > SEGMENT_HOURS
             ? splitWindow(from, to, SEGMENT_HOURS)
             : [{ from, to }]
-        const tasks = points.flatMap((p) =>
-          segments.map((seg, segIndex) => ({ pointId: p.id, segIndex, ...seg })),
+        // 一个任务 = 一段窗口 × 一批测点（最多 SERIES_BATCH_SIZE 个）。
+        // 请求数从「段数 × 点数」降到「段数 × ceil(点数/100)」——这是 P2-4 的全部意义。
+        const tasks = segments.flatMap((seg, segIndex) =>
+          chunkPointIds(points.map((p) => p.id)).map((ids) => ({ ids, segIndex, ...seg })),
         )
 
         // 多段时**最近一段到齐先出一版帧**：时间轴先显示最近一段，其余段在后台补齐。
@@ -246,33 +275,60 @@ export const useReplayStore = defineStore('replay', {
         // 某个点的最后一次采样变新，所以先出的这一版不会出现「刚进来满屏数据过期」。
         // 单段路径（含所有降采样路径）不触发，只成一次帧。
         const needFirst = segments.length > 1 ? points.length : 0
-        let doneFirst = 0
+        const firstDone = new Set()
         let staged = false
+        const delivered = (segIndex, ids) => {
+          if (!needFirst || segIndex !== 0) return
+          for (const id of ids) firstDone.add(id)
+          if (!staged && firstDone.size >= needFirst) {
+            staged = true
+            applyFrames()
+          }
+        }
+        // 只有"请求真的失败"才计数：合法的空结果（这个项目就是没有历史数据）不算失败，
+        // 否则界面会把"没数据"说成"加载失败"。
+        let failures = 0
+        let lastError = ''
 
         await mapWithLimit(tasks, MAX_INFLIGHT, async (t) => {
-          const res = await pointSeries(t.pointId, {
+          const params = {
             metricCode,
             granularity,
             from: new Date(t.from).toISOString(),
             to: new Date(t.to).toISOString(),
-          }).catch(() => null)
-          if (!active()) return null
-          const bucket = byPoint.get(t.pointId)
-          if (bucket) bucket.push(...(res?.points || []))
-          if (needFirst && t.segIndex === 0) {
-            doneFirst += 1
-            if (doneFirst === needFirst && !staged) {
-              staged = true
-              applyFrames()
-            }
           }
-          return res
+          // silent：批量失败会由下面的逐点兜底给出结论，不该在界面上先弹一条红条
+          const res = await pointsSeries(t.ids, params, { silent: true }).catch(() => null)
+          if (!active()) return null
+          if (res) {
+            for (const one of res.series || []) {
+              byPoint.get(one.pointId)?.push(...(one.points || []))
+            }
+            delivered(t.segIndex, (res.series || []).map((one) => one.pointId))
+            return res
+          }
+          // 退化成逐点。**只影响这一批**：它的意义是"后端还没升级/这一批被网关拒了"
+          // 时不至于让整屏曲线消失（改造前本来就是逐点，所以最坏也就是回到老行为）。
+          await mapWithLimit(t.ids, MAX_INFLIGHT, async (pointId) => {
+            const one = await pointSeries(pointId, params, { silent: true }).catch((err) => {
+              failures += 1
+              lastError = lastError || err?.message || ''
+              return null
+            })
+            if (!active() || !one) return null
+            byPoint.get(pointId)?.push(...(one.points || []))
+            delivered(t.segIndex, [pointId])
+            return one
+          })
+          return null
         })
 
         if (!active()) return // 迟到的整批结果：一个字都不写
         applyFrames()
         if (!this.frames.length) {
-          this.error = `近 ${this.rangeHours} 小时内没有历史数据`
+          this.error = failures > 0
+            ? `回放数据加载失败：${lastError || '请稍后重试'}`
+            : `近 ${this.rangeHours} 小时内没有历史数据`
         }
       } catch (e) {
         if (!active()) return

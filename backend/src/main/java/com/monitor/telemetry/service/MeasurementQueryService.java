@@ -11,9 +11,12 @@ import com.monitor.project.mapper.MonitorPointMapper;
 import com.monitor.asset.dto.PointSourceRow;
 import com.monitor.asset.mapper.DevicePointMapper;
 import com.monitor.scope.service.DataScopeService;
+import com.monitor.telemetry.dto.MeasurementBaselineVO;
 import com.monitor.telemetry.dto.MeasurementBucket;
 import com.monitor.telemetry.dto.PointLatestVO;
 import com.monitor.telemetry.dto.PointSourceVO;
+import com.monitor.telemetry.dto.MeasurementPointBucket;
+import com.monitor.telemetry.dto.PointSeriesBatchVO;
 import com.monitor.telemetry.dto.PointSeriesVO;
 import com.monitor.telemetry.entity.Measurement;
 import com.monitor.telemetry.mapper.MeasurementMapper;
@@ -25,9 +28,11 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.HashMap;
+import java.util.function.Function;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -55,6 +60,17 @@ public class MeasurementQueryService {
 
     /** 未特别指定优先级时的默认档（与 V25 的列默认值一致）。 */
     private static final int DEFAULT_SOURCE_PRIORITY = 100;
+
+    /** 批量 series（P2-4）单次允许的测点数上限。前端按 100 一批发，留一倍余量。 */
+    public static final int MAX_BATCH_POINTS = 200;
+
+    /**
+     * 批量 series 单次允许的**合计**原始行数上限。
+     *
+     * <p>取单点上限的 4 倍：单点仍各自受 5000 条约束（与单点端点同口径），
+     * 合计再多就意味着这一批已经不适合"一次取回来画图"，应当分窗口或改分桶。</p>
+     */
+    public static final int MAX_BATCH_RAW_POINTS = SeriesWindowPolicy.MAX_RAW_POINTS * 4;
 
     public MeasurementQueryService(MeasurementMapper mapper,
                                    MonitorPointMapper pointMapper,
@@ -325,6 +341,166 @@ public class MeasurementQueryService {
                 ? rawPoints(pointId, code, window)
                 : bucketedPoints(pointId, code, window, g));
         return vo;
+    }
+
+    /**
+     * 批量 series（复查清单 P2-4）：一次请求取多个测点的同窗口曲线。
+     *
+     * <p><b>为什么要它</b>：大屏回放原本对每个测点各发一次 {@code /series}（用并发池压住
+     * 瞬时压力）。并发池只改变"同时几个"，没改变"总共几次"——生产基线 1000 点时首屏依旧是
+     * 1000 次查询。这里把 N 次压成 ceil(N/200) 次：原始行、分桶均值、单位、基准四条查询
+     * 各一次，全部按 {@code point_id IN (...)} 走。</p>
+     *
+     * <p><b>与单点端点同口径的部分</b>：时间窗（默认 24 小时、跨度上限 31 天）、
+     * {@code raw} 单点 5000 点上限、超限返回 400 而不是静默截断、窗口与粒度回显、
+     * 每个点各自带 baselines。差别只有一处，而且是有意的：</p>
+     *
+     * <p><b>不存在或不在数据范围内的测点进 {@code skippedPointIds}，不让整批失败</b>。
+     * 一次回放请求几十上百个点，其中一个点刚被回收、或某个点不属于调用者的项目，
+     * 单点端点回 404/403 是对的；批量若照搬，结果是整屏曲线消失——而且看起来像"这个项目
+     * 没有数据"。跳过的 id 必须回显出来：少了几个点和"本来就只有这几个"在图上一模一样。</p>
+     *
+     * @param pointIds 请求的测点；重复项自动去重，上限 {@value #MAX_BATCH_POINTS} 个
+     */
+    public PointSeriesBatchVO batchSeries(List<Long> pointIds, String metricCode, String from,
+                                          String to, String granularity) {
+        List<Long> ids = normalisePointIds(pointIds);
+        String code = blank(metricCode) ? DEFAULT_METRIC : metricCode;
+        String g = granularityOf(granularity);   // 先校验粒度再查库，与单点一致
+        SeriesWindowPolicy.Window window = SeriesWindowPolicy.resolve(
+                Times.parse(from, "from"), Times.parse(to, "to"), LocalDateTime.now());
+
+        // 档案 + 可见性：一次 selectByIds；可见性逐点判（不能像单点那样抛 403）
+        Map<Long, MonitorPoint> archive = pointMapper.selectByIds(ids).stream()
+                .collect(Collectors.toMap(MonitorPoint::getId, Function.identity(), (a, b) -> a));
+        List<Long> visible = new ArrayList<>();
+        List<Long> skipped = new ArrayList<>();
+        for (Long id : ids) {
+            if (archive.get(id) == null || !dataScope.canSeePoint(id)) {
+                skipped.add(id);
+            } else {
+                visible.add(id);
+            }
+        }
+
+        PointSeriesBatchVO vo = new PointSeriesBatchVO();
+        vo.setMetricCode(code);
+        vo.setFrom(Times.iso(window.from()));
+        vo.setTo(Times.iso(window.to()));
+        vo.setGranularity(g);
+        vo.setWindowDefaulted(window.fromDefaulted() && window.toDefaulted());
+        vo.setRequestedPoints(ids.size());
+        vo.setSkippedPointIds(skipped);
+        if (visible.isEmpty()) {
+            vo.setNote("请求的测点都不可见或不存在，没有可返回的曲线");
+            return vo;
+        }
+
+        Map<Long, String> units = unitsOf(visible, code);
+        Map<Long, List<MeasurementBaselineVO>> baselines =
+                baselineService.inWindowForPoints(visible, window.from(), window.to());
+        Map<Long, List<PointSeriesVO.Item>> points = "raw".equals(g)
+                ? batchRawPoints(visible, code, window)
+                : batchBucketedPoints(visible, code, window, g);
+
+        for (Long id : visible) {
+            MonitorPoint p = archive.get(id);
+            PointSeriesVO one = new PointSeriesVO();
+            one.setPointId(p.getId());
+            one.setPointCode(p.getCode());
+            one.setMetricCode(code);
+            one.setUnit(units.getOrDefault(id, defaultUnit(code)));
+            one.setFrom(Times.iso(window.from()));
+            one.setTo(Times.iso(window.to()));
+            one.setWindowDefaulted(window.fromDefaulted() && window.toDefaulted());
+            one.setBaselines(baselines.getOrDefault(id, List.of()));
+            one.setPoints(points.getOrDefault(id, List.of()));
+            vo.getSeries().add(one);
+        }
+        vo.setNote("单次请求最多 " + MAX_BATCH_POINTS + " 个测点、合计原始行 "
+                + MAX_BATCH_RAW_POINTS + " 条；超过时是 400 而不是静默截断");
+        return vo;
+    }
+
+    /** 去重（保持请求顺序）与规模闸门。 */
+    private static List<Long> normalisePointIds(List<Long> pointIds) {
+        if (pointIds == null || pointIds.isEmpty()) {
+            throw new BizException("pointIds 不能为空：批量 series 需要至少一个测点");
+        }
+        // 先去掉 null 再进 LinkedHashSet：去重的同时保持"请求里先出现的先返回"
+        Set<Long> unique = new LinkedHashSet<>();
+        for (Long id : pointIds) {
+            if (id != null) {
+                unique.add(id);
+            }
+        }
+        List<Long> ids = new ArrayList<>(unique);
+        if (ids.isEmpty()) {
+            throw new BizException("pointIds 里没有有效的测点 id");
+        }
+        if (ids.size() > MAX_BATCH_POINTS) {
+            throw new BizException("单次批量查询最多 " + MAX_BATCH_POINTS + " 个测点，收到 "
+                    + ids.size() + " 个：请分批请求（前端按 100 一批）");
+        }
+        return ids;
+    }
+
+    /** 批量 raw：一次 IN 查询 + 内存分组；两道闸门与单点同口径（每点 5000、合计 2 万）。 */
+    private Map<Long, List<PointSeriesVO.Item>> batchRawPoints(List<Long> pointIds, String code,
+                                                               SeriesWindowPolicy.Window w) {
+        List<Measurement> rows = mapper.batchRawRows(pointIds, code, w.from(), w.to(),
+                MAX_BATCH_RAW_POINTS + 1);
+        Map<Long, List<PointSeriesVO.Item>> out = new LinkedHashMap<>();
+        for (Measurement r : rows) {
+            out.computeIfAbsent(r.getPointId(), k -> new ArrayList<>())
+                    .add(new PointSeriesVO.Item(Times.iso(r.getCollectTime()), r.getMeasureValue()));
+        }
+        for (Map.Entry<Long, List<PointSeriesVO.Item>> e : out.entrySet()) {
+            if (e.getValue().size() > SeriesWindowPolicy.MAX_RAW_POINTS) {
+                throw new BizException("测点 " + e.getKey() + " 在窗口内的原始点数超过 "
+                        + SeriesWindowPolicy.MAX_RAW_POINTS
+                        + " 条：请缩小时间范围，或改用 granularity=hour / day 查看趋势");
+            }
+        }
+        if (rows.size() > MAX_BATCH_RAW_POINTS) {
+            throw new BizException("本批窗口内原始点数合计超过 " + MAX_BATCH_RAW_POINTS
+                    + " 条：请缩小时间范围、减少测点，或改用 granularity=hour / day 查看趋势");
+        }
+        return out;
+    }
+
+    /** 批量 hour/day：分桶与求均值仍在 SQL 里，分批只影响返回行数（点数 × 桶数）。 */
+    private Map<Long, List<PointSeriesVO.Item>> batchBucketedPoints(List<Long> pointIds, String code,
+                                                                    SeriesWindowPolicy.Window w,
+                                                                    String g) {
+        Map<Long, List<PointSeriesVO.Item>> out = new LinkedHashMap<>();
+        for (MeasurementPointBucket b : mapper.averageByBucketForPoints(
+                pointIds, code, w.from(), w.to(), "day".equals(g))) {
+            if (b.getPointId() == null || b.getBucketTime() == null || b.getBucketValue() == null) {
+                continue;   // collect_time 为空的行会落进 NULL 桶，跳过（与单点版本一致）
+            }
+            out.computeIfAbsent(b.getPointId(), k -> new ArrayList<>())
+                    .add(new PointSeriesVO.Item(Times.iso(b.getBucketTime()),
+                            round(b.getBucketValue().doubleValue())));
+        }
+        return out;
+    }
+
+    /** 一次查出这批测点的单位（而不是逐点查 metric 表）。 */
+    private Map<Long, String> unitsOf(List<Long> pointIds, String code) {
+        Map<Long, String> units = new HashMap<>();
+        for (Metric m : metricMapper.selectList(new LambdaQueryWrapper<Metric>()
+                .in(Metric::getPointId, pointIds)
+                .eq(Metric::getCode, code))) {
+            if (m.getPointId() != null && !blank(m.getUnit())) {
+                units.put(m.getPointId(), m.getUnit());
+            }
+        }
+        return units;
+    }
+
+    private static String defaultUnit(String code) {
+        return "rate_mm_d".equals(code) ? "mm/d" : "mm";
     }
 
     /** {@code granularity} 白名单与归一化。 */

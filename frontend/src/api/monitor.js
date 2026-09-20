@@ -28,8 +28,27 @@ export function pointLatest(pointId) {
  * @param {string} [p.to]   ISO8601
  * @param {string} [p.granularity] raw | hour | day
  */
-export function pointSeries(pointId, params = {}) {
-  return http.get(`/v1/points/${pointId}/series`, { params })
+export function pointSeries(pointId, params = {}, config = {}) {
+  return http.get(`/v1/points/${pointId}/series`, { params, ...config })
+}
+
+/**
+ * GET /api/v1/points/series?pointIds=1,2,3 → 批量 series（P2-4，大屏回放用）。
+ *
+ * 一次取多个测点的同窗口曲线：响应里每个测点一份，字段与单点端点完全一致
+ * （含 baselines），所以消费方可以按同一个函数解析。
+ *
+ * 与单点端点的**刻意差别**：不存在或不在数据范围内的测点不会让整批失败，
+ * 而是列在 `skippedPointIds` 里返回——一次回放几百个点，其中一个点刚被回收
+ * 不该让整屏曲线消失；但也不能静默，"少了两条"和"本来只有两条"在图上一模一样。
+ *
+ * 单次上限 200 个测点（超出 400），调用方按 SERIES_BATCH_SIZE 分批。
+ */
+export function pointsSeries(pointIds, params = {}, config = {}) {
+  return http.get('/v1/points/series', {
+    params: { ...params, pointIds: pointIds.join(',') },
+    ...config,
+  })
 }
 
 /**

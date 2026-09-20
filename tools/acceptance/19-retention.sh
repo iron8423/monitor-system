@@ -85,9 +85,12 @@ OLD_CT=$(TS --days -40)
 NOW_CT=$(TS)
 info "pointId=$PID；老数据 collectTime=$OLD_CT"
 
-# 老数据取 5.0（越过 +5.0 那条种子规则）——顺带造出一条警情，用来验「保留不动警情」
-ingest_id "ret-old-$RUN_ID" "$NP" "$OLD_CT" '"defo_mm":5.0' >/dev/null
-ingest_id "ret-new-$RUN_ID" "$NP" "$NOW_CT" '"defo_mm":1.0' >/dev/null
+# 老数据取 5.0（越过 +5.0 那条种子规则）——顺带造出一条警情，用来验「保留不动警情」。
+# **回执要留下**：本套件的实例 sweep-ms=2s、initial-delay-ms=1s，老数据插进去可能
+# 在同一个 2 秒窗口里就被扫掉了。所以"它曾经写进去过"必须由**接入回执**来证明，
+# 而不是由"插入后还能查得到"来证明——后者是一次真实的竞态（本地跑过 1 次红）。
+OLD_ACK=$(ingest_id "ret-old-$RUN_ID" "$NP" "$OLD_CT" '"defo_mm":5.0')
+NEW_ACK=$(ingest_id "ret-new-$RUN_ID" "$NP" "$NOW_CT" '"defo_mm":1.0')
 
 OLD_WIN="from=$(TS --days -45 --urlencode)&to=$(TS --days -35 --urlencode)"
 NEW_WIN="from=$(TS --hours -2 --urlencode)"
@@ -95,7 +98,11 @@ points_in() {
   curl -s "$BASE/points/$PID/series?$1&granularity=raw" -H "$AUTH" \
     | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))"
 }
-check "造数后：窗口外有 1 条老数据" "1" "$(points_in "$OLD_WIN")"
+accepted_of() { python3 -c "import sys,json;print(json.load(sys.stdin)['data']['accepted'])"; }
+check "老数据确实写进去了（接入回执 accepted=1）" "1" "$(printf '%s' "$OLD_ACK" | accepted_of)"
+check "新数据确实写进去了（接入回执 accepted=1）" "1" "$(printf '%s' "$NEW_ACK" | accepted_of)"
+# 窗口内的那条只能被"保留任务误伤"才会消失，所以这一条是确定性的；
+# 窗口外那条此刻在不在取决于扫描是否刚好跑过（见上面的回执说明），不在这里断言。
 check "造数后：窗口内有 1 条新数据" "1" "$(points_in "$NEW_WIN")"
 
 section "③ 等一轮扫描（最长 30s）：窗口外的被删、窗口内的保留"
@@ -108,6 +115,7 @@ for _ in $(seq 1 30); do
 done
 check "保留任务至少删掉了 1 行（lastRun.deleted）" "true" \
   "$([ -n "$DEL" ] && [ "$DEL" != "0" ] && echo true || echo false)"
+# 两条一起看才成立：回执证明它写进去过（②），这里证明它现在没了（③）。
 check "窗口外的老数据已被删除" "0" "$(points_in "$OLD_WIN")"
 check "窗口内的新数据仍在" "1" "$(points_in "$NEW_WIN")"
 check "统计里给出了截止时间（cutoff）" "true" \

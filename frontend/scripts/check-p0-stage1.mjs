@@ -256,6 +256,18 @@ try {
     assert.equal(s.latestMap[1].latest.defo_mm, 0)
   })
 
+  /**
+   * 批量 series 的响应替身（P2-4）：把"每个测点的点列"包成后端批量端点的形状。
+   * 批量之后回放的桩不能再返回 `{ points: [...] }`——那是单点端点的形状，
+   * 用它当桩会让"帧是空的"这种真 bug 伪装成通过。
+   */
+  const batch = (perPoint, ids = [1]) => ({
+    series: perPoint.map((points, i) => ({ pointId: ids[i] ?? i + 1, points })),
+  })
+  /** 按请求里的 pointIds 生成同序响应（给"两个点各一份曲线"的用例用）。 */
+  const batchSeries = (pointIdsParam, perPoint) =>
+    batch(perPoint, String(pointIdsParam).split(',').map(Number))
+
   // ── 回放取数（清单第 18/19 条）─────────────────────────────────
   const { useReplayStore } = await server.ssrLoadModule('/src/stores/replay.js')
   const { frameFreshCount } = await server.ssrLoadModule('/src/utils/timeline.js')
@@ -263,15 +275,35 @@ try {
   await test('回放只拉本项目测点，且每个 series 都带 to（原来拉全部可见点、且窗口右端无界）', async (s) => {
     const replay = useReplayStore()
     replay.rangeHours = 24 // 单段路径：先只看「拉谁、带什么参数」
-    responder = () => ({ points: [] })
+    responder = () => ({ series: [] })
     await replay.load()
-    // 项目 1 只有点 1；点 2 属于项目 2，画面上根本不出现，就不该为它发请求
-    assert.deepEqual(calls, ['/v1/points/1/series'], JSON.stringify(calls))
+    // 项目 1 只有点 1；点 2 属于项目 2，画面上根本不出现，就不该为它发请求。
+    // P2-4 之后走批量端点：一次请求带全部点（而不是每点一次），所以 URL 上没有 id。
+    assert.deepEqual(calls, ['/v1/points/series'], JSON.stringify(calls))
+    assert.equal(callConfigs[0].params.pointIds, '1', '批量请求必须带上测点清单')
     assert.ok(callConfigs[0].params.to, 'series 必须带 to')
     assert.ok(callConfigs[0].params.from, 'series 必须带 from')
     // P0-3 之后 24 小时窗口不再是 raw：后端对 raw 有 5000 点上限（5 秒采样 ≈ 6 小时），
     // 24 小时 @raw 会被 400 掉、曲线整条消失。这条断言改成钉"降采到 hour"这个结论。
     assert.equal(callConfigs[0].params.granularity, 'hour')
+  })
+
+  // P2-4 的兜底：批量端点不可用（老后端 / 网关拒绝）时必须退化成逐点，
+  // 最坏也只是回到改造前的行为，而不是让整屏曲线消失。第一次实现里
+  // "批量失败就直接放弃这一批"，这条用例就是那次遗漏的种子。
+  await test('批量端点不可用时退化成逐点，曲线照样出来', async (s) => {
+    const replay = useReplayStore()
+    replay.rangeHours = 24
+    responder = (config) => {
+      if (config.url === '/v1/points/series') {
+        throw Object.assign(new Error('没有这个端点'), { response: { status: 404 } })
+      }
+      return { points: [{ t: time(10), v: 42 }] }   // 兜底走的是单点端点，形状仍是单点
+    }
+    await replay.load()
+    assert.equal(calls[0], '/v1/points/series', JSON.stringify(calls))
+    assert.ok(calls.includes('/v1/points/1/series'), `兜底没发生：${JSON.stringify(calls)}`)
+    assert.equal(replay.error, '', '兜底成功就不该报错')
   })
 
   // P0-3 之后这条用例的口径变了：后端给 raw 加了 5000 点硬上限，7 天窗口即使只有
@@ -282,7 +314,7 @@ try {
   await test('7 天窗口：raw 装不下 → 按小时一次取回（不再逐 24 小时分段）', async (s) => {
     const replay = useReplayStore()
     replay.rangeHours = 168
-    responder = () => ({ points: [] })
+    responder = () => ({ series: [] })
     await replay.load()
     assert.equal(calls.length, 1, JSON.stringify(calls))
     assert.equal(callConfigs[0].params.granularity, 'hour')
@@ -305,12 +337,12 @@ try {
     s.primaryMetricCode = 'rate_mm_d'
     const second = replay.load()
     await flush()
-    b.resolve({ points: [{ t: time(0), v: 7 }] }) // 新测项先回
+    b.resolve(batch([[{ t: time(0), v: 7 }]])) // 新测项先回
     await second
     assert.equal(replay.metricCode, 'rate_mm_d')
     assert.equal(replay.loading, false)
     const framesAfterNew = replay.frames.length
-    a.resolve({ points: [{ t: time(0), v: 999 }, { t: time(60), v: 888 }] }) // 旧测项后回
+    a.resolve(batch([[{ t: time(0), v: 999 }, { t: time(60), v: 888 }]])) // 旧测项后回
     await first
     assert.equal(replay.metricCode, 'rate_mm_d', '旧批次的测项码不许写回')
     assert.equal(replay.frames.length, framesAfterNew, '旧批次的帧不许写回')
@@ -327,7 +359,7 @@ try {
     const p2 = replay.load()
     await flush()
     assert.equal(calls.length, 1, JSON.stringify(calls))
-    pending.resolve({ points: [] })
+    pending.resolve(batch([[]]))
     await Promise.all([p1, p2])
   })
 
@@ -340,9 +372,10 @@ try {
     replay.rangeHours = 24
     const hourlyA = Array.from({ length: 6 }, (_, i) => ({ t: time(i * 3600), v: i }))
     const hourlyB = Array.from({ length: 6 }, (_, i) => ({ t: time(i * 3600 + 1800), v: 100 + i }))
-    responder = (config) => ({ points: config.url.includes('/points/1/') ? hourlyA : hourlyB })
+    responder = (config) => batchSeries(config.params.pointIds, [hourlyA, hourlyB])
     await replay.load()
-    assert.equal(calls.length, 2, JSON.stringify(calls))
+    // P2-4 之后两个测点合成**一次**批量请求（改造前是两次）——这条断言同时钉住批量确实生效
+    assert.equal(calls.length, 1, JSON.stringify(calls))
     assert.ok(replay.frames.length >= 11, `frames=${replay.frames.length}`)
     // 第一帧（t=0）只有点 1 上报过：那是「还没有数据」，不是「数据过期」。
     // 这两态在界面上必须是不同的样子（第 19 条的措辞就是「缺测或过期」）。
@@ -542,6 +575,23 @@ try {
       '试算请求里不能带方位角/斜距：那是人填的，拿它去校验它自己等于没校验')
     assert.ok(/calibration\/preview/.test(api), 'API 层要指向 /calibration/preview')
     assert.ok(drawer.includes('按试算结果填入'), '试算结果要能一键填进表单（否则人还得手抄）')
+  })
+
+  /**
+   * 批量取数的绊线（P2-4）。回放此前对每个测点各发一次请求，1000 点项目首屏就是 1000 次。
+   * 绊线只保证"批量这条路还在用"：真跑一遍请求数在 selfcheck 与浏览器实测里，
+   * 这里防的是有人后来把 load() 改回逐点、而界面看起来毫无变化。
+   */
+  ok('绊线·回放走批量取数（不是"又变回逐点"）', () => {
+    const replay = src('stores/replay.js')
+    const api = src('api/monitor.js')
+    assert.ok(/pointsSeries\(/.test(replay), 'replay 必须调用批量接口')
+    assert.ok(replay.includes('chunkPointIds'), '批量必须分批（后端单次上限 200）')
+    assert.ok(replay.includes('SERIES_BATCH_SIZE'), '批量大小要有名字，不能散着写魔法数')
+    assert.ok(/pointSeries\(/.test(replay),
+      '保留逐点调用作为兜底：批量失败时退化成逐点，最坏也只是回到改造前')
+    assert.ok(/\/v1\/points\/series/.test(api), 'API 层要指向 /points/series')
+    assert.ok(api.includes("pointIds: pointIds.join(',')"), 'pointIds 用逗号分隔传给后端')
   })
 
   // 执行实际路由守卫和 onError；只替换浏览器 history、页面组件与对话框。

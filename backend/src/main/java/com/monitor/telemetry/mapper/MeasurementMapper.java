@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.monitor.telemetry.dto.IngestMode;
 import com.monitor.telemetry.dto.MeasurementBucket;
+import com.monitor.telemetry.dto.MeasurementPointBucket;
 import com.monitor.telemetry.entity.Measurement;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -102,6 +103,65 @@ public interface MeasurementMapper extends BaseMapper<Measurement> {
                                             @Param("from") LocalDateTime from,
                                             @Param("to") LocalDateTime to,
                                             @Param("daily") boolean daily);
+
+    /**
+     * 批量原始点（P2-4）：一次查询取多个测点的窗口内原始行。
+     *
+     * <p><b>为什么不是"循环调用单点版本"</b>：回放原本对每个测点各发一次请求
+     * （用并发池压住瞬时压力），生产基线 1000 点时首屏就是 1000 次查询——
+     * 并发池只改变了"同时几个"，没改变"总共几次"。一条 {@code IN} 查询把它变成几次。</p>
+     *
+     * <p>排序是 {@code point_id, collect_time}：分组靠 Map，但每点内部的时序必须在
+     * SQL 里就定好，否则曲线会按数据库的返回顺序连线。</p>
+     *
+     * <p>{@code limit} 是"总量上限 + 1"：拿满上限恰好合法，多出来那一行才说明被截断——
+     * 与单点 {@code rawPoints} 同一个探测法。</p>
+     */
+    @Select("""
+            <script>
+            SELECT * FROM measurement
+            WHERE point_id IN
+              <foreach collection="pointIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              AND metric_code = #{metricCode}
+              AND collect_time &gt;= #{from}
+              AND collect_time &lt;= #{to}
+            ORDER BY point_id, collect_time, id
+            LIMIT #{limit}
+            </script>
+            """)
+    List<Measurement> batchRawRows(@Param("pointIds") List<Long> pointIds,
+                                   @Param("metricCode") String metricCode,
+                                   @Param("from") LocalDateTime from,
+                                   @Param("to") LocalDateTime to,
+                                   @Param("limit") int limit);
+
+    /**
+     * 批量分桶均值（P2-4）：与 {@link #averageByBucket} 同一条 SQL，多一个 {@code point_id}
+     * 维度、返回行里带 {@code point_id}。
+     *
+     * <p>行数等于"点数 × 桶数"，与单点版本一样是聚合后的规模——批量化不会把原始行搬回来。</p>
+     */
+    @Select("""
+            <script>
+            SELECT point_id AS point_id,
+                   <choose><when test="daily">DATE_TRUNC('DAY', collect_time)</when><otherwise>DATE_TRUNC('HOUR', collect_time)</otherwise></choose> AS bucket_time,
+                   AVG(measure_value) AS bucket_value
+            FROM measurement
+            WHERE point_id IN
+              <foreach collection="pointIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+              AND metric_code = #{metricCode}
+              AND collect_time &gt;= #{from}
+              AND collect_time &lt;= #{to}
+            GROUP BY point_id,
+                     <choose><when test="daily">DATE_TRUNC('DAY', collect_time)</when><otherwise>DATE_TRUNC('HOUR', collect_time)</otherwise></choose>
+            ORDER BY point_id, 2
+            </script>
+            """)
+    List<MeasurementPointBucket> averageByBucketForPoints(@Param("pointIds") List<Long> pointIds,
+                                                          @Param("metricCode") String metricCode,
+                                                          @Param("from") LocalDateTime from,
+                                                          @Param("to") LocalDateTime to,
+                                                          @Param("daily") boolean daily);
 
     /** 幂等：device_id + message_id 是否已存在。撞唯一键后用它区分「真重复」与「暂时失败」。 */
     @Select("SELECT COUNT(*) FROM measurement WHERE device_id = #{deviceId} AND message_id = #{messageId}")

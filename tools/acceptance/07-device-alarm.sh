@@ -57,11 +57,15 @@ DID2=$(curl -s -X POST "$BASE/devices" -H "$AUTH" -H "$JSON" \
        -d "{\"code\":\"$NEVER\",\"name\":\"从未上报的设备\",\"type\":\"MILLIMETER_WAVE_RADAR\"}" \
        | data_of "['id']")
 info "deviceId=$DID（停报）/ $DID2（从未上报）"
+# 「前置干净」这条**必须在绑定之前**取：绑定一发生，远处那台停报设备就归属到本项目了，
+# 而 DeviceAlarmMonitor 每 10 秒扫一次（monitor.device-offline.sweep-ms），
+# 它的离线警情随时可能落到项目上——放在绑定之后断言就是在跟这个 10 秒窗口赛跑，
+# 本地跑过 1 次红（实得 1 条）。语义没变：验的是"这个项目此刻本来是干净的"。
+check "绑定前该项目无未解除警情（设备尚未归属本项目）" "0" "$(alert_count)"
 # 把停报设备挂到本项目那个临时测点上——设备告警靠 device_point 反查才归属到项目，
 # 不挂的话它对本项目就是「无主」的，summary 数不到它不是缺陷而是对的。
 BIND=$(http_code -X POST "$BASE/devices/$DID/points/$PID" -H "$AUTH")
 check "设备与测点绑定成功" "200" "$BIND"
-check "绑定前该项目无未解除警情" "0" "$(alert_count)"
 check "停报设备的状态接口已判离线" "OFFLINE" \
   "$(curl -s "$BASE/devices/$DID/status" -H "$AUTH" | data_of "['status']")"
 check "从未上报的设备同样显示离线" "OFFLINE" \

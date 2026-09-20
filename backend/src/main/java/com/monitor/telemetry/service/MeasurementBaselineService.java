@@ -18,9 +18,11 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 测量基准版本（复查清单 P1-4）。
@@ -152,6 +154,29 @@ public class MeasurementBaselineService {
                         .le(MeasurementBaseline::getEffectiveFrom, to)
                         .orderByAsc(MeasurementBaseline::getEffectiveFrom))
                 .stream().map(MeasurementBaselineService::toVO).toList();
+    }
+
+    /**
+     * 批量：窗口内各测点的基准变更（P2-4 批量 series 用）。
+     *
+     * <p>与 {@link #inWindow} 同样是**一条**查询：批量端点的意义就是把 N 次请求压成一次，
+     * 如果基准还逐点查，最贵的那部分没省下来。不校验数据范围，理由同 {@code inWindow}——
+     * 调用方已经在入口处判过可见性。</p>
+     */
+    public Map<Long, List<MeasurementBaselineVO>> inWindowForPoints(Collection<Long> pointIds,
+                                                                     LocalDateTime from,
+                                                                     LocalDateTime to) {
+        if (pointIds == null || pointIds.isEmpty()) {
+            return Map.of();
+        }
+        return baselineMapper.selectList(new LambdaQueryWrapper<MeasurementBaseline>()
+                        .in(MeasurementBaseline::getPointId, pointIds)
+                        .ge(MeasurementBaseline::getEffectiveFrom, from)
+                        .le(MeasurementBaseline::getEffectiveFrom, to)
+                        .orderByAsc(MeasurementBaseline::getPointId)
+                        .orderByAsc(MeasurementBaseline::getEffectiveFrom))
+                .stream().collect(Collectors.groupingBy(MeasurementBaseline::getPointId,
+                        Collectors.mapping(MeasurementBaselineService::toVO, Collectors.toList())));
     }
 
     /** 测点存在且可见（404 / 403 的口径与其它测点端点一致）。 */

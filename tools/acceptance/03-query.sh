@@ -140,6 +140,69 @@ for r in "objects/$T_OBJ" "scenes/$T_SCN" "projects/$T_PRJ"; do
 done
 info "已回收临时项目链"
 
+section "⑩b 批量 series（P2-4）：一次取多个测点，与单点端点逐值一致"
+# 第二个测点：与 $PID 同构，用来验证"一次请求两个点的两段曲线都对"
+NP2="P-QRY2-$RUN_ID"
+PID2=$(curl -s -X POST "$BASE/points" -H "$AUTH" -H "$JSON" \
+       -d "{\"objectId\":1,\"code\":\"$NP2\",\"name\":\"查询验收临时测点2\",\"type\":\"POINT_DEFORMATION\",\"enabled\":true}" \
+       | data_of "['id']")
+ingest2 "qry2-$RUN_ID" "$NP2" "2026-08-27T10:00:00+08:00" 7.0 0.7 >/dev/null
+BATCH=$(curl -s "$BASE/points/series?pointIds=$PID,$PID2&$WIN" -H "$AUTH")
+# 逐值一致是这条端点的底线：它是同一个查询服务的第二个入口，两边口径分叉的后果
+# 是"大屏上的曲线和测点页的曲线不一样"，而两边看起来都很正常。
+SINGLE=$(curl -s "$BASE/points/$PID/series?$WIN" -H "$AUTH")
+check "批量返回两个测点" "2" \
+  "$(printf '%s' "$BATCH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['series']))")"
+check "顺序与请求一致（第一个是 $PID）" "$PID" \
+  "$(printf '%s' "$BATCH" | data_of "['series'][0]['pointId']")"
+check "第一个点的点数与单点端点一致" \
+  "$(printf '%s' "$SINGLE" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['points']))")" \
+  "$(printf '%s' "$BATCH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['series'][0]['points']))")"
+check "第一个点的值与单点端点逐值一致" \
+  "$(printf '%s' "$SINGLE" | python3 -c "import sys,json;print([p['v'] for p in json.load(sys.stdin)['data']['points']])")" \
+  "$(printf '%s' "$BATCH" | python3 -c "import sys,json;print([p['v'] for p in json.load(sys.stdin)['data']['series'][0]['points']])")"
+check "第二个点的值也在" "7.0" \
+  "$(printf '%s' "$BATCH" | data_of "['series'][1]['points'][0]['v']")"
+# 回显字段与**单点端点逐字段比**，而不是抄一个期望值：两边的口径本来就该一样，
+# 写死一个值只证明了"这次是这样"，比对才证明"两个入口不会分叉"。
+# 只比**两个端点都有的**字段：单点响应里没有 granularity（那是入参不是回显），
+# 把它一起比会得到一个与实现无关的 KeyError。
+check "窗口回显与单点端点逐字段一致（metricCode/windowDefaulted/from/to）" \
+  "$(printf '%s' "$SINGLE" | python3 -c "import sys,json;d=json.load(sys.stdin)['data'];print(d['metricCode'],d['windowDefaulted'],d['from'],d['to'])")" \
+  "$(printf '%s' "$BATCH" | python3 -c "import sys,json;d=json.load(sys.stdin)['data'];print(d['metricCode'],d['windowDefaulted'],d['from'],d['to'])")"
+check "批量额外回显粒度（一次请求可能问不同粒度，调用方要能自证）" "raw" \
+  "$(printf '%s' "$BATCH" | data_of "['granularity']")"
+# 不给窗口时同样补默认窗口（这是 P0-3 那条硬闸门在批量路径上的版本）
+check "不给窗口时批量也补默认窗口（windowDefaulted=true）" "True" \
+  "$(curl -s "$BASE/points/series?pointIds=$PID" -H "$AUTH" | data_of "['windowDefaulted']")"
+check "不给窗口时批量也只返回近 24 小时（造数在 8 月，所以是 0 点）" "0" \
+  "$(curl -s "$BASE/points/series?pointIds=$PID" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['series'][0]['points']))")"
+check "单位带上（批量也要能画出带单位的曲线）" "mm" "$(printf '%s' "$BATCH" | data_of "['series'][0]['unit']")"
+check "没有跳过任何测点" "0" \
+  "$(printf '%s' "$BATCH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['skippedPointIds']))")"
+
+section "⑩c 批量 series 的边界与闸门"
+check "重复 id 自动去重（只返回一份）" "1" \
+  "$(curl -s "$BASE/points/series?pointIds=$PID,$PID,$PID&$WIN" -H "$AUTH" | python3 -c "import sys,json;d=json.load(sys.stdin)['data'];print(len(d['series']))")"
+check "不存在的测点进 skipped，不让整批失败" "200:1:true" \
+  "$(curl -s -o /tmp/batch-skip-$RUN_ID.json -w '%{http_code}' "$BASE/points/series?pointIds=$PID,999999&$WIN" -H "$AUTH")$(python3 -c "
+import json;d=json.load(open('/tmp/batch-skip-$RUN_ID.json'))['data']
+print(':%d:%s' % (len(d['skippedPointIds']), str(d['skippedPointIds']==[999999]).lower()))")"
+check "非数字 id -> 400（并指出是哪一个）" "400" \
+  "$(http_code "$BASE/points/series?pointIds=$PID,abc&$WIN" -H "$AUTH")"
+check "空 pointIds -> 400" "400" "$(http_code "$BASE/points/series?pointIds=&$WIN" -H "$AUTH")"
+check "粒度非法 -> 400（与单点同一白名单）" "400" \
+  "$(http_code "$BASE/points/series?pointIds=$PID&granularity=minute&$WIN" -H "$AUTH")"
+check "跨度过大 -> 400（沿用 31 天上限）" "400" \
+  "$(http_code "$BASE/points/series?pointIds=$PID&from=2026-01-01T00:00:00%2B08:00&to=2026-09-01T00:00:00%2B08:00" -H "$AUTH")"
+check "hour 粒度走桶数（3 天 3 条 -> 3 个桶）" "3" \
+  "$(curl -s "$BASE/points/series?pointIds=$PID&granularity=hour&$WIN" -H "$AUTH" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['series'][0]['points']))")"
+# 批量端点占了 /points/series 这个字面量路径，不能把档案 CRUD 的 /points/{id} 顶掉
+check "档案端点没被批量路径顶掉（GET /points/$PID 仍是测点档案）" "$NP" \
+  "$(curl -s "$BASE/points/$PID" -H "$AUTH" | data_of "['code']")"
+check "300 个测点超过单次上限 -> 400" "400" \
+  "$(http_code "$BASE/points/series?pointIds=$(seq -s, 1 300)&$WIN" -H "$AUTH")"
+
 section "⑪ 概览的最大形变只认 defo_mm，不是「所有测项里最大的那个」"
 # 这一条钉的是**刻意写死**的口径（契约 §3），不是待办。测项中立化那轮很容易顺手把
 # maxDeformation 也改成「扫全部测项」——那是错的，而且错得安静：KPI 被速率顶掉，
@@ -172,6 +235,7 @@ for r in "objects/$M_OBJ" "scenes/$M_SCN" "projects/$M_PRJ"; do
   [ "$C" = "200" ] || info "临时 $r 未回收（HTTP $C），可忽略"
 done
 
+recycle_point "$PID2"
 recycle_point "$PID"
 
 summary

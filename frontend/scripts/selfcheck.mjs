@@ -286,7 +286,8 @@ try {
   }
 
   // ── ⑤ 回放取数规模（清单第 18 条）────────────────────────────
-  const { pickGranularity, mapWithLimit, splitWindow } = await server.ssrLoadModule('/src/stores/replay.js')
+  const { pickGranularity, mapWithLimit, splitWindow, chunkPointIds, SERIES_BATCH_SIZE } =
+    await server.ssrLoadModule('/src/stores/replay.js')
 
   // P0-3：raw 有 5000 点硬上限（后端 SeriesWindowPolicy），生产 5 秒采样下约 6 小时。
   // 所以"24 小时以内都取原始点"这条旧口径已经不成立——24 小时 @7 点 = 12 万行，
@@ -365,6 +366,27 @@ try {
     check('分段：相邻边界差 1ms 不重叠（后端 from/to 是双闭区间，不减 1ms 边界那行会出现两次）',
       segs.every((s, i) => i === 0 || s.to === segs[i - 1].from - 1))
     check('分段：最后一段的左端不越过 from', segs.at(-1).from === from)
+  }
+
+  // ── ⑤b 批量取数分批（P2-4）─────────────────────────────────
+  // 并发池只决定"同时几个"，请求数还是"点数"。分批函数是把 1000 次查询压成 10 次的那一环，
+  // 边界（空、恰好整除、残段）都要钉住，否则最后一批要么漏点、要么多带一个 undefined。
+  {
+    check('分批：空集合不分批（不发请求，而不是发一个空请求）', chunkPointIds([]).length === 0)
+    check('分批：7 个点一批发完', chunkPointIds([1, 2, 3, 4, 5, 6, 7]).length === 1)
+    check('分批：200 个点切成 2 批（100 + 100，恰好整除不产生空批）',
+      chunkPointIds(Array.from({ length: 200 }, (_, i) => i + 1)).length === 2)
+    const three = chunkPointIds(Array.from({ length: 201 }, (_, i) => i + 1))
+    check('分批：201 个点是 100/100/1 三段，最后一段只有 1 个',
+      three.length === 3 && three[2].length === 1)
+    check('分批：不丢点、不重复（首尾相接的 id 序列与输入逐个相同）',
+      chunkPointIds(Array.from({ length: 251 }, (_, i) => i + 1)).flat().join(',') ===
+      Array.from({ length: 251 }, (_, i) => i + 1).join(','))
+    check('分批：批量大小不超过后端单次上限 200（现在是 100，留一半余量）',
+      SERIES_BATCH_SIZE <= 100)
+    check('分批：size 非正数时回落到默认批量（而不是退化成逐点，也不是死循环）',
+      chunkPointIds([1, 2, 3], 0).length === 1 && chunkPointIds([1, 2, 3], -5).length === 1)
+    check('分批：size=1 就是逐点（极端值仍然可用）', chunkPointIds([1, 2, 3], 1).length === 3)
   }
 
   // ── ⑥ 曲线窗口建议（2026-09-17）─────────────────────────────
