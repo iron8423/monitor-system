@@ -72,6 +72,17 @@ jobs:
             grep -E '^(---- .*(通过|失败)|  ✗|  套件|  未通过|  全部通过)' "$LOG" | tail -60 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      # 把失败摘要做成 **check run annotation**：它连匿名读取都能拿到
+      # （`GET /repos/{owner}/{repo}/check-runs/{id}/annotations`），
+      # 而 job summary 与 artifact 都要鉴权——本地排查 CI 时差别很大（2026-09-20 实测）。
+      - name: 失败时把关键行做成注解（可被 checks API 读到）
+        if: failure()
+        run: |
+          LOG="$RUNNER_TEMP/acceptance-run.log"
+          [ -f "$LOG" ] || exit 0
+          grep -E '^---- .*(通过|失败)|^  ✗|^  未通过|^  套件' "$LOG" | tail -25 | while IFS= read -r line; do
+            echo "::error title=验收失败::${line}"
+          done
       - name: 失败时上传日志
         if: failure()
         uses: actions/upload-artifact@v4
