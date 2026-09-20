@@ -236,6 +236,46 @@ function addRadar(viewer, radar, index = 0) {
     },
     properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
   })
+  /*
+   * 地形裁剪覆盖（P1-11 后半）。几何来自后端 `/devices/{id}/coverage`：
+   * 每条方位线给一个"连续可见距离"，把它们的端点连起来，扇面外缘就跟着山脊线走。
+   *
+   * 与理论扇面的分工写在面板与图例里：理论视场是虚线提示层（按参数解析算的），
+   * 这一层是**按地形算出来的**（同一份高程场、与标定校核同一套判据）。
+   * 后端若没有该场景的高程场，radar.coverage 会是 undefined —— 这时**什么都不画**，
+   * 而不是退回理论扇面冒充。少一层比多一层假结论好。
+   */
+  const coverage = radar.coverage
+  let coverageFace = null
+  let coverageOutline = null
+  if (coverage?.terrainAvailable && Array.isArray(coverage.rays) && coverage.rays.length >= 2) {
+    const radarGround = finite(radar.altitude)
+    const boundary = coverage.rays.map((ray) => {
+      const a = Cesium.Math.toRadians(finite(ray.azimuthDegrees))
+      const d = Math.max(0, finite(ray.visibleDistanceM))
+      // 本地 z：边界处地面高程 - 雷达处地面高程（frame 的原点就是雷达所在地面）
+      const z = finite(ray.groundAltitudeM) - radarGround
+      return localToWorld(frame, [Math.sin(a) * d, Math.cos(a) * d, z + 0.4])
+    })
+    coverageFace = add('coverage', {
+      polygon: {
+        hierarchy: new Cesium.PolygonHierarchy([start, ...boundary]),
+        perPositionHeight: true,
+        material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.18),
+        outline: false,
+      },
+      properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
+    })
+    coverageOutline = add('coverage-outline', {
+      polyline: {
+        positions: [start, ...boundary, start],
+        width: 1.6,
+        material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.9),
+      },
+      properties: { kind: 'radar-decoration', deviceId: radar.deviceId },
+    })
+  }
+
   const sectorOutline = add('sector-outline', {
     polyline: {
       positions: [start, ...arc, start],
@@ -320,6 +360,7 @@ function addRadar(viewer, radar, index = 0) {
     targetEntities,
     faceColor,
     sector: { face: sectorFace, outline: sectorOutline, upper: sectorUpper, lower: sectorLower },
+    coverage: { face: coverageFace, outline: coverageOutline },
   }
 }
 
@@ -343,6 +384,8 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
   // 两个图层开关与当前选中：每台雷达四片形状的可见性由它们合成（见 applyRadarVisibility）
   let sectorVisible = true
   let verticalVisible = false
+  // 地形裁剪覆盖层默认显示：它是"真的看得到哪儿"的答案，比理论扇面更该先看到
+  let coverageVisible = true
   let activeRadarKey = null
   // 下标用于配色：RADAR_COLORS 按声明顺序分配，保证「同一台雷达每次打开都是同一个颜色」
   ;(config.radars || []).forEach((radar, index) => {
@@ -429,6 +472,13 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
    * 「为什么有三个区域」）。需要看垂直范围时再打开；打开后也**只画选中那一台**，
    * 否则两台雷达的四片轮廓同时铺开，又回到同一个误会。</p>
    */
+  function setCoverageVisible(show) {
+    coverageVisible = !!show
+    for (const [id, group] of radarGroups) {
+      applyRadarVisibility(group, String(id) === activeRadarKey)
+    }
+  }
+
   function setVerticalVisible(show) {
     verticalVisible = !!show
     for (const [id, group] of radarGroups.entries()) {
@@ -439,11 +489,20 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
   /** 两处开关 + 是否选中，合成每台雷达四片形状的可见性。 */
   function applyRadarVisibility(group, active) {
     const sector = group.sector
+    const coverage = group.coverage
     if (!sector) return
-    sector.face.show = sectorVisible
+    // 理论扇面面片与裁剪覆盖同时开着会糊成一片：有裁剪层时，面片只留虚线轮廓，
+    // 实心区域交给裁剪层（它才是"看得到哪儿"）。这条规则写在 applyRadarVisibility 里，
+    // 因为它是"三层的可见性怎么合成"的一部分，散到别处就会出现"开了图层没刷新"。
+    const hasCoverage = !!(coverage && coverage.face)
+    sector.face.show = sectorVisible && !(hasCoverage && coverageVisible)
     sector.outline.show = sectorVisible
     sector.upper.show = sectorVisible && verticalVisible && active
     sector.lower.show = sectorVisible && verticalVisible && active
+    if (coverage) {
+      if (coverage.face) coverage.face.show = coverageVisible
+      if (coverage.outline) coverage.outline.show = coverageVisible
+    }
   }
 
   function pickRadarId(picked) {
@@ -463,6 +522,7 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
     setActiveRadar,
     setSectorVisible,
     setVerticalVisible,
+    setCoverageVisible,
     pickRadarId,
     destroy() {
       for (const entity of decorations) viewer.entities.remove(entity)

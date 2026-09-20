@@ -174,6 +174,67 @@ check "测点不存在 -> 404" "404" \
 check "试算请求体可以整个省略" "200" \
   "$(http_code -X POST "$BASE/devices/$DEVICE_ID/points/$HK01/calibration/preview" -H "$AUTH")"
 
+section "⑦ 地形裁剪覆盖（P1-11 后半）：扇面外缘跟着山脊走"
+COV=$(curl -s "$BASE/devices/$DEVICE_ID/coverage" -H "$AUTH")
+check "有高程场" "True" "$(printf '%s' "$COV" | data_of "['terrainAvailable']")"
+check "资产版本带出" "qingyuan-hillside-2.0.0" "$(printf '%s' "$COV" | data_of "['assetVersion']")"
+check "±30° 每 1° 一条 = 61 条方位线" "61" \
+  "$(printf '%s' "$COV" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['rays']))")"
+check "首尾方位线落在视场边界上" "196.683 256.683" \
+  "$(printf '%s' "$COV" | python3 -c "import sys,json;r=json.load(sys.stdin)['data']['rays'];print(r[0]['azimuthDegrees'],r[-1]['azimuthDegrees'])")"
+check "北侧雷达被地形截短（没有一路看到 620m）" "True" \
+  "$(printf '%s' "$COV" | data_of "['terrainClipped']")"
+check "最短可见距离小于量程" "true" \
+  "$(printf '%s' "$COV" | python3 -c "import sys,json;d=json.load(sys.stdin)['data'];print(str(d['shortestVisibleDistanceM'] < d['detectionRangeM']).lower())")"
+check_contains "口径说明写明是按地形裁剪" "地形裁剪" "$(printf '%s' "$COV" | data_of "['note']")"
+
+# 最重要的一条：**扇面与逐目标结论不能互相矛盾**。目标是按"逐米步进视线"核验的，
+# 扇面是按"地面仰角 vs 前缀最大仰角"裁的——两套判据独立，正好可以互证：
+# 每个已核验目标到雷达的距离，必须落在它所在方位的可见距离之内（方位线 1° 采样，给 30m 余量）。
+FAN_CHECK=$(python3 - "$TOKEN" "$BASE" "$DEVICE_ID" <<'PYFAN'
+import json, sys, urllib.request
+token, base, did = sys.argv[1], sys.argv[2], sys.argv[3]
+def get(path):
+    req = urllib.request.Request(base + path, headers={'Authorization': 'Bearer ' + token})
+    return json.load(urllib.request.urlopen(req))['data']
+cov = get(f'/devices/{did}/coverage')
+bindings = [b for b in get(f'/devices/{did}/points') if b.get('lineOfSight')]
+bad = []
+for b in bindings:
+    az, d = float(b['azimuthDegrees']), float(b['slantRangeM'])
+    ray = min(cov['rays'], key=lambda r: min(abs(r['azimuthDegrees'] - az),
+                                             360 - abs(r['azimuthDegrees'] - az)))
+    if d > ray['visibleDistanceM'] + 30:
+        bad.append('%s 斜距%.1f 但 %s° 只看到 %.1f' % (b['targetCode'], d,
+                                                  ray['azimuthDegrees'], ray['visibleDistanceM']))
+if not bindings:
+    print('没有参与核验的目标（断言不能空过）')
+elif bad:
+    print('矛盾: ' + '; '.join(bad))
+else:
+    print('ok(%d)' % len(bindings))
+PYFAN
+)
+# 断言写成"以 ok( 开头"而不是钉死条数：条数取决于当时有几条已生效标定
+# （套件会临时加绑定），钉死数字等于把断言挂到别处去。
+check_contains "每个已核验目标都落在裁剪扇面之内" "ok(" "$FAN_CHECK"
+
+# 未绑任何测点的设备（看不到数字孪生项目）-> terrainAvailable=false 且带原因
+NODEV=$(curl -s -X POST "$BASE/devices" -H "$AUTH" -H "$JSON" \
+  -d "{\"code\":\"dev-cov-$RUN_ID\",\"name\":\"覆盖验收：未绑定设备\",\"type\":\"MILLIMETER_WAVE_RADAR\",
+       \"longitude\":113.0513300,\"latitude\":23.7594600,\"altitude\":150.000,
+       \"antennaHeightM\":10.000,\"headingDegrees\":180,\"pitchDegrees\":0,
+       \"detectionRangeM\":300.000,\"halfAngleDegrees\":30.0000,\"verticalHalfAngleDegrees\":15.0000}" \
+  | data_of "['id']")
+COVN=$(curl -s "$BASE/devices/$NODEV/coverage" -H "$AUTH")
+check "未绑定设备的覆盖：terrainAvailable=false" "False" "$(printf '%s' "$COVN" | data_of "['terrainAvailable']")"
+check "并给出原因（不静默）" "true" \
+  "$(printf '%s' "$COVN" | python3 -c "import sys,json;print(str(bool(json.load(sys.stdin)['data'].get('unavailableReason'))).lower())")"
+check "没有几何时 rays 是空的" "0" \
+  "$(printf '%s' "$COVN" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']['rays']))")"
+check "设备不存在 -> 404" "404" "$(http_code "$BASE/devices/99999/coverage" -H "$AUTH")"
+curl -s -o /dev/null -X DELETE "$BASE/devices/$NODEV" -H "$AUTH"
+
 section "⑦ 回收临时数据"
 for pid in "$VIS_PID" "$HID_PID" "$FAR_PID"; do
   curl -s -o /dev/null -X DELETE "$BASE/devices/$DEVICE_ID/points/$pid" -H "$AUTH"

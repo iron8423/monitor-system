@@ -492,6 +492,28 @@ try {
    *   · 面板旁注写明"未按地形裁剪"；
    *   · 目标连线三档里，已核验走实线（不是虚线）、理论视场轮廓走虚线。
    */
+  /**
+   * P1-11 后半：**地形裁剪覆盖**必须真的接上，且与理论视场分清。
+   *
+   * 这一层最容易变成"文档里有、屏幕上没有"：后端算了、接口通了，前端忘了取或忘了传，
+   * 界面上一切照旧（还是那个完美圆弧），没人看得出。所以绊线钉的是"取到了、传下去了、
+   * 画出来了、能关掉"这四件事，而几何对不对由验收套件（扇面与已核验目标互不矛盾）保证。
+   */
+  ok('绊线·P1-11：地形裁剪覆盖接上了（取数 / 传参 / 绘制 / 开关）', () => {
+    const screen = src('views/ScreenView.vue')
+    const api = src('api/monitor.js')
+    const scene = src('cesium/digitalTwinScene.js')
+    assert.ok(/deviceCoverage\(/.test(screen), '大屏没有取覆盖几何')
+    assert.ok(screen.includes('coverage'), '没有把覆盖结果交给场景层')
+    assert.ok(scene.includes('radar.coverage'), '场景层没有读覆盖数据')
+    assert.ok(scene.includes("add('coverage'") && scene.includes("add('coverage-outline'"),
+      '覆盖层要画出面与轮廓两条')
+    assert.ok(scene.includes('setCoverageVisible'), '覆盖层要能单独关掉')
+    assert.ok(/\/v1\/devices\/\$\{deviceId\}\/coverage/.test(api), 'API 路径不对')
+    // 覆盖层与理论扇面同时铺满会糊成一片：有裁剪层时理论面片必须让位（只留虚线轮廓）
+    assert.ok(/coverageVisible\)/.test(scene), '理论面片没有为裁剪层让位')
+  })
+
   ok('绊线·P1-11：理论视场与已核验目标分开表达', () => {
     const screen = src('views/ScreenView.vue')
     const scene = src('cesium/digitalTwinScene.js')
@@ -499,7 +521,8 @@ try {
     for (const label of ['已核验目标', '待核验目标', '被遮挡目标']) {
       assert.ok(screen.includes(label), `图例缺「${label}」`)
     }
-    assert.ok(screen.includes('未按地形裁剪'), '面板缺口径说明（扇形不是真实覆盖）')
+    assert.ok(screen.includes('按地形裁剪') && screen.includes('理论视场'),
+      '面板口径说明必须把"按地形裁剪的实心覆盖"与"理论视场虚线"都写出来')
     assert.ok(scene.includes('verified ?') || scene.includes('verified\n'), '目标连线没有区分已核验')
     assert.ok(/sectorOutline[\s\S]{0,400}PolylineDashMaterialProperty/.test(scene),
       '理论视场轮廓必须是虚线（实线看起来像已经成立的边界）')

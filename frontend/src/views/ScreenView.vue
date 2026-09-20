@@ -16,7 +16,7 @@ import {
 import { createDigitalTwinScene } from '@/cesium/digitalTwinScene'
 import { createPointLayer } from '@/cesium/pointLayer'
 import { createHeatmapLayer } from '@/cesium/heatmapLayer'
-import { projectDigitalTwin } from '@/api/monitor'
+import { deviceCoverage, projectDigitalTwin } from '@/api/monitor'
 import MediaGallery from '@/components/MediaGallery.vue'
 import ThemeSwitch from '@/components/ThemeSwitch.vue'
 import { ALARM_LEVEL, resolvePointVisual } from '@/constants/status'
@@ -334,6 +334,11 @@ const sectorOn = ref(true)
  * 打开后也只画选中的那一台（见 digitalTwinScene 的 setVerticalVisible）。
  */
 const verticalOn = ref(false)
+/**
+ * 地形裁剪覆盖层（P1-11 后半，默认开）。它是"这台雷达按这片地形真的能看到哪儿"：
+ * 外缘跟着山脊线走。与理论视场不是一回事——理论视场是参数算出来的，这一层是地形算出来的。
+ */
+const coverageOn = ref(true)
 
 /** 当前主测项是不是「速率」类——点符号用它区分（见 pointLayer.js 的说明） */
 const isRateMetric = computed(() => String(store.primaryMetricCode || '').includes('rate'))
@@ -472,6 +477,14 @@ async function loadProjectScene(projectId) {
     // 资产哈希核对（P0-5）与模型加载并行：核对只是"报一条"，
     // 既不该拖慢首屏，也不该拦住场景——模型真坏了也要先把现场显示出来。
     integrity.verify(config).catch(() => {})
+    // 覆盖层几何与资产加载**并行**取：它是一次几十毫秒的高程场计算，但也不该串在首屏前面。
+    // 失败（老后端没有这个端点 / 没导出高程场）就让 radar.coverage 保持 undefined，
+    // 场景层会只画理论视场——不冒充、不报错拦屏。
+    const coverageTask = Promise.all((config.radars || []).map((radar) =>
+      deviceCoverage(radar.deviceId)
+        .then((coverage) => Object.assign(radar, { coverage }))
+        .catch(() => radar),
+    ))
     const scene = await createDigitalTwinScene(viewer, config)
     if (generation !== sceneLoadGeneration) {
       scene.destroy()
@@ -484,6 +497,8 @@ async function loadProjectScene(projectId) {
     // 不该因为新建了场景就自己又亮回来
     scene.setSectorVisible(sectorOn.value)
     scene.setVerticalVisible(verticalOn.value)
+    scene.setCoverageVisible(coverageOn.value)
+    coverageTask.catch(() => {})
     mountainState.value = 'ok'
     pointLayer?.setLabelDistance(config.labelDistance)
     heatLayer?.sync(displayPoints.value, { visible: heatOn.value, selectedId: popup.pointId })
@@ -712,6 +727,7 @@ watch(
 )
 watch(sectorOn, (on) => mountainScene?.setSectorVisible(on))
 watch(verticalOn, (on) => mountainScene?.setVerticalVisible(on))
+watch(coverageOn, (on) => mountainScene?.setCoverageVisible(on))
 
 // 主题切换要把 3D 场景底色一起换掉（影像与地形本身不动——那是数据，不是主题装饰）
 watch(isDark, () => applyViewerTheme(viewer))
@@ -953,8 +969,10 @@ onBeforeUnmount(() => {
         <span class="vk blocked">被遮挡 {{ radarTargetStats.blocked }}</span>
       </div>
       <div v-if="activeRadar" class="radar-note">
-        扇面是水平理论视场（按量程与角度解析算出，未按地形裁剪）；垂直上下边界在图例里打开后才显示，
-        且只显示选中的这一台；连线才是逐目标的核验结果。
+        实心覆盖区是<strong>按地形裁剪</strong>的结果（沿每条方位线从雷达脚下往外，地面落到视线之下即止，
+        外缘跟着山脊线走，与标定校核同一套判据、同一份高程场）；虚线扇面是<strong>理论视场</strong>
+        （按量程与角度解析算出，不打地形）。两者都在图例里可单独关闭；垂直上下边界只显示选中的这一台；
+        连线才是逐目标的核验结果。
       </div>
     </aside>
 
@@ -997,8 +1015,12 @@ onBeforeUnmount(() => {
           地面热力图（选中测点）
         </label>
         <label class="heat-toggle">
+          <input v-model="coverageOn" type="checkbox" />
+          地形裁剪覆盖（实测）
+        </label>
+        <label class="heat-toggle">
           <input v-model="sectorOn" type="checkbox" />
-          雷达理论视场
+          雷达理论视场（虚线）
         </label>
         <label class="heat-toggle">
           <input v-model="verticalOn" type="checkbox" />

@@ -21,7 +21,9 @@ import com.monitor.common.util.Times;
 import com.monitor.project.mapper.MonitorPointMapper;
 import com.monitor.project.entity.MonitorPoint;
 import com.monitor.scope.service.DataScopeService;
+import com.monitor.twin.TerrainCoverageService;
 import com.monitor.twin.TerrainSightService;
+import com.monitor.twin.dto.RadarCoverageVO;
 import com.monitor.twin.dto.CalibrationPreviewRequest;
 import com.monitor.twin.dto.CalibrationPreviewVO;
 import jakarta.servlet.http.HttpServletResponse;
@@ -57,6 +59,7 @@ public class DeviceController extends BaseCrudController<Device> {
     private final DataScopeService dataScope;
     private final CalibrationService calibrationService;
     private final TerrainSightService terrainSight;
+    private final TerrainCoverageService terrainCoverage;
 
     @Override
     protected BaseMapper<Device> mapper() {
@@ -288,6 +291,21 @@ public class DeviceController extends BaseCrudController<Device> {
         // 没绑定也允许试算：现场最常见的一步就是"先看看这个点能不能被这台雷达看到，
         // 行的话再绑"。绑定与否只影响"与现有标定值的对比"那一组字段。
         return Result.ok(terrainSight.preview(device, point, binding, request));
+    }
+
+    /**
+     * 雷达**按地形裁剪**的地面覆盖（复查清单 P1-11 的后半）：沿每条方位线算出连续可见的距离。
+     *
+     * <p>与 {@code /calibration/preview} 的分工：那个回答"某个目标看不看得见"，
+     * 这个回答"这台雷达这一片能看到多远"——前者是逐目标的核验，后者是画在屏幕上的覆盖层。
+     * 两者用的是同一套判据（地面点仰角 vs 前缀最大仰角）与同一份高程场，
+     * 所以扇面的外缘不会和某个目标的核验结论打架。</p>
+     *
+     * <p>权限沿用它兄弟 {@code GET /{id}/points}：只读、按数据范围判可见性。</p>
+     */
+    @GetMapping("/{id}/coverage")
+    public Result<RadarCoverageVO> coverage(@PathVariable Long id) {
+        return Result.ok(terrainCoverage.coverage(requireDevice(id)));
     }
 
     /**

@@ -206,6 +206,17 @@ export function previewDevicePointCalibration(deviceId, pointId, payload) {
  * 数值越小越权威；100 是"未特别指定"的默认档。多台设备看同一个点时，
  * 当前值取"优先级最小的来源里、时间最新的一条"。
  */
+/**
+ * GET /api/v1/devices/{id}/coverage → 雷达**按地形裁剪**的地面覆盖（P1-11 后半）。
+ *
+ * 返回每条方位线的「连续可见距离」与边界处的地面高程。大屏用它画覆盖层：
+ * 扇面外缘跟着山脊线走，而不是画成一个完美圆弧。没有高程场时
+ * `terrainAvailable=false`，此时调用方应当只画理论视场（不要拿假几何充数）。
+ */
+export function deviceCoverage(deviceId) {
+  return http.get(`/v1/devices/${deviceId}/coverage`)
+}
+
 export function setDevicePointSourcePriority(deviceId, pointId, sourcePriority) {
   return http.put(`/v1/devices/${deviceId}/points/${pointId}/source-priority`, { sourcePriority })
 }
