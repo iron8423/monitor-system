@@ -34,7 +34,6 @@ import java.util.Set;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class CalibrationService {
 
     /** 失效原因（短代码，进 {@code device_point.invalidated_reason}）。 */

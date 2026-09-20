@@ -67,16 +67,12 @@ public final class SeriesWindowPolicy {
     public static Window resolve(LocalDateTime from, LocalDateTime to, LocalDateTime now) {
         boolean fromDefaulted = from == null;
         boolean toDefaulted = to == null;
-        LocalDateTime f = from;
-        LocalDateTime t = to;
-        if (f == null && t == null) {
-            t = now;
-            f = t.minus(DEFAULT_WINDOW);
-        } else if (f == null) {
-            f = t.minus(DEFAULT_WINDOW);
-        } else if (t == null) {
-            t = now;
-        }
+        // 写法刻意"笨"一点：先定上界，再由上界推下界。
+        // 原来的分支式写法（if 都不给 / 只给 from / 只给 to）语义等价，但静态分析看不出
+        // "走到 `t.minus(...)` 时 t 一定非空"，于是报一处 potential NPE——
+        // 与其加注解解释，不如改成一眼就能证明非空的形状（2026-09-20，IDE 告警清单）。
+        LocalDateTime t = to == null ? now : to;
+        LocalDateTime f = from == null ? t.minus(DEFAULT_WINDOW) : from;
         if (f.isAfter(t)) {
             throw new BizException("from 不能晚于 to");
         }

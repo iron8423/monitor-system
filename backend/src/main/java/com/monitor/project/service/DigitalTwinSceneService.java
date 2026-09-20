@@ -31,7 +31,6 @@ import java.util.stream.Collectors;
 /** 数字孪生配置的校验、按项目读取与幂等更新。 */
 @Service
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class DigitalTwinSceneService {
 
     private final DigitalTwinSceneMapper sceneMapper;
@@ -134,7 +133,9 @@ public class DigitalTwinSceneService {
                 .in(DevicePoint::getDeviceId, deviceIds));
         Set<Long> pointIds = bindings.stream().map(DevicePoint::getPointId).collect(Collectors.toSet());
         Map<Long, MonitorPoint> points = pointIds.isEmpty() ? Collections.emptyMap()
-                : pointMapper.selectBatchIds(pointIds).stream()
+                // selectByIds 而不是已废弃的 selectBatchIds（IDE 告警清单，2026-09-20）；
+                // 全仓其它地方（DataScopeService / AlarmRuleService 等）用的都是前者
+                : pointMapper.selectByIds(pointIds).stream()
                 .collect(Collectors.toMap(MonitorPoint::getId, Function.identity(), (a, b) -> a));
         Map<Long, List<DevicePoint>> byDevice = bindings.stream()
                 .collect(Collectors.groupingBy(DevicePoint::getDeviceId));

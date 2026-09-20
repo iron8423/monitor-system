@@ -35,7 +35,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1")
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class MediaController {
 
     private final MediaService mediaService;

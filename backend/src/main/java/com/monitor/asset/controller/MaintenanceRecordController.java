@@ -27,7 +27,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/maintenance-records")
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class MaintenanceRecordController {
 
     private final MaintenanceRecordMapper maintenanceRecordMapper;

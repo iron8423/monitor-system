@@ -40,7 +40,6 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 @Slf4j
 @Component
-@SuppressWarnings("null")
 public class KeyLock {
 
     /** 分段数：2 的幂，{@code hashCode} 取模退化为位与，且足够覆盖常见并发度。 */

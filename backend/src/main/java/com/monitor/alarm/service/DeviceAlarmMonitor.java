@@ -49,7 +49,6 @@ import java.util.List;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class DeviceAlarmMonitor {
 
     /** 设备离线告警等级（D5 最低档）。 */

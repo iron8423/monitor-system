@@ -38,7 +38,6 @@ import java.util.List;
 @Component
 @Order(20)
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class ProjectMemberInitializer implements CommandLineRunner {
 
     /** 项目 1（清远电厂灰库/库区边坡），四个演示角色都在里面。 */

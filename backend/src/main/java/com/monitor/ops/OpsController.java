@@ -49,7 +49,6 @@ import java.util.Set;
 @RequestMapping("/api/v1/ops")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMIN')")
-@SuppressWarnings("null")
 public class OpsController {
 
     /** 开发默认 ingest 密钥（与 application.yml 的默认值一致）。只用来回答"是否仍是默认值"。 */

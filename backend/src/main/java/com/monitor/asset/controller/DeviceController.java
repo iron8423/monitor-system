@@ -44,7 +44,6 @@ import java.time.LocalDateTime;
 @RestController
 @RequestMapping("/api/v1/devices")
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class DeviceController extends BaseCrudController<Device> {
 
     private final DeviceMapper deviceMapper;

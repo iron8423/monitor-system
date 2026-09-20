@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class UserDetailsServiceImpl implements UserDetailsService {
 
     private final SysUserMapper userMapper;

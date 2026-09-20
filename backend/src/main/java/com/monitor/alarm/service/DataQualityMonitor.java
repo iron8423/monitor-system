@@ -50,7 +50,6 @@ import java.util.List;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class DataQualityMonitor {
 
     /** 数据可信度告警等级（D5 最低档），与离线告警同档。 */

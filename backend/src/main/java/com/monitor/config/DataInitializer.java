@@ -44,7 +44,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "monitor.demo-accounts", name = "enabled",
         havingValue = "true", matchIfMissing = true)
-@SuppressWarnings("null")
 public class DataInitializer implements CommandLineRunner {
 
     /**

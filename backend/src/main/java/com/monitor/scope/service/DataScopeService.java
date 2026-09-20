@@ -64,7 +64,6 @@ import java.util.stream.Collectors;
  */
 @Service
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class DataScopeService implements SubscriberScope {
 
     private final ProjectMemberMapper memberMapper;

@@ -1,6 +1,5 @@
 package com.monitor.auth.mapper;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.monitor.auth.entity.SysUser;
 import org.apache.ibatis.annotations.Mapper;

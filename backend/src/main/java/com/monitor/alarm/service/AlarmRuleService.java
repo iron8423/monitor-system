@@ -36,7 +36,6 @@ import java.util.stream.Collectors;
  */
 @Service
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class AlarmRuleService {
 
     private static final Set<String> OPERATORS = Set.of("gte", "lte");

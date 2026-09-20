@@ -20,7 +20,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/audit-logs")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('ADMIN')")
-@SuppressWarnings("null")
 public class AuditLogController {
 
     private final AuditLogMapper auditLogMapper;

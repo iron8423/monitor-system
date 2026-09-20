@@ -25,7 +25,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/alarms")
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class AlarmController {
 
     private final AlarmService alarmService;

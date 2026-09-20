@@ -25,7 +25,6 @@ import java.io.IOException;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class IngestKeyFilter extends OncePerRequestFilter {
 
     public static final String INGEST_KEY_HEADER = "X-Ingest-Key";

@@ -48,7 +48,6 @@ import java.util.function.Supplier;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class SseBroadcaster {
 
     public static final String EVENT_CONNECTED = "connected";

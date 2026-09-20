@@ -8,7 +8,10 @@ backend/target/
 # IDE
 .idea/
 *.iml
-.vscode/
+.vscode/*
+# 例外：把 Java 诊断口径（null 分析模式）共享出去——它决定"问题"面板里有没有噪音，
+# 每个人都自己配一遍必然会漂。理由见 docs/IDE_Java告警口径_20260920.md
+!.vscode/settings.json
 .classpath
 .project
 .settings/

@@ -120,7 +120,6 @@ public interface MeasurementMapper extends BaseMapper<Measurement> {
      * 「最近收到的数据」才是这条链路的当下状态；按采集时间卡的话，
      * 实时消息是否迟到要比较这两个时间；历史补报已在模式闸门外排除。</p>
      */
-    @SuppressWarnings("null")
     default List<Measurement> recentOfDevice(String deviceCode, LocalDateTime since) {
         return selectList(new LambdaQueryWrapper<Measurement>()
                 .eq(Measurement::getDeviceId, deviceCode)
@@ -167,7 +166,6 @@ public interface MeasurementMapper extends BaseMapper<Measurement> {
      * @param ceiling    当前值的时间上界；传 {@code LocalDateTime.now()}。理论上可为 null
      *                   （条件消失），但**没有任何调用点该这么做**
      */
-    @SuppressWarnings("null")
     default LambdaQueryWrapper<Measurement> latestRowOf(Long pointId, String metricCode,
                                                         LocalDateTime ceiling) {
         return new LambdaQueryWrapper<Measurement>()

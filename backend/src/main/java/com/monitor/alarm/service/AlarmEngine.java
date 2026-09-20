@@ -74,7 +74,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class AlarmEngine {
 
     private final AlarmRuleMapper ruleMapper;

@@ -1,0 +1,10 @@
+{
+    // Java 诊断口径（2026-09-20）。原值是 automatic，它让 JDT 对 Spring / Jackson /
+    // JSpecify 这些**已注解的库 API** 逐处报 "Null type safety: needs unchecked conversion"——
+    // 本工程没有 @NullMarked 注解体系，这类提示只会淹没真问题（实测 35 条告警里 25 条属于它）。
+    // 关闭之后，真正能发现的仍然是：未使用 import/字段/变量、废弃 API、潜在空指针
+    // ——这些在 2026-09-20 那一轮已经逐条修掉了。
+    // 想要把 null 分析真正用起来（而不是关掉），正确做法是先补 JSpecify 的 @NullMarked 体系，
+    // 步骤与取舍见 docs/IDE_Java告警口径_20260920.md。
+    "java.compile.nullAnalysis.mode": "disabled"
+}

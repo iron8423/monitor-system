@@ -27,7 +27,6 @@ import jakarta.validation.ConstraintViolationException;
 @Slf4j
 @RestControllerAdvice
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class GlobalExceptionHandler {
 
     private final DeniedWriteAuditor deniedWriteAuditor;

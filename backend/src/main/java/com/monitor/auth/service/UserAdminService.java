@@ -2,7 +2,6 @@ package com.monitor.auth.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.monitor.auth.dto.UserAdminVO;
-import com.monitor.auth.dto.UserCreateRequest;
 import com.monitor.auth.dto.UserUpdateRequest;
 import com.monitor.auth.entity.SysUser;
 import com.monitor.auth.mapper.SysUserMapper;
@@ -11,7 +10,6 @@ import com.monitor.common.exception.BizException;
 import com.monitor.organization.entity.Organization;
 import com.monitor.organization.mapper.OrganizationMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
@@ -51,12 +49,10 @@ import java.util.Map;
  */
 @Service
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class UserAdminService {
 
     private final SysUserMapper userMapper;
     private final OrganizationMapper organizationMapper;
-    private final PasswordEncoder passwordEncoder;
 
     /** 列表：按 id 升序（顺序必须确定——管理端要靠它稳定翻页，理由见 BaseCrudController#ordered） */
     public List<UserAdminVO> list() {
@@ -104,7 +100,9 @@ public class UserAdminService {
      * ——否则同样是「把自己或所有人关在门外」。</p>
      */
     public void remove(Long id, Long currentUserId) {
-        SysUser user = require(id);
+        // 只做存在性校验：这一行的值不参与判定（IDEA 会提示"局部变量未使用"，
+        // 但把它删干净、改成不接收返回值反而更好读）
+        require(id);
         if (id.equals(currentUserId)) {
             throw new BizException(400, "不能删除当前登录的账号");
         }

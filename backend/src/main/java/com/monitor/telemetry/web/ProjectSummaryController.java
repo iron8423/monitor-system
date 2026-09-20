@@ -18,7 +18,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/projects")
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class ProjectSummaryController {
 
     private final ProjectSummaryService summaryService;

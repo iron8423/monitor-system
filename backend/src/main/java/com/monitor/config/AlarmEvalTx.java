@@ -29,7 +29,6 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Bean 包一层，Boot 的自动配置不受影响，两个监视器拿到的仍是默认的 {@code REQUIRED} 模板。</p>
  */
 @Component
-@SuppressWarnings("null")
 public class AlarmEvalTx {
 
     private final TransactionTemplate template;

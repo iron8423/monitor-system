@@ -22,7 +22,6 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RestController
 @RequestMapping("/api/v1/stream")
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class StreamController {
 
     private final SseBroadcaster broadcaster;

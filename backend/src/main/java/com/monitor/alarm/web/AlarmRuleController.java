@@ -23,7 +23,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/alarm-rules")
 @RequiredArgsConstructor
-@SuppressWarnings("null")
 public class AlarmRuleController {
 
     private final AlarmRuleService ruleService;
