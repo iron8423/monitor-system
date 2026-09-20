@@ -54,8 +54,9 @@ jobs:
       # run-all.sh 需要 ss（iproute2）与 curl；ubuntu-latest 自带，这里只做显式声明
       - name: 验收套件（H2 空库）
         env:
-          # 后端日志留到固定路径：失败时 artifact 与 job summary 都靠它
+          # 后端日志与结果文件都留到固定路径：失败时 artifact / job summary / 注解都靠它们
           KEEP_LOG: ${{ runner.temp }}/acceptance-backend.log
+          RESULT_LOG: ${{ runner.temp }}/acceptance-result.json
         run: |
           set -o pipefail
           FRESH_PORT=18085 MVNW_OPTS="-B" tools/acceptance/run-all.sh --fresh 2>&1 \
@@ -71,6 +72,11 @@ jobs:
             echo '```'
             grep -E '^(---- .*(通过|失败)|  ✗|  套件|  未通过|  全部通过)' "$LOG" | tail -60 || true
             echo '```'
+            echo
+            echo '### 日志最后 20 行（进程被中断时看这里）'
+            echo '```'
+            tail -20 "$LOG" || true
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       # 把失败摘要做成 **check run annotation**：它连匿名读取都能拿到
       # （`GET /repos/{owner}/{repo}/check-runs/{id}/annotations`），
@@ -78,15 +84,21 @@ jobs:
       - name: 失败时把关键行做成注解（可被 checks API 读到）
         if: failure()
         run: |
+          RESULT="$RUNNER_TEMP/acceptance-result.json"
           LOG="$RUNNER_TEMP/acceptance-run.log"
-          [ -f "$LOG" ] || exit 0
-          # ① 失败断言与它的「期望/实得」明细 ② 失败套件汇总
-          { grep -E '^  ✗|^      |^  未通过|^  套件' "$LOG" || true; } | head -20 | while IFS= read -r line; do
+          # ① 结果文件在不在，先回答那个最容易误判的问题：**跑完了没有**
+          #    （日志经 tee，进程被中断会从中间截断，"没有未通过行"因此有两种含义）
+          if [ -f "$RESULT" ]; then
+            echo "::error title=验收结果::$(cat "$RESULT")"
+          else
+            echo "::error title=验收未跑完::结果文件未生成 —— 进程在跑完前被中断（看下面的日志尾部）"
+          fi
+          # ② 失败断言与它的「期望/实得」明细
+          { grep -E '^  ✗|^      |^  未通过' "$LOG" 2>/dev/null || true; } | head -20 | while IFS= read -r line; do
             echo "::error title=验收失败::${line}"
           done
-          # ③ 日志最后 15 行：进程若被中途杀掉（OOM/磁盘满），套件汇总根本没有机会打印，
-          #    那时只有"日志停在哪儿"能告诉排查的人发生了什么（2026-09-20 实测）
-          tail -15 "$LOG" | while IFS= read -r line; do
+          # ③ 日志最后 15 行：进程被中断时，只有"停在哪儿"能说明发生了什么
+          tail -15 "$LOG" 2>/dev/null | while IFS= read -r line; do
             echo "::error title=日志尾部::${line}"
           done
       - name: 失败时上传日志

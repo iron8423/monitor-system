@@ -20,6 +20,11 @@ MVNW_OPTS="${MVNW_OPTS:--o}"      # 默认离线（本仓 ~/.m2 已就绪）；�
 # 为什么需要：脚本原本把日志放 mktemp，失败时只在终端打最后 30 行——
 # 而 CI 的失败发生在哪一套、后端当时说了什么，往往要看完整日志才判得出来。
 KEEP_LOG="${KEEP_LOG:-}"
+# 结果文件（CI 与排障用）：把「跑了几套、过了几条、哪几套红」写成一份独立的小 JSON。
+# 为什么不能只看输出日志：日志经过 tee，进程被中断（SIGPIPE / 被 kill）时它会**从中间截断**，
+# 于是"没有未通过行"既可能是全过、也可能是没跑完——2026-09-20 两次 CI 红就卡在这个歧义上。
+# 有了这份文件：文件存在 = 跑完了（内容说明结果）；文件不存在 = 中途被中断。
+RESULT_LOG="${RESULT_LOG:-}"
 
 # 非 fresh：跑在已经起来的后端上，地址可用 BASE 覆盖
 if [ "$FRESH" = 1 ]; then BASE="http://localhost:$PORT/api/v1"
@@ -177,6 +182,19 @@ printf '\n%s================ 汇总 ================%s\n' "$C_DIM" "$C_OFF"
 if [ "$TOTAL_FAIL" -eq 0 ]; then FC="$C_GRN"; else FC="$C_RED"; fi
 printf '  套件 %d 个 · 断言通过 %s%d%s · 失败 %s%d%s\n' \
   "${#SUITES[@]}" "$C_GRN" "$TOTAL_PASS" "$C_OFF" "$FC" "$TOTAL_FAIL" "$C_OFF"
+if [ -n "$RESULT_LOG" ]; then
+  {
+    printf '{"suites":%d,"pass":%d,"fail":%d,"failed":[' "${#SUITES[@]}" "$TOTAL_PASS" "$TOTAL_FAIL"
+    first=1
+    for f in "${FAILED_SUITES[@]:-}"; do
+      [ -n "$f" ] || continue
+      [ "$first" = 1 ] || printf ','
+      first=0
+      printf '"%s"' "$(printf '%s' "$f" | sed 's/"/\\"/g')"
+    done
+    printf ']}\n'
+  } > "$RESULT_LOG" 2>/dev/null || true
+fi
 [ -n "$KEEP_LOG" ] && printf '  后端日志已留存：%s\n' "$KEEP_LOG"
 if [ "$TOTAL_FAIL" -eq 0 ]; then
   printf '  %s全部通过%s\n' "$C_GRN" "$C_OFF"
