@@ -20,6 +20,7 @@ import { projectDigitalTwin } from '@/api/monitor'
 import MediaGallery from '@/components/MediaGallery.vue'
 import ThemeSwitch from '@/components/ThemeSwitch.vue'
 import { ALARM_LEVEL, resolvePointVisual } from '@/constants/status'
+import { HEAT_RAMP_STOPS, heatColorOf, heatExtentOf } from '@/utils/heatScale'
 import { useMonitorStore } from '@/stores/monitor'
 import { useIntegrityStore } from '@/stores/integrity'
 import { useRealtimeStore } from '@/stores/realtime'
@@ -138,6 +139,17 @@ const assetChipTitle = computed(() => {
   ].filter(Boolean).join('\n')
 })
 const activeRadarId = ref(null)
+
+/**
+ * 地面热力层的标度（2026-09-20 重做）：颜色与半径都按**当前这批测点**的最大绝对值归一化，
+ * 所以标度要跟着数据走，并在图例里把刻度写出来——不然"颜色深一点"没有可解释的含义。
+ */
+const heatMax = computed(() => heatExtentOf(displayPoints.value))
+const heatUnit = computed(() => store.primaryMetric?.unit || '')
+const heatLegendGradient = computed(() => {
+  const stops = HEAT_RAMP_STOPS.map((s) => `${s.color} ${((s.at + 1) / 2 * 100).toFixed(0)}%`)
+  return `linear-gradient(90deg, ${stops.join(', ')})`
+})
 
 /** 跟随测点的浮窗 */
 const popup = reactive({ visible: false, pointId: null, x: 0, y: 0 })
@@ -683,6 +695,7 @@ watch(
   displayPoints,
   (list) => {
     pointLayer?.sync(list)
+    // 标度由热力层自己按这批测点算（见 heatmapLayer.sync 的注释：传参漏传过一次，全部被清掉）
     heatLayer?.sync(list, { visible: heatOn.value })
   },
   { deep: true, immediate: true },
@@ -941,6 +954,21 @@ onBeforeUnmount(() => {
         <span class="dot" :style="{ background: item.color }" />{{ item.label }}
       </div>
       <span class="legend-note">立柱高度为示意，非实测量值</span>
+      <!--
+        地面热力层的刻度（2026-09-20）：颜色 = 测值大小（发散色标，负冷正暖），
+        半径 = 相对大小的视觉强调——半径没有物理含义，必须写出来，否则会被读成"影响半径"。
+      -->
+      <div v-if="heatOn" class="heat-legend">
+        <div class="heat-legend-bar" :style="{ background: heatLegendGradient }" />
+        <div class="heat-legend-scale">
+          <span>{{ formatSigned(-heatMax, 2) }} {{ heatUnit }}</span>
+          <span>0</span>
+          <span>{{ formatSigned(heatMax, 2) }} {{ heatUnit }}</span>
+        </div>
+        <span class="legend-note">
+          颜色＝测值大小（刻度取当前测点最大绝对值）；晕圈大小只表示相对大小，不是影响半径。
+        </span>
+      </div>
       <span class="legend-note">场景：{{ sceneDescription }}</span>
       <!-- 主测项不只换数字：符号与立柱也跟着换，这里必须写出来，否则用户不知道「为什么变成空心环」 -->
       <span class="legend-note">
@@ -1464,6 +1492,29 @@ onBeforeUnmount(() => {
   padding-top: 6px;
   font-size: 10px;
   line-height: 1.5;
+  color: var(--mk-hud-muted);
+}
+
+/* 热力色标：一条渐变条 + 两端刻度。放在图例里，和"哪个颜色代表什么"挨着 */
+.heat-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  max-width: 260px;
+  margin-top: 6px;
+}
+
+.heat-legend-bar {
+  height: 8px;
+  border: 1px solid var(--mk-border);
+  border-radius: 3px;
+}
+
+.heat-legend-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
   color: var(--mk-hud-muted);
 }
 

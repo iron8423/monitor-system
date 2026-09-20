@@ -393,6 +393,37 @@ try {
     check('窗口建议：未来时间（设备时钟超前）不抛，落最小档',
       suggestRange(iso(-2), RANGES, now)?.value === 1)
   }
+
+  // ── ⑦ 地面热力层的标度（2026-09-20）────────────────────────
+  // 这一层上一版"看不出来"：颜色取状态色（普遍正常 → 全绿），半径 12m + |值|×系数
+  // 在 ±1mm/d 量级下全部贴下限。现在颜色按发散色标、半径按当前集合归一化，
+  // 所以这两条性质必须被钉住，否则下一次改颜色/半径时很容易又回到"一样大、一样色"。
+  {
+    const { HEAT_RADIUS_MIN, HEAT_RADIUS_MAX, heatColorOf, heatExtentOf, heatRadiusOf } =
+      await server.ssrLoadModule('/src/utils/heatScale.js')
+
+    check('热力标度：刻度取当前测点最大绝对值（忽略 null/NaN，不把它们当 0 压扁刻度）',
+      heatExtentOf([{ value: 0.2 }, { value: -0.83 }, { value: null }, { value: '不是数' }]) === 0.83)
+    check('热力标度：全无有效读数的集合刻度为 0（调用方据此不画）',
+      heatExtentOf([{ value: null }, {}]) === 0)
+    check('热力标度：值为 0 不画（没有形变就没有热力），无量纲的 0 不是"最小热力"',
+      heatRadiusOf(0, 1) === 0 && heatRadiusOf(null, 1) === 0)
+    check('热力标度：最大值取到半径上限、小值明显大于下限（相对关系一定看得见）',
+      heatRadiusOf(0.83, 0.83) === HEAT_RADIUS_MAX
+        && heatRadiusOf(0.2, 0.83) > HEAT_RADIUS_MIN
+        && heatRadiusOf(0.2, 0.83) < HEAT_RADIUS_MAX)
+    // 端点色是锚点本身；中间值按锚点插值——所以"单调"要按通道比，不能拿端点色去比完整值
+    const redOf = (hex) => parseInt(hex.slice(1, 3), 16)
+    check('热力标度：端点色是锚点（-1 冷蓝 / 0 中性 / +1 暖红）',
+      heatColorOf(-1, 1) === '#2b6cb0'
+        && heatColorOf(0, 1) === '#e8eef5'
+        && heatColorOf(1, 1) === '#e53e3e')
+    check('热力标度：颜色随值单调（负值偏冷、正值偏暖，中间值插值）',
+      redOf(heatColorOf(-0.8, 1)) < redOf(heatColorOf(0, 1))
+        && redOf(heatColorOf(0, 1)) < redOf(heatColorOf(0.8, 1)))
+    check('热力标度：超出刻度也只到端点色，不会算出非法颜色',
+      /^#[0-9a-f]{6}$/.test(heatColorOf(99, 1)) && heatColorOf(99, 1) === '#e53e3e')
+  }
 } finally {
   await server.close()
 }

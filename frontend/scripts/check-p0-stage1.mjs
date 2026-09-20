@@ -503,6 +503,25 @@ try {
     }
   })
 
+  /**
+   * 地面热力层的绊线（2026-09-20）。这一层**两次**变成"视觉上的死代码"：
+   *   ① 颜色取状态色（测点普遍正常 → 全绿）、半径按绝对量级（±1mm/d → 全贴下限）；
+   *   ② 晕圈画在"档案高程 + 0.45m"的水平面上，被 GLB 山体吞掉，勾了开关什么都不出现。
+   * 现在颜色走数值色标、形状是有厚度的短柱、图例给出刻度——三条都钉住。
+   */
+  ok('绊线·地面热力层：数值色标 + 有厚度 + 图例刻度', () => {
+    const layer = src('cesium/heatmapLayer.js')
+    const screen = src('views/ScreenView.vue')
+    assert.ok(!layer.includes("from '@/constants/status'"),
+      '热力层不该再用状态色（测点普遍正常时所有晕圈同色，等于看不出来）')
+    assert.ok(layer.includes('extrudedHeight'),
+      '晕圈必须有厚度：贴地平面会被 GLB 山体三角形吞掉')
+    assert.ok(layer.includes('heatExtentOf') && layer.includes('heatColorBucketOf'),
+      '颜色与半径要按当前测点集合的标度算')
+    assert.ok(screen.includes('heat-legend') && screen.includes('heatExtentOf'),
+      '图例里要给出色标刻度（否则"颜色深一点"没有可解释的含义）')
+  })
+
   // 执行实际路由守卫和 onError；只替换浏览器 history、页面组件与对话框。
   const { default: router } = await server.ssrLoadModule('/src/router/index.js')
   const { useUserStore } = await server.ssrLoadModule('/src/stores/user.js')
