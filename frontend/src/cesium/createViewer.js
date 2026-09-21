@@ -1,6 +1,8 @@
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 
+import { applyRenderProfile } from '@/cesium/renderProfile'
+
 const TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN || ''
 const TERRAIN_MODE = import.meta.env.VITE_TERRAIN_MODE || 'ion'
 const SCENE_MODE = import.meta.env.VITE_SCENE_MODE || 'mountain'
@@ -66,15 +68,52 @@ export function createViewer(container) {
   })
 
   const scene = viewer.scene
+  // 画布分辨率（2026-09-21 用户反馈"点和标签发虚"）：
+  // Cesium 默认 useBrowserRecommendedResolution=true，按 CSS 分辨率渲染——
+  // 在 2x 屏上等于把整幅三维画面放大一倍，点/编号/视场线全被插值糊掉。
+  // 改成按设备像素渲染（上限 2，默认 1.5 兼顾性能）。
+  const scale = Math.min(
+    Math.max(parseFloat(import.meta.env.VITE_RESOLUTION_SCALE) || 1.5, 1),
+    Math.min(window.devicePixelRatio || 1, 2),
+  )
+  viewer.useBrowserRecommendedResolution = false
+  viewer.resolutionScale = scale
+
   applyViewerTheme(viewer)
   scene.globe.enableLighting = false
   scene.globe.depthTestAgainstTerrain = true
   scene.fog.enabled = true
-  scene.fog.density = 0.0002
-  scene.screenSpaceCameraController.minimumZoomDistance = 30
-  scene.screenSpaceCameraController.maximumZoomDistance = 60000
+  // 雾密度（2026-09-21）：原来 0.0002 在 1km 尺度上等于没有雾——拉远后地形边界会硬切在
+  // 一片纯黑里，"一张纸浮在空中"的观感就是这么来的。调到 0.0011 让远处自然化掉。
+  scene.fog.density = parseFloat(import.meta.env.VITE_FOG_DENSITY) || 0.0011
+  scene.screenSpaceCameraController.minimumZoomDistance = 60
+  // 最大缩放距离（2026-09-21 用户反馈"回到全局视角就看不到东西"）：
+  // 原来给到 60km，等于允许用户把 1km 的场址缩成一个看不见的点。
+  // 收到 4000m：还能拉远看全貌，但不会拉到虚空里。可用 VITE_MAX_ZOOM_DISTANCE 覆盖。
+  scene.screenSpaceCameraController.maximumZoomDistance =
+    parseFloat(import.meta.env.VITE_MAX_ZOOM_DISTANCE) || 12000
+  // 鼠标操作映射（2026-09-21 反馈"有时旋转有时平移"）：
+  // Cesium 默认左键在"有地球的地方"是转地球、在虚空里是转相机，还会因为地形/椭球
+  // 命中与否表现不一致。这里把三种操作钉死，行为可预期：
+  //   左键拖 = 绕场景旋转；右键拖 = 平移；滚轮 = 缩放
+  const cam = scene.screenSpaceCameraController
+  cam.rotateEventTypes = Cesium.CameraEventType.LEFT_DRAG
+  cam.translateEventTypes = [
+    Cesium.CameraEventType.RIGHT_DRAG,
+    Cesium.CameraEventType.MIDDLE_DRAG,
+  ]
+  cam.zoomEventTypes = [Cesium.CameraEventType.WHEEL, Cesium.CameraEventType.PINCH]
+  cam.tiltEventTypes = [
+    Cesium.CameraEventType.MIDDLE_DRAG,
+    Cesium.CameraEventType.PINCH,
+    { eventType: Cesium.CameraEventType.LEFT_DRAG, modifier: Cesium.KeyboardEventModifier.CTRL },
+  ]
+  cam.enableLook = false
   // 版权署名容器保留（Cesium 与影像提供方要求），只在样式上收敛
   viewer.cesiumWidget.creditContainer.style.opacity = '0.55'
+
+  // 渲染档位（默认 flat = 历史行为；VITE_RENDER_MODE=lit 时切成受光渲染）
+  applyRenderProfile(viewer)
 
   return viewer
 }

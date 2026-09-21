@@ -365,11 +365,21 @@ function addRadar(viewer, radar, index = 0) {
 }
 
 function cameraOf(config) {
-  return {
+  // 取景微调（2026-09-21）：数据库里存的相机参数（range 1650）让 1000×750m 的资产
+  // 只占屏幕中间一小块，四周全是空白——观感上是"一张纸浮在黑底上"。
+  // 这里用环境变量按比例收紧，不动数据库、也不改其它场景的存档参数：
+  // VITE_CAMERA_RANGE_SCALE=0.7 → 1650m 变约 1155m；VITE_CAMERA_PITCH 可覆盖俯角。
+  const rangeScale = parseFloat(import.meta.env.VITE_CAMERA_RANGE_SCALE) || 1
+  const pitchOverride = parseFloat(import.meta.env.VITE_CAMERA_PITCH)
+  const camera = {
     heading: finite(config.cameraHeadingDegrees, DEFAULT_CAMERA.heading),
-    pitch: finite(config.cameraPitchDegrees, DEFAULT_CAMERA.pitch),
+    pitch: Number.isFinite(pitchOverride)
+      ? pitchOverride
+      : finite(config.cameraPitchDegrees, DEFAULT_CAMERA.pitch),
     range: Math.max(1, finite(config.cameraRange, DEFAULT_CAMERA.range)),
   }
+  camera.range *= rangeScale
+  return camera
 }
 
 /**
@@ -411,13 +421,31 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
         finite(config.anchorLatitude),
         finite(config.anchorHeight),
       )
+      // 取景自适应（2026-09-21）：原来用的是配置里写死的 range，模型大小/窗口宽高比一变
+      // 就会"要么塞不满、要么跑出画面"。这里按**模型包围球**和当前画布 FOV 反算距离，
+      // 保证任何窗口比例下模型都刚好填满（留 12% 余量）。VITE_CAMERA_FIT=0 可退回固定值。
+      const fit = String(import.meta.env.VITE_CAMERA_FIT ?? '1') !== '0'
+      // 取景半径优先用**场景平面尺寸**（宽/深），包围球会把 200m 的山体高度也算进去，
+      // 结果相机被推到模型外很远——上一版"点了全局视角反而什么都看不到"就是这么来的。
+      const dim = Array.isArray(config.dimensionsMetres) ? config.dimensionsMetres : []
+      const span = Math.max(Number(dim[0]) || 0, Number(dim[1]) || 0)
+      const radius = Math.max(span / 2, Number(asset?.boundingSphere?.radius) || 0, 30)
+      let range = camera.range
+      if (fit) {
+        const canvas = viewer.canvas
+        const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight)
+        const fovy = viewer.camera.frustum.fovy || Cesium.Math.toRadians(60)
+        const hfov = 2 * Math.atan(Math.tan(fovy / 2) * aspect)
+        const half = Math.min(fovy, hfov) / 2
+        range = (radius / Math.sin(half)) * 1.12
+      }
       viewer.camera.flyToBoundingSphere(
-        new Cesium.BoundingSphere(anchor, Math.max(30, camera.range / 2.4)),
+        new Cesium.BoundingSphere(anchor, radius),
         {
           offset: new Cesium.HeadingPitchRange(
             Cesium.Math.toRadians(camera.heading),
             Cesium.Math.toRadians(camera.pitch),
-            camera.range,
+            range,
           ),
           duration,
         },

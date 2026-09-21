@@ -14,6 +14,7 @@ import {
   setupTerrain,
 } from '@/cesium/createViewer'
 import { createDigitalTwinScene } from '@/cesium/digitalTwinScene'
+import { ASSET_OVERRIDE, LIT_RENDERING } from '@/cesium/renderProfile'
 import { createPointLayer } from '@/cesium/pointLayer'
 import { createHeatmapLayer } from '@/cesium/heatmapLayer'
 import { deviceCoverage, projectDigitalTwin } from '@/api/monitor'
@@ -467,6 +468,11 @@ async function loadProjectScene(projectId) {
   try {
     const config = await projectDigitalTwin(projectId)
     if (generation !== sceneLoadGeneration) return null
+    // 本地试验：把资产临时指到另一份 GLB（受光版），并且跳过哈希核对——
+    // 数据库里记的是旧资产的 SHA-256，对着新资产核对只会得到一条假告警。
+    // 真正上线要走新版本号迁移把 asset_sha256 一起更新。
+    const overridden = Boolean(ASSET_OVERRIDE) && config?.enabled
+    if (overridden) config.assetUrl = ASSET_OVERRIDE
     if (!config?.enabled) {
       mountainState.value = 'skipped'
       if (store.pointsOfProject.length) flyToPoints(viewer, store.pointsOfProject)
@@ -476,7 +482,7 @@ async function loadProjectScene(projectId) {
     }
     // 资产哈希核对（P0-5）与模型加载并行：核对只是"报一条"，
     // 既不该拖慢首屏，也不该拦住场景——模型真坏了也要先把现场显示出来。
-    integrity.verify(config).catch(() => {})
+    if (!overridden) integrity.verify(config).catch(() => {})
     // 覆盖层几何与资产加载**并行**取：它是一次几十毫秒的高程场计算，但也不该串在首屏前面。
     // 失败（老后端没有这个端点 / 没导出高程场）就让 radar.coverage 保持 undefined，
     // 场景层会只画理论视场——不冒充、不报错拦屏。
@@ -781,6 +787,10 @@ onBeforeUnmount(() => {
         <span class="logo">CQXL</span>
         <span class="title">三维数字孪生监测大屏</span>
         <span class="project">{{ store.currentProject?.name || '—' }}</span>
+        <!-- 试验标记：受光渲染 / 临时资产。避免把试验画面当成正式效果看走了眼。 -->
+        <span v-if="LIT_RENDERING || ASSET_OVERRIDE" class="render-flag">
+          试验渲染{{ LIT_RENDERING ? '·受光' : '' }}{{ ASSET_OVERRIDE ? '·资产覆盖' : '' }}
+        </span>
         <!-- 项目切换：只影响读这份 store 的页面（就是本屏）——其余页面由后端按成员项目限范围 -->
         <label v-if="store.projects.length > 1" class="metric-pick">
           <span>项目</span>
@@ -1028,9 +1038,8 @@ onBeforeUnmount(() => {
         </label>
       </div>
     </div>
-    </div>
 
-    <!-- 底部时间轴：回放历史 / 退回实时 -->
+    <!-- 时间轴回放（2026-09-21 用户要求：从底部挪进右侧竖栏，与雷达面板/图例同列） -->
     <div class="hud timeline">
       <button class="btn" :class="{ primary: replay.enabled }" @click="replay.toggle()">
         {{ replay.enabled ? '退回实时' : '时间轴回放' }}
@@ -1074,6 +1083,7 @@ onBeforeUnmount(() => {
         <span v-if="replay.error" class="err-text">{{ replay.error }}</span>
       </template>
       <span v-else class="dim-text">实时推送中 · 打开时间轴可回看历史形变</span>
+    </div>
     </div>
 
     <!-- 点击测点后的浮窗 -->
@@ -1873,5 +1883,38 @@ onBeforeUnmount(() => {
 /* Cesium 自带版权署名容器的位置微调，避免压住左下角图例 */
 :deep(.cesium-widget-credits) {
   font-size: 10px;
+}
+
+/* 试验标记（受光渲染 / 资产覆盖）：只在打开对应开关时出现 */
+.render-flag {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 176, 87, 0.55);
+  color: #ffb057;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+
+/*
+ * 时间轴挪进右侧竖栏（2026-09-21）：它原来是底部整条（left/right:16px、横排），
+ * 现在作为竖栏里的一块普通面板——位置交给 .right-rail，内部改成竖排。
+ * 选择器带 .right-rail 前缀，特异性高于原来的 .timeline，覆盖旧的绝对定位。
+ */
+.right-rail .timeline {
+  position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  top: auto;
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.right-rail .timeline .timeline-slider {
+  width: 100%;
+  margin: 0;
 }
 </style>

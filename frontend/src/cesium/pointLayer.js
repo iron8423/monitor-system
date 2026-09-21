@@ -94,19 +94,24 @@ export function createPointLayer(viewer, { labelDistance = 2000 } = {}) {
       id: `point-${item.id}`,
       position: top,
       point: {
-        pixelSize: 16,
+        // 2026-09-21 用户反馈"圆形图例不好看"：地面锚点收小，主视觉交给
+        // "空中标签 + 引线连地面"（引线 = 上面的 mast，颜色按状态走）。
+        pixelSize: 7,
         color,
-        outlineColor: Cesium.Color.WHITE.withAlpha(0.95),
-        outlineWidth: 3,
+        outlineColor: Cesium.Color.fromCssColorString('#06101f').withAlpha(0.9),
+        outlineWidth: 1.5,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       // 标签文字在 sync() 里随数据一起更新
       label: {
         text: item.code,
         font: '13px "Microsoft YaHei", sans-serif',
-        fillColor: Cesium.Color.WHITE,
+        // 标签文字也按状态着色，远看能一眼分辨正常/告警（与图例一一对应）
+        fillColor: color,
         showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString('#06101f').withAlpha(0.78),
+        backgroundColor: Cesium.Color.fromCssColorString('#06101f').withAlpha(0.82),
+        outlineColor: Cesium.Color.fromCssColorString('#06101f').withAlpha(0.9),
+        outlineWidth: 2,
         backgroundPadding: new Cesium.Cartesian2(8, 4),
         // 同一场景内的测点往往只隔一两百米，标签会叠在一起 —— 按序号阶梯式上移错开
         pixelOffset: new Cesium.Cartesian2(0, -26 - stackIndex * 21),

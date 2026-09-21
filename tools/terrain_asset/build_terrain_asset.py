@@ -496,7 +496,8 @@ def build_heightfield(dem: Mosaic, anchor: dict, width: float, depth: float,
 
 
 def bake_texture(imagery: Mosaic, terrain: Heightfield, width: float, depth: float,
-                 texture_size: tuple[int, int], seed: int) -> tuple[bytes, Image.Image]:
+                 texture_size: tuple[int, int], seed: int,
+                 baked_shade: float = 1.0) -> tuple[bytes, Image.Image]:
     tex_w, tex_h = texture_size
     m_per_lon, m_per_lat = terrain.m_per_lon, terrain.m_per_lat
 
@@ -553,6 +554,11 @@ def bake_texture(imagery: Mosaic, terrain: Heightfield, width: float, depth: flo
     lambert = np.clip((normal * light).sum(axis=-1), 0.0, 1.0)
     # 平地 lambert = sin(45°) ≈ 0.707 → 1.0，向阳面略亮、背阴面压暗但不发黑。
     shade = np.clip(0.45 + 0.78 * lambert, 0.55, 1.22)
+    # baked_shade=0 ⇒ 纹理不带任何明暗（供 --material lit 使用）：实时日照会给出
+    # 更真实的明暗，如果纹理里再压一层同样方向的山体阴影，两者会互相打架、
+    # 背光坡会黑成一片。默认 1.0 与历史资产逐字节一致。
+    if baked_shade != 1.0:
+        shade = 1.0 + (shade - 1.0) * float(baked_shade)
 
     # 5) 程序化细节：树冠级斑块 + 细颗粒，避免 10m 影像放大成一片糊。
     #    幅度刻意保守（±10%/±6%）：这部分是**观感补充**，压过头就会盖掉真实影像的颜色，
@@ -617,7 +623,7 @@ def pad4(data: bytes, byte: bytes = b"\x00") -> bytes:
 
 
 def write_glb(path: Path, mesh: dict, texture_jpeg: bytes, asset_version: str,
-              extras: dict, structures: dict | None = None) -> None:
+              extras: dict, structures: dict | None = None, lit: bool = False) -> None:
     positions = mesh["positions"].reshape(-1).astype("<f4")
     normals = mesh["normals"].reshape(-1).astype("<f4")
     uvs = mesh["uvs"].reshape(-1).astype("<f4")
@@ -673,9 +679,32 @@ def write_glb(path: Path, mesh: dict, texture_jpeg: bytes, asset_version: str,
         ])
     pos_min = mesh["positions"].reshape(-1, 3).min(axis=0).tolist()
     pos_max = mesh["positions"].reshape(-1, 3).max(axis=0).tolist()
+    terrain_material = {
+        "name": "SatelliteTerrainLit" if lit else "SatelliteTerrainUnlit",
+        "doubleSided": True,
+        "pbrMetallicRoughness": {
+            "baseColorTexture": {"index": 0},
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.95 if lit else 1.0,
+        },
+    }
+    structure_material = {
+        "name": "StructureVertexColorsLit" if lit else "StructureVertexColors",
+        "doubleSided": True,
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.95 if lit else 1.0,
+        },
+    }
+    if not lit:
+        # unlit = 不受场景时钟与太阳位置影响；lit 交给实时日照与阴影。
+        terrain_material["extensions"] = {"KHR_materials_unlit": {}}
+        structure_material["extensions"] = {"KHR_materials_unlit": {}}
+
     gltf = {
         "asset": {"version": "2.0", "generator": "monitor-system offline terrain asset builder v1"},
-        "extensionsUsed": ["KHR_materials_unlit"],
+        **({} if lit else {"extensionsUsed": ["KHR_materials_unlit"]}),
         "scene": 0,
         "scenes": [{"name": extras.get("sceneName", asset_version), "nodes": [0]}],
         "nodes": [{"name": "RealTerrain", "mesh": 0}],
@@ -688,25 +717,7 @@ def write_glb(path: Path, mesh: dict, texture_jpeg: bytes, asset_version: str,
                 "mode": 4,
             }],
         }],
-        "materials": [{
-            "name": "SatelliteTerrainUnlit",
-            "doubleSided": True,
-            "pbrMetallicRoughness": {
-                "baseColorTexture": {"index": 0},
-                "metallicFactor": 0.0,
-                "roughnessFactor": 1.0,
-            },
-            "extensions": {"KHR_materials_unlit": {}},
-        }] + ([{
-            "name": "StructureVertexColors",
-            "doubleSided": True,
-            "pbrMetallicRoughness": {
-                "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
-                "metallicFactor": 0.0,
-                "roughnessFactor": 1.0,
-            },
-            "extensions": {"KHR_materials_unlit": {}},
-        }] if structures is not None else []),
+        "materials": [terrain_material] + ([structure_material] if structures is not None else []),
         "textures": [{"sampler": 0, "source": 0}],
         "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 33071, "wrapT": 33071}],
         "images": [{"name": "sentinel2-terrain-texture", "bufferView": 4,
@@ -1133,7 +1144,10 @@ def write_provenance(out: Path, *, asset_version: str, glb_sha: str, terrain: He
         "",
         f"- **实测**：宏观地形（30m 级 DEM）、影像色彩与地物分布（10m 级）。",
         f"- **程序化**：中高频地形细节（幅度 ±{args.detail_amplitude:.1f}m 级，按坡度加权）、",
-        "  树冠级纹理噪声、山体阴影（太阳方位 315°、高度角 45°，已烘焙进纹理）。",
+        ("  树冠级纹理噪声；材质为**受光 PBR**（山体阴影不烘焙，由实时日照与阴影给出，"
+         "需前端开启 `enableLighting` / `shadows`）。"
+         if args.material == "lit" else
+         "  树冠级纹理噪声、山体阴影（太阳方位 315°、高度角 45°，已烘焙进纹理）。"),
         "  公开 DEM 在 320m 场景里只有约 10×8 个采样点，不补细节会呈蜡状；",
         "  这条边界必须让读者知道，避免把观感当成测绘精度。",
         "- **模拟**：雷达位姿、测点位置与标定参数。测点仍在原有本地坐标上，",
@@ -1187,6 +1201,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--detail-amplitude", type=float, default=None,
                         help="程序化地形细节基准幅度（米）；航测数据接进来时应传 0")
     parser.add_argument("--detail-seed", type=int, default=20260918)
+    parser.add_argument("--material", choices=("unlit", "lit"), default="unlit",
+                        help="unlit（默认，与历史资产一致，山体阴影烘焙进纹理）/ "
+                             "lit（受光 PBR，配合实时日照与阴影；此时应同时用 --baked-shade 0）")
+    parser.add_argument("--baked-shade", type=float, default=1.0,
+                        help="烘焙山体阴影的强度：1.0=原样（默认）；0=不烘焙（配合 --material lit）")
     parser.add_argument("--texture-width", type=int, default=None)
     parser.add_argument("--texture-height", type=int, default=None)
     parser.add_argument("--camera", type=float, nargs=3, default=None,
@@ -1246,7 +1265,8 @@ def main(argv: list[str] | None = None) -> int:
 
     log("烘焙卫星纹理（曝光归一 + 山坡阴影 + 细节合成）...")
     texture_bytes, preview = bake_texture(imagery, terrain, width, depth,
-                                          texture_size, args.detail_seed)
+                                          texture_size, args.detail_seed,
+                                          baked_shade=args.baked_shade)
     log(f"纹理 {len(texture_bytes) / 1024:.0f} KiB")
 
     log("生成网格...")
@@ -1272,12 +1292,17 @@ def main(argv: list[str] | None = None) -> int:
         "feature": site["feature"],
         "texture": {"width": args.texture_width, "height": args.texture_height,
                     "source": "Sentinel-2 cloudless 2023 (EOX, CC BY 4.0)",
-                    "bakedLighting": "hillshade sun azimuth 315°, altitude 45°"},
+                    "bakedLighting": ("none (lit PBR material, real-time sunlight)"
+                                      if args.material == "lit"
+                                      else "hillshade sun azimuth 315°, altitude 45°")},
+        # 只在 lit 时写这个键：默认路径必须与历史资产逐字节一致（资产哈希是核对项）。
+        **({"material": args.material} if args.material != "unlit" else {}),
         "elevationSource": "Mapzen/AWS terrarium tiles (SRTM-derived, ~30m)",
         "syntheticDetailMetres": args.detail_amplitude,
         "license": "Imagery CC BY 4.0 (EOX Sentinel-2 cloudless); DEM SRTM public domain",
     }
-    write_glb(glb_path, mesh, texture_bytes, args.asset_version, extras, structures)
+    write_glb(glb_path, mesh, texture_bytes, args.asset_version, extras, structures,
+              lit=args.material == "lit")
     glb_bytes = glb_path.read_bytes()
     log(f"写入 {glb_path}（{len(glb_bytes) / 1024 / 1024:.2f} MiB）")
 
