@@ -18,6 +18,20 @@ const SCENE_MODE = import.meta.env.VITE_SCENE_MODE || 'mountain'
 export const ION_CONFIGURED = Boolean(TOKEN)
 export const ION_TERRAIN_MODE = TERRAIN_MODE
 export const LOCAL_SCENE_ENABLED = SCENE_MODE === 'mountain'
+/*
+ * 远景层（2026-09-22 用户反馈"转一下就露出地块边缘的虚空"）。
+ *
+ * 根因是几何事实：本地方形地块是有限的，只要视线接近水平，地块边界必然进画面，
+ * 边界之外什么都没有 → 看起来像"一块悬浮的板子"。此前试过扩大地块（3km→6km），
+ * 但按 -30° 俯角算需要 20km 见方才推得出画面，而且纹理会被摊薄到没意义。
+ *
+ * 正确做法是让"地块之外"有东西：给椭球铺一层真实全球影像（ion 的 Bing 影像，
+ * WGS-84，与我们的地块不错位），于是任意角度、任意缩放看到的都是真实地面，
+ * 而不是背景色。`VITE_FARFIELD=off` 可退回"深色底 + 只有地块"的老行为。
+ */
+const FARFIELD = String(import.meta.env.VITE_FARFIELD || 'ion').toLowerCase()
+/** 远景要不要用 Cesium 全球地形（ion asset 1）：有真实起伏，但需要联网且更吃性能。 */
+const FARFIELD_TERRAIN = String(import.meta.env.VITE_FARFIELD_TERRAIN || '0') === '1'
 
 /**
  * 场景底色（椭球底色）按主题给两个值。
@@ -25,15 +39,33 @@ export const LOCAL_SCENE_ENABLED = SCENE_MODE === 'mountain'
  * 为什么 3D 也要跟着主题走：白天模式下工作台是浅色的，如果大屏的"天空"仍是深夜蓝黑，
  * 切过来会像两个系统。底线是不动影像与地形本身——那是数据，不是装饰。
  */
-const GLOBE_BASE_COLOR = { dark: '#0b1622', light: '#cfdbe8' }
+// 背景/地面底色（2026-09-21 用户反馈"左上角仍有虚空"）：从接近纯黑改成偏蓝的深石板色，
+// 配一层大气，观感更"有天空"、也不刺眼；浅色主题保持原来的浅灰蓝。
+// 背景/地面底色（2026-09-21 第二轮）：再提亮一档并偏蓝，让"模型之外"看起来是
+// 天空与雾，而不是黑洞——旋转到地平线方向时尤其明显。
+const GLOBE_BASE_COLOR = { dark: '#1b3550', light: '#cfdbe8' }
+
+/*
+ * 雾（2026-09-22）：Cesium 的雾是"距离越远越白"的航空透视，公式是
+ *   fog = 1 - exp(-((k·s + k) · s · (1 + k)))，  s = 距离 × density
+ * 其中 k = fog.visualDensityScalar。**之前一直看不见雾的原因就在这里**：
+ * 只调 density，而 k 很小（默认 0.001 量级），在 3~10km 的尺度上几乎不起作用；
+ * 而且 applyViewerTheme() 每次切主题都会把 density 重置成固定值，把环境变量覆盖掉。
+ * 现在两个参数都走环境变量，切主题也不再回写。
+ */
+const FOG_DENSITY = parseFloat(import.meta.env.VITE_FOG_DENSITY)
+const FOG_VISUAL_SCALAR = parseFloat(import.meta.env.VITE_FOG_VISUAL_SCALAR)
 
 /** 把当前主题应用到 viewer（创建时调一次；主题切换时再调） */
 export function applyViewerTheme(viewer, theme = document.documentElement.dataset.theme) {
   if (!viewer) return
   const key = theme === 'light' ? 'light' : 'dark'
   viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString(GLOBE_BASE_COLOR[key])
-  // 雾密度也分两档：浅色底配原来的雾会显得"发灰"
-  viewer.scene.fog.density = key === 'light' ? 0.00012 : 0.0002
+  // 雾密度也分两档：浅色底配原来的雾会显得"发灰"。
+  // 环境变量优先——否则切一次主题就会把调好的雾"打回原形"（这是个真发生过的问题）。
+  if (!Number.isFinite(FOG_DENSITY)) {
+    viewer.scene.fog.density = key === 'light' ? 0.00012 : 0.0002
+  }
 }
 
 /** 全球模式的远程兜底底图；默认 mountain 模式不会请求它。 */
@@ -82,10 +114,16 @@ export function createViewer(container) {
   applyViewerTheme(viewer)
   scene.globe.enableLighting = false
   scene.globe.depthTestAgainstTerrain = true
+  // 舒适的天空/大气：关掉默认星空盒、开大气散射，地平线自然过渡（不再是一块纯黑背景）
+  scene.skyBox.show = false
+  scene.skyAtmosphere.show = true
+  scene.backgroundColor = Cesium.Color.fromCssColorString(GLOBE_BASE_COLOR.dark)
   scene.fog.enabled = true
-  // 雾密度（2026-09-21）：原来 0.0002 在 1km 尺度上等于没有雾——拉远后地形边界会硬切在
-  // 一片纯黑里，"一张纸浮在空中"的观感就是这么来的。调到 0.0011 让远处自然化掉。
-  scene.fog.density = parseFloat(import.meta.env.VITE_FOG_DENSITY) || 0.0011
+  // 雾：密度 + 视觉密度标量都要给（见文件开头的公式说明），否则等于没开。
+  scene.fog.density = Number.isFinite(FOG_DENSITY) ? FOG_DENSITY : 0.0002
+  if (Number.isFinite(FOG_VISUAL_SCALAR)) {
+    scene.fog.visualDensityScalar = FOG_VISUAL_SCALAR
+  }
   scene.screenSpaceCameraController.minimumZoomDistance = 60
   // 最大缩放距离（2026-09-21 用户反馈"回到全局视角就看不到东西"）：
   // 原来给到 60km，等于允许用户把 1km 的场址缩成一个看不见的点。
@@ -123,7 +161,7 @@ export function createViewer(container) {
  * @returns {Promise<'ok'|'skipped'|'failed'>}
  */
 export async function setupTerrain(viewer) {
-  if (LOCAL_SCENE_ENABLED) {
+  if (LOCAL_SCENE_ENABLED && !FARFIELD_TERRAIN) {
     return 'skipped'
   }
   if (TERRAIN_MODE !== 'ion' || !TOKEN) {
@@ -147,15 +185,39 @@ export async function setupTerrain(viewer) {
  * @returns {Promise<'ion'|'offline'|'fallback'|'failed'>}
  */
 export async function setupImagery(viewer) {
-  // 山地演示默认不发任何外部请求：椭球底色 + 本地 GLB 足够构成完整画面。
-  // 若要切回原来的全球底图，可显式设置 VITE_SCENE_MODE=globe。
-  if (LOCAL_SCENE_ENABLED) {
+  // 本地地形场景默认也铺一层远景影像：地块之外要有真实地面，否则一转就露边。
+  // VITE_FARFIELD=off → 退回"深色椭球 + 只有地块"的老行为（断网兜底）。
+  if (LOCAL_SCENE_ENABLED && FARFIELD === 'off') {
     return 'offline'
+  }
+  /*
+   * 本地远景层（2026-09-22 第二轮）：`tools/imagery_fetch/fetch_farfield.py` 抓下来的
+   * Google 瓦片金字塔放在 `public/farfield/`，由 manifest.json 描述范围与层级。
+   * 好处：和地块纹理**同源同时期**（色调/地物都对得上），且运行期不联网。
+   * FARFIELD=local → 只用本地；local+ion → 本地之上再垫一层 ion 影像兜更远的地方。
+   */
+  if (FARFIELD === 'local' || FARFIELD === 'local+ion') {
+    const localStatus = await addLocalFarfield(viewer)
+    if (localStatus) {
+      if (FARFIELD === 'local+ion' && TOKEN) {
+        try {
+          const provider = await Cesium.IonImageryProvider.fromAssetId(2)
+          const layer = viewer.imageryLayers.addImageryProvider(provider)
+          viewer.imageryLayers.lowerToBottom(layer)
+          applyFarfieldTone(layer, true)
+        } catch (error) {
+          console.warn('[cesium] 远景兜底影像不可用（不影响本地远景）：', error?.message || error)
+        }
+      }
+      return localStatus
+    }
+    console.warn('[cesium] 没有找到本地远景层，退回在线影像')
   }
   if (TOKEN) {
     try {
       const provider = await Cesium.IonImageryProvider.fromAssetId(2)
-      viewer.imageryLayers.addImageryProvider(provider)
+      const layer = viewer.imageryLayers.addImageryProvider(provider)
+      applyFarfieldTone(layer, true)
       return 'ion'
     } catch (error) {
       console.warn('[cesium] ion 影像加载失败，改用兜底底图：', error?.message || error)
@@ -173,6 +235,50 @@ export async function setupImagery(viewer) {
   } catch (error) {
     console.warn('[cesium] 兜底底图也不可用：', error?.message || error)
     return 'failed'
+  }
+}
+
+/**
+ * 远景色调调整（2026-09-22 用户反馈"颜色差距很大"）。
+ *
+ * 地块纹理是 Google 影像，在线远景是 ion/Bing 影像——实测同一块场址
+ * Bing 的 HSV 饱和度均值 62.8、Google 只有 27.7，Bing 均值 RGB 165/148/124 还偏暖，
+ * 交界处就是一圈明显的色差。Cesium 的 ImageryLayer 支持渲染时调亮度/对比/饱和/伽马，
+ * 这里用环境变量把"非 Google 源"的远景往地块的色调上拽。
+ * 本地远景（同源 Google）不需要调，所以 desaturate=false。
+ */
+function applyFarfieldTone(layer, desaturate) {
+  const tune = (name, fallback) => {
+    const value = parseFloat(import.meta.env[name])
+    return Number.isFinite(value) ? value : fallback
+  }
+  layer.brightness = desaturate ? tune('VITE_FARFIELD_BRIGHTNESS', 1) : 1
+  layer.contrast = desaturate ? tune('VITE_FARFIELD_CONTRAST', 1) : 1
+  layer.saturation = desaturate ? tune('VITE_FARFIELD_SATURATION', 1) : 1
+  layer.gamma = desaturate ? tune('VITE_FARFIELD_GAMMA', 1) : 1
+  layer.hue = 0
+}
+
+/** 加载 public/farfield/manifest.json 描述的本地远景瓦片金字塔；没有就返回 null。 */
+async function addLocalFarfield(viewer) {
+  try {
+    const response = await fetch('/farfield/manifest.json', { cache: 'no-cache' })
+    if (!response.ok) return null
+    const manifest = await response.json()
+    const rect = manifest.rectangle || {}
+    const provider = new Cesium.UrlTemplateImageryProvider({
+      url: manifest.urlTemplate || '/farfield/{z}/{x}_{y}.jpg',
+      rectangle: Cesium.Rectangle.fromDegrees(rect.west, rect.south, rect.east, rect.north),
+      minimumLevel: manifest.minimumLevel ?? 0,
+      maximumLevel: manifest.maximumLevel ?? 18,
+      credit: manifest.credit || '',
+    })
+    const layer = viewer.imageryLayers.addImageryProvider(provider)
+    applyFarfieldTone(layer, false)
+    return 'local'
+  } catch (error) {
+    console.warn('[cesium] 本地远景层读取失败：', error?.message || error)
+    return null
   }
 }
 

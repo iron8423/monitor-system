@@ -123,7 +123,13 @@ function addRadar(viewer, radar, index = 0) {
   const entities = []
   const targetEntities = []
   const add = (suffix, options) => {
-    const entity = viewer.entities.add({ id: `dt-radar-${id}-${suffix}`, ...options })
+    const entityId = `dt-radar-${id}-${suffix}`
+    // 同 id 已存在时先摘掉再挂：创建流程可能被并发触发两次（初始化 + 项目变化），
+    // 而两边都会 await 加载资产——只在函数开头清一次挡不住这种交错（实测仍会抛
+    // "An entity with id ... already exists"）。这里逐个 id 幂等化，谁后建谁生效。
+    const existing = viewer.entities.getById(entityId)
+    if (existing) viewer.entities.remove(existing)
+    const entity = viewer.entities.add({ id: entityId, ...options })
     entities.push(entity)
     return entity
   }
@@ -365,21 +371,175 @@ function addRadar(viewer, radar, index = 0) {
 }
 
 function cameraOf(config) {
-  // 取景微调（2026-09-21）：数据库里存的相机参数（range 1650）让 1000×750m 的资产
-  // 只占屏幕中间一小块，四周全是空白——观感上是"一张纸浮在黑底上"。
-  // 这里用环境变量按比例收紧，不动数据库、也不改其它场景的存档参数：
-  // VITE_CAMERA_RANGE_SCALE=0.7 → 1650m 变约 1155m；VITE_CAMERA_PITCH 可覆盖俯角。
-  const rangeScale = parseFloat(import.meta.env.VITE_CAMERA_RANGE_SCALE) || 1
+  const fitRange = fitRangeFor(sceneRadius, sceneViewer)
   const pitchOverride = parseFloat(import.meta.env.VITE_CAMERA_PITCH)
-  const camera = {
+  return {
     heading: finite(config.cameraHeadingDegrees, DEFAULT_CAMERA.heading),
     pitch: Number.isFinite(pitchOverride)
       ? pitchOverride
       : finite(config.cameraPitchDegrees, DEFAULT_CAMERA.pitch),
-    range: Math.max(1, finite(config.cameraRange, DEFAULT_CAMERA.range)),
+    range: fitRange,
   }
-  camera.range *= rangeScale
-  return camera
+}
+
+/*
+ * 取景（2026-09-21 第四版）：**以模型真实包围球为准**，不再依赖配置里的尺寸字段
+ * （上一版就是因为后端配置里没有 dimensionsMetres，退回 1000×750 默认值，距离全错）。
+ * 包围球由 Cesium 在模型加载后自己算出，模型多大它就多大。
+ */
+let sceneRadius = 1500
+let sceneViewer = null
+let cameraClampHandler = null
+/** 最近一次场景的锚点（ENU 原点），供"回到全局视角"在不依赖旧 scene 实例的情况下复用 */
+export let lastSceneAnchor = null
+export let lastSceneHeading = 0
+export let lastScenePitch = -38
+
+/**
+ * 从**当前三维场景里真实加载的那个模型**量半径。
+ * 为什么不只依赖建场景时缓存的值：Vite 热更新会保留"上一次创建的场景实例"，
+ * 旧实例里的闭包还是旧代码——用户不整页刷新时，按钮会走到旧逻辑上。
+ * 这个函数每次现算，谁的代码新都无所谓。
+ */
+function radiusFromScene(viewer) {
+  const prims = viewer?.scene?.primitives
+  if (prims) {
+    for (let i = 0; i < prims.length; i += 1) {
+      const p = prims.get(i)
+      const r = Number(p?.boundingSphere?.radius)
+      if (Number.isFinite(r) && r > 0) return { radius: r, measured: true }
+    }
+  }
+  return { radius: sceneRadius, measured: false }
+}
+
+/**
+ * 把相机放到"刚好装下模型"的位置 —— **与场景实例无关**的公共入口。
+ * 大屏的"回到全局视角"按钮直接调它，因此即使页面没有整页刷新、旧场景实例还在，
+ * 取景逻辑也用的是最新代码。返回一组数字供界面诊断显示。
+ */
+export function fitSceneView(viewer) {
+  if (!viewer) return null
+  const { radius, measured } = radiusFromScene(viewer)
+  sceneViewer = viewer
+  sceneRadius = Math.max(100, radius)
+  const anchor =
+    lastSceneAnchor ||
+    Cesium.Cartesian3.fromDegrees(113.541523, 24.4162209, 0)
+  const range = fitRangeFor(sceneRadius, viewer)
+  applyFitView(viewer, anchor, lastSceneHeading, lastScenePitch, 0)
+  const info = {
+    radius: Math.round(sceneRadius),
+    radiusMeasured: measured,
+    lastRange: Math.round(range),
+  }
+  // 平移/缩放的边界也在这里装（幂等）：超过"取景距离"就把相机按原方向拉回来，
+  // 这样"看不到虚空"不依赖任何创建场景时的代码路径。
+  const anchorForClamp = anchor
+  if (!viewer.__fitClampInstalled) {
+    viewer.__fitClampInstalled = true
+    let lastClampAt = 0
+    viewer.scene.postRender.addEventListener(() => {
+      /*
+       * 方案 A 之后这里只剩一件事：**俯仰角兜底**。
+       *
+       * 距离与横移都由 lookAt 变换 + 控制器限制管住了（不需要每帧修相机，
+       * 也就不会再有"点列表闪烁变黑"）。但 Cesium 的 tilt 没有上下限，
+       * 拉到贴地平线时地形会变成一条线、上方全是天空——这不是"虚空"，
+       * 但仍然不好看，所以只在**明显超出**时纠正一次，且 400 ms 内只修一次。
+       */
+      const pitchDeg = Cesium.Math.toDegrees(viewer.camera.pitch)
+      const minPitch = parseFloat(import.meta.env.VITE_CAMERA_MIN_PITCH) || -78
+      const maxPitch = parseFloat(import.meta.env.VITE_CAMERA_MAX_PITCH) || -18
+      const now = Date.now()
+      if ((pitchDeg > maxPitch || pitchDeg < minPitch) && now - lastClampAt > 400) {
+        lastClampAt = now
+        const clamped = Math.min(Math.max(pitchDeg, minPitch), maxPitch)
+        const range = Cesium.Cartesian3.distance(viewer.camera.positionWC, anchorForClamp)
+        viewer.camera.lookAt(
+          anchorForClamp,
+          new Cesium.HeadingPitchRange(viewer.camera.heading, Cesium.Math.toRadians(clamped), range),
+        )
+      }
+    })
+  }
+  if (typeof window !== 'undefined') window.__sceneFit = { ...(window.__sceneFit || {}), ...info }
+  return info
+}
+
+function fitRangeFor(radius, viewer) {
+  if (!viewer) return radius * 2.2
+  const canvas = viewer.canvas
+  const aspect = canvas && canvas.clientHeight ? canvas.clientWidth / canvas.clientHeight : 16 / 9
+  const frustum = viewer.camera.frustum
+  // Cesium 的 `fov` 是"宽>高时按水平、否则按垂直"解释的，`fovy` 才是垂直。
+  // 之前直接用 fovy → 对宽屏来说垂直视场只有 36° 左右，算出的距离偏大 2 倍多。
+  // 这里取**两者较小的那个**作为约束，再乘一个"平面模型修正系数"。
+  const fovy = frustum.fovy || Cesium.Math.toRadians(60)
+  const hfov = 2 * Math.atan(Math.tan(fovy / 2) * aspect)
+  const half = Math.min(fovy, hfov) / 2
+  // 包围球是按"三维对角"算的（含山高），而地形是**扁平**的：按球取景会把画面浪费一倍。
+  // 默认按 0.55 折算（实测 3000×2250 场景约填满 75~85% 画面），可环境变量覆盖。
+  const effFactor = parseFloat(import.meta.env.VITE_CAMERA_FIT_RADIUS_FACTOR) || 0.55
+  const effRadius = radius * effFactor
+  const margin = parseFloat(import.meta.env.VITE_CAMERA_FIT_MARGIN) || 1.06
+  /*
+   * 取景距离上限（2026-09-22）：地块外扩到 6km 后，"刚好装下整块"要把相机推到 5km 之外，
+   * 用户反馈"相机拉太远"。远景层铺上真实影像之后，没必要非把整块地块塞进画面——
+   * 直接给一个上限（默认 2800m），默认视角就落在厂区核心区，四周由远景层自然延续。
+   */
+  const maxRange = parseFloat(import.meta.env.VITE_CAMERA_FIT_MAX_RANGE) || 0
+  const fitted = (effRadius / Math.sin(half)) * margin
+  return maxRange > 0 ? Math.min(fitted, maxRange) : fitted
+}
+
+/*
+ * 把相机放到"刚好装下模型"的位置（2026-09-21 第五版）。
+ *
+ * 为什么不再用 flyToBoundingSphere：它对 `offset.range` 的解释依赖包围球，
+ * 我们既传过球半径又传过距离，两者叠加后距离翻倍——用户看到的就是"点了全局视角变成一个小点"。
+ * 现在改成：`camera.lookAt(锚点, HeadingPitchRange(heading, pitch, 距离))` ——
+ * **距离就是距离**，语义唯一；再把姿态取出来、用 flyTo 做动画。
+ */
+function applyFitView(viewer, anchor, headingDeg, pitchDeg, duration = 0) {
+  const range = fitRangeFor(sceneRadius, viewer)
+  if (typeof window !== 'undefined') {
+    window.__sceneFit = {
+      ...(window.__sceneFit || {}),
+      lastRange: Math.round(range),
+      lastHeading: headingDeg,
+      lastPitch: pitchDeg,
+    }
+  }
+  /*
+   * 锁定轨道（2026-09-21 方案 A）：把相机**留在以场址为原点的 lookAt 变换里**，
+   * 不再 lookAtTransform(IDENTITY)。
+   *
+   * 为什么这是关键：Cesium 的默认交互是"绕地球"的——
+   *   旋转 = 绕地心转、平移 = 在地表滑、缩放 = 改到椭球的距离。
+   * 相机待在变换里之后，这三件事全部变成"绕场址"：
+   *   旋转 → 永远绕场址转，模型不会被甩出画面；
+   *   缩放 → 距离从场址量起，上限就是"刚好装下"；
+   *   平移 → 直接禁用（铺满状态下平移必然露边）。
+   * 全部限制都变成"本地米"，不用再跟地球半径较劲。
+   */
+  viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
+  viewer.camera.lookAt(
+    anchor,
+    new Cesium.HeadingPitchRange(
+      Cesium.Math.toRadians(headingDeg),
+      Cesium.Math.toRadians(pitchDeg),
+      range,
+    ),
+  )
+  const ctrl = viewer.scene.screenSpaceCameraController
+  // 距离：只能往里（0.12 倍）不能往外（1.0 倍 = 进场全景）
+  ctrl.minimumZoomDistance = Math.max(80, range * 0.12)
+  ctrl.maximumZoomDistance = range
+  // 平移禁用；旋转/倾斜保留（都在场址坐标系里进行，天然绕场址）
+  ctrl.enableTranslate = false
+  ctrl.enableTilt = true
+  ctrl.enableLook = true
 }
 
 /**
@@ -387,8 +547,95 @@ function cameraOf(config) {
  */
 export async function createDigitalTwinScene(viewer, rawConfig) {
   const config = validateConfig(rawConfig)
+  /*
+   * 先清掉上一场的残留实体（2026-09-22 查到的"顶栏挂假故障"）：
+   * loadProjectScene 会被并发触发两次（初始化 + 项目变化），第二次给同一台雷达
+   * add 同 id 的实体时，Cesium 直接抛
+   *   "An entity with id dt-radar-1-platform already exists in this collection"
+   * 于是整场被判成"数字孪生加载失败"——可画面其实是好的，顶栏就一直挂着一条假故障。
+   * 场景里的实体 id 统一以 `dt-` 开头，这里按前缀清一遍，重复创建就变成幂等的。
+   */
+  for (const entity of viewer.entities.values.filter(
+    (item) => String(item.id || '').startsWith('dt-'),
+  )) {
+    viewer.entities.remove(entity)
+  }
   const modelMatrix = modelMatrixOf(config)
   const asset = await loadAsset(viewer, config, modelMatrix)
+  // 模型加载 ≠ 模型就绪：`boundingSphere` 要等 glTF 解析完才有值。
+  // 之前直接在 await loadAsset 之后读它，很可能读到 undefined → 半径回退默认值 →
+  // 取景距离跟着错（这正是"全局视角变成一个小点"的一种成因）。这里显式等就绪。
+  /*
+   * 等模型就绪：**用 readyEvent**（Cesium 1.145 的正规接口）。
+   * 之前这里用的是 `asset.readyPromise` —— 那个属性在当前版本已经移除，
+   * 访问它会抛异常，而异常发生在 loadAsset 之后 → 模型已经显示、但后面
+   * "记半径 / 装相机边界 / 记诊断"全都执行不到（用户看到的正是"进去没取景、
+   * 点按钮才生效"）。这里整段用 try 包住，任何情况都不再往外抛。
+   */
+  try {
+    if (asset?.readyEvent?.addEventListener && !asset.ready) {
+      await new Promise((resolve) => {
+        let done = false
+        const stop = asset.readyEvent.addEventListener(() => {
+          if (!done) { done = true; resolve() }
+        })
+        setTimeout(() => {
+          if (!done) { done = true; resolve() }
+          try { stop && stop() } catch { /* 忽略 */ }
+        }, 3000)
+      })
+    }
+  } catch {
+    /* 就绪等待失败也要把现场显示出来 */
+  }
+  // 以模型真实包围球为准记录场景半径，并**装一个相机限制器**：任何操作（缩放/平移/旋转）
+  // 都不能把相机拉到"模型之外"——用户反馈"移动会移动到虚空里"，根因是 Cesium 的
+  // maximumZoomDistance 约束的是"到椭球的距离"，与我们自己的模型毫无关系。
+  sceneViewer = viewer
+  const measuredRadius = Number(asset?.boundingSphere?.radius)
+  sceneRadius = Math.max(100, Number.isFinite(measuredRadius) && measuredRadius > 0 ? measuredRadius : 1500)
+  if (typeof window !== 'undefined') {
+    window.__sceneFit = {
+      coordinateMode: config.coordinateMode,
+      assetUrl: config.assetUrl,
+      radius: sceneRadius,
+      radiusMeasured: Number.isFinite(measuredRadius) && measuredRadius > 0,
+    }
+  }
+  const anchorCartesian = Cesium.Cartesian3.fromDegrees(
+    finite(config.anchorLongitude),
+    finite(config.anchorLatitude),
+    finite(config.anchorHeight),
+  )
+  // 记下锚点与朝向：供模块级 fitSceneView() 复用（不依赖本次创建的 scene 实例）
+  lastSceneAnchor = anchorCartesian
+  lastSceneHeading = finite(config.cameraHeadingDegrees, 315)
+  lastScenePitch = Number.isFinite(parseFloat(import.meta.env.VITE_CAMERA_PITCH))
+    ? parseFloat(import.meta.env.VITE_CAMERA_PITCH)
+    : finite(config.cameraPitchDegrees, -38)
+  const fitRange = fitRangeFor(sceneRadius, viewer)
+  const maxDistance = fitRange * (parseFloat(import.meta.env.VITE_MAX_ZOOM_FACTOR) || 1.25)
+  viewer.scene.screenSpaceCameraController.maximumZoomDistance = maxDistance * 2
+  if (cameraClampHandler) viewer.scene.postRender.removeEventListener(cameraClampHandler)
+  cameraClampHandler = () => {
+    const cam = viewer.camera.positionWC
+    const d = Cesium.Cartesian3.distance(cam, anchorCartesian)
+    if (d <= maxDistance) return
+    const dir = Cesium.Cartesian3.normalize(
+      Cesium.Cartesian3.subtract(cam, anchorCartesian, new Cesium.Cartesian3()),
+      new Cesium.Cartesian3(),
+    )
+    const target = Cesium.Cartesian3.add(
+      anchorCartesian,
+      Cesium.Cartesian3.multiplyByScalar(dir, maxDistance, new Cesium.Cartesian3()),
+      new Cesium.Cartesian3(),
+    )
+    viewer.camera.setView({
+      destination: target,
+      orientation: { direction: viewer.camera.directionWC, up: viewer.camera.upWC },
+    })
+  }
+  viewer.scene.postRender.addEventListener(cameraClampHandler)
   const decorations = []
   const radarGroups = new Map()
   // 两个图层开关与当前选中：每台雷达四片形状的可见性由它们合成（见 applyRadarVisibility）
@@ -421,35 +668,11 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
         finite(config.anchorLatitude),
         finite(config.anchorHeight),
       )
-      // 取景自适应（2026-09-21）：原来用的是配置里写死的 range，模型大小/窗口宽高比一变
-      // 就会"要么塞不满、要么跑出画面"。这里按**模型包围球**和当前画布 FOV 反算距离，
-      // 保证任何窗口比例下模型都刚好填满（留 12% 余量）。VITE_CAMERA_FIT=0 可退回固定值。
-      const fit = String(import.meta.env.VITE_CAMERA_FIT ?? '1') !== '0'
-      // 取景半径优先用**场景平面尺寸**（宽/深），包围球会把 200m 的山体高度也算进去，
-      // 结果相机被推到模型外很远——上一版"点了全局视角反而什么都看不到"就是这么来的。
-      const dim = Array.isArray(config.dimensionsMetres) ? config.dimensionsMetres : []
-      const span = Math.max(Number(dim[0]) || 0, Number(dim[1]) || 0)
-      const radius = Math.max(span / 2, Number(asset?.boundingSphere?.radius) || 0, 30)
-      let range = camera.range
-      if (fit) {
-        const canvas = viewer.canvas
-        const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight)
-        const fovy = viewer.camera.frustum.fovy || Cesium.Math.toRadians(60)
-        const hfov = 2 * Math.atan(Math.tan(fovy / 2) * aspect)
-        const half = Math.min(fovy, hfov) / 2
-        range = (radius / Math.sin(half)) * 1.12
-      }
-      viewer.camera.flyToBoundingSphere(
-        new Cesium.BoundingSphere(anchor, radius),
-        {
-          offset: new Cesium.HeadingPitchRange(
-            Cesium.Math.toRadians(camera.heading),
-            Cesium.Math.toRadians(camera.pitch),
-            range,
-          ),
-          duration,
-        },
-      )
+      // 第五版：**唯一一个把相机放到"刚好装下"的地方**（applyFitView）。
+      // 默认视角、全局视角按钮、缩放上限三者共用同一个距离，语义只有一份：
+      //   距离 = fitRangeFor(模型包围球半径, 画布)  ← 余量由 VITE_CAMERA_FIT_MARGIN 控制
+      //   VITE_CAMERA_FIT_MARGIN=1.0 → 完全贴边；VITE_MAX_ZOOM_FACTOR=1.0 → 不允许比它更远
+      applyFitView(viewer, anchor, camera.heading, camera.pitch, duration)
       return
     }
     await viewer.flyTo(asset, { duration })
@@ -542,6 +765,27 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
 
   const firstRadar = (config.radars || [])[0]
   if (firstRadar) setActiveRadar(firstRadar.deviceId ?? firstRadar.code)
+
+  /*
+   * 进场取景放在**建场景函数的最后一步**（2026-09-21 第七版）。
+   *
+   * 为什么放这里：调用方（ScreenView）在建完场景之后还有一串操作（图层开关、热力层同步…），
+   * 其中任何一个抛异常，都会让它后面的"进场取景"整段被跳过——用户看到的就是
+   * "模型出来了、但相机停在默认全球视角，进来看是个小点"。
+   * 放在本函数内部，只要场景建成就必然执行；再补一发延迟调用兜住"模型解析晚一拍"。
+   */
+  try {
+    fitSceneView(viewer)
+  } catch (error) {
+    console.warn('[cesium] 进场取景失败（不影响场景显示）：', error)
+  }
+  setTimeout(() => {
+    try {
+      if (!viewer.isDestroyed?.()) fitSceneView(viewer)
+    } catch {
+      /* 忽略 */
+    }
+  }, 1200)
 
   return {
     config,

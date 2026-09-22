@@ -13,7 +13,7 @@ import {
   setupImagery,
   setupTerrain,
 } from '@/cesium/createViewer'
-import { createDigitalTwinScene } from '@/cesium/digitalTwinScene'
+import { createDigitalTwinScene, fitSceneView } from '@/cesium/digitalTwinScene'
 import { ASSET_OVERRIDE, LIT_RENDERING } from '@/cesium/renderProfile'
 import { createPointLayer } from '@/cesium/pointLayer'
 import { createHeatmapLayer } from '@/cesium/heatmapLayer'
@@ -46,11 +46,14 @@ let mountainScene = null
 let clickHandler = null
 let removePostRender = null
 let pollTimer = null
+let fitDebugTimer = null
 let bannerTimer = null
 let sceneLoadGeneration = 0
 let disposed = false
 let removeRenderError = null
 const viewerError = ref('')
+/** 取景诊断文本（模型半径 / 取景距离 / 相机高度），临时用来定位"全局视角变一个小点" */
+const fitDebug = ref('')
 
 /**
  * WebGL 上下文状态（复查清单 P1-12）。
@@ -127,10 +130,24 @@ const assetChipClass = computed(() => {
   if (!assetCheck.value) return 'dim'
   return isHashProblem(assetCheck.value.status) ? 'err' : 'ok'
 })
-const assetChipText = computed(() => (assetCheck.value ? HASH_TEXT[assetCheck.value.status] || '资产核对' : '资产未核对'))
+/*
+ * 用 `VITE_ASSET_OVERRIDE` 做本地预览时，哈希核对是**故意跳过**的
+ * （库里登记的是旧资产的 SHA-256，对着新资产核对只会得到一条假告警）。
+ * 这种时候顶栏就不能显示"资产未核对"——那看着像故障，演示时会被当成系统坏了。
+ * 改成"预览资产"，把"我们没核对"和"核对不一致"两件事分开说。
+ */
+const assetChipText = computed(() => {
+  if (assetCheck.value) return HASH_TEXT[assetCheck.value.status] || '资产核对'
+  return ASSET_OVERRIDE ? '预览资产' : '资产未核对'
+})
+const assetChipTitleBase = computed(() =>
+  (ASSET_OVERRIDE && !assetCheck.value
+    ? `本地预览资产（已跳过 SHA-256 核对）：${ASSET_OVERRIDE}`
+    : null),
+)
 const assetChipTitle = computed(() => {
   const r = assetCheck.value
-  if (!r) return '进入场景后自动核对模型 SHA-256'
+  if (!r) return assetChipTitleBase.value || '进入场景后自动核对模型 SHA-256'
   return [
     HASH_TEXT[r.status] || r.status,
     `资产：${r.assetUrl}`,
@@ -413,8 +430,22 @@ function focusPoint(point) {
 }
 
 function resetView() {
+  // 2026-09-21：不再依赖"创建场景时那份闭包"（Vite 热更新会保留旧场景实例 → 走旧取景逻辑），
+  // 直接调模块级 fitSceneView：每次都从当前场景里真实加载的模型量半径再取景。
+  if (viewer && fitSceneView(viewer)) return
   if (mountainScene) mountainScene.flyHome()
   else if (viewer) flyToPoints(viewer, store.points)
+}
+
+/** 窗口尺寸变了要重算取景（FOV/宽高比变了，同一个距离就不"刚好装下"了） */
+function onWindowResize() {
+  if (viewer) {
+    try {
+      fitSceneView(viewer)
+    } catch {
+      /* 取景失败不影响其它功能 */
+    }
+  }
 }
 
 /** 每帧把浮窗贴到测点的屏幕位置上；点转到背面或出屏就藏起来 */
@@ -508,14 +539,32 @@ async function loadProjectScene(projectId) {
     mountainState.value = 'ok'
     pointLayer?.setLabelDistance(config.labelDistance)
     heatLayer?.sync(displayPoints.value, { visible: heatOn.value, selectedId: popup.pointId })
-    scene.flyHome({ duration: 1.8 })
+    // 进场取景（2026-09-21 第六版）：**只调用模块级 fitSceneView**，不再走 scene.flyHome。
+    // 原因：flyHome 是"创建场景那一刻的闭包"，任何一步异常都会把这一整段 try 打断
+    // （表现为"模型能看见、但相机停在默认全球视角"）。fitSceneView 独立、可重复调用，
+    // 并且它自己装相机边界（进场 = 全景 = 最远距离，三者同一个数）。
+    try {
+      fitSceneView(viewer)
+    } catch (error) {
+      console.warn('[cesium] 进场取景失败（不影响场景显示）：', error)
+    }
+    // 双保险：模型解析完成可能比"场景函数返回"晚一拍，这里再补一次取景。
+    // 放在 setTimeout 里且单独 try/catch —— 前面的任何异常都不影响它执行。
+    setTimeout(() => {
+      if (disposed || !viewer) return
+      try {
+        fitSceneView(viewer)
+      } catch {
+        /* 忽略 */
+      }
+    }, 1200)
     window.__digitalTwinScene = scene
     return scene
   } catch (error) {
     if (generation !== sceneLoadGeneration) return null
     mountainState.value = 'failed'
     sceneError.value = error?.message || String(error)
-    console.error('[cesium] 数字孪生场景加载失败：', error)
+    console.error('[cesium] 数字孪生场景加载失败：', error?.message || error, error?.stack || '(无堆栈)')
     if (store.pointsOfProject.length) flyToPoints(viewer, store.pointsOfProject)
     return null
   }
@@ -678,6 +727,7 @@ onMounted(async () => {
   // 实时推送的连接归 store（它能覆盖到本页这个顶层路由），这里只负责唤醒。
   // 放在 initViewer 之外：重建视图不该重连推送、也不该多起一个定时器。
   realtime.start()
+  window.addEventListener('resize', onWindowResize)
   let tick = 0
   pollTimer = setInterval(() => {
     tick += 1
@@ -687,6 +737,27 @@ onMounted(async () => {
       store.refreshLatest()
     }
   }, 15000)
+  // 取景诊断（2026-09-21）：把"模型半径 / 取景距离 / 相机离地高度"直接显示在界面上，
+  // 免得只能靠猜。VITE_DEBUG_CAMERA=0 可关掉。
+  if (String(import.meta.env.VITE_DEBUG_CAMERA ?? '1') !== '0') {
+    fitDebugTimer = setInterval(() => {
+      const f = window.__sceneFit || {}
+      const v = window.__viewer
+      let camH = 0
+      let camDist = 0
+      let liveRadius = 0
+      if (v) {
+        const carto = Cesium.Cartographic.fromCartesian(v.camera.positionWC)
+        camH = carto ? Math.round(carto.height) : 0
+        const prims = v.scene.primitives
+        for (let i = 0; i < prims.length; i += 1) {
+          const r = Number(prims.get(i)?.boundingSphere?.radius)
+          if (Number.isFinite(r) && r > 0) { liveRadius = Math.round(r); break }
+        }
+      }
+      fitDebug.value = `模式=${f.coordinateMode || '?'} 模型半径=${liveRadius || f.radius || '?'}${liveRadius ? '(场景实测)' : ''} 取景距离=${f.lastRange || '?'} 相机离地=${camH}m`
+    }, 1000)
+  }
 })
 
 /*
@@ -761,6 +832,8 @@ onBeforeUnmount(() => {
   disposed = true
   sceneLoadGeneration += 1
   clearInterval(pollTimer)
+  if (fitDebugTimer) clearInterval(fitDebugTimer)
+  window.removeEventListener('resize', onWindowResize)
   clearTimeout(bannerTimer)
   // 回放的定时器不在组件里，但得跟着页面停，否则它会一直推着索引走
   replay.dispose()
@@ -772,6 +845,8 @@ onBeforeUnmount(() => {
 <template>
   <div class="screen">
     <div ref="container" class="globe" />
+    <!-- 取景诊断（临时，2026-09-21）：模型半径 / 取景距离 / 相机离地高度，用来定位取景问题 -->
+    <div v-if="fitDebug" class="hud fit-debug">{{ fitDebug }}</div>
 
     <section v-if="viewerError" class="hud viewer-error" role="alert">
       <h2>三维视图未能正常运行</h2>
@@ -1678,11 +1753,28 @@ onBeforeUnmount(() => {
   gap: 5px;
   align-items: flex-start;
   padding: 8px 16px;
+  /* 2026-09-22（用户要求）：图例面板再透明一点，和地图背景融合。
+     深色主题下从 rgba(6,16,31,0.74) 降到 0.45，浅色主题下从 0.88 降到 0.72；
+     文字加一点阴影，压在半透明的底上仍然读得清。 */
+  background: rgba(6, 16, 31, 0.45);
+  backdrop-filter: blur(8px);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
   /* 注意：原来这里还有 transform: translateX(-50%)（配合 left:50% 居中）。
      改成静态定位后它不会消失——left 失效但 transform 照旧生效，
      于是整块面板被左移半个宽度、内容在竖栏左边被裁掉（实测偏了 148px）。
      居中改竖排时**两处都要清**：left/right 与 transform。 */
   transform: none;
+}
+
+:root[data-theme='light'] .legend {
+  background: rgba(255, 255, 255, 0.72);
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.7);
+}
+
+.legend .dot {
+  /* 图例上的小圆点也跟着淡一点：原来是纯色 + 8px 发光，压在影像上很跳 */
+  opacity: 0.82;
+  box-shadow: 0 0 6px currentColor;
 }
 
 /* 图例是竖排的，行间距收紧一点，别把大屏占掉半屏 */
@@ -1916,5 +2008,20 @@ onBeforeUnmount(() => {
 .right-rail .timeline .timeline-slider {
   width: 100%;
   margin: 0;
+}
+
+/* 取景诊断（临时）：左下角一行小字，定位完取景问题就删 */
+.fit-debug {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace;
+  color: #9fe8ff;
+  background: rgba(6, 16, 31, 0.72);
+  border: 1px solid rgba(159, 232, 255, 0.35);
+  border-radius: 6px;
+  pointer-events: none;
 }
 </style>

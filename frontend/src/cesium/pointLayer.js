@@ -4,7 +4,41 @@ import { resolvePointVisual } from '@/constants/status'
 import { formatSigned } from '@/utils/format'
 
 /** 测点上方立柱高度（米）：点形变雷达装在构筑物上，用一根立柱表示"测点在哪儿" */
-const MAST_HEIGHT = 14
+// 引线高度（2026-09-21 用户要求"离地面更远"）：默认 60 m，可用 VITE_PIN_HEIGHT_M 覆盖。
+const MAST_HEIGHT = parseFloat(import.meta.env.VITE_PIN_HEIGHT_M) || 60
+
+/**
+ * 生成"水滴 pin"贴图（billboard 用）。
+ * 为什么用 canvas 画而不是放 PNG：颜色要跟状态走，7~20 种状态各一张图不如现画一张；
+ * billboard 的宽高是**屏幕像素**，所以远近视距下大小恒定（用户要的"自适应缩放"），
+ * billboard 又永远朝向相机（用户要的"自适应旋转"）。
+ */
+const pinCache = new Map()
+function pinImage(cssColor) {
+  if (pinCache.has(cssColor)) return pinCache.get(cssColor)
+  const size = 64
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  const ctx = canvas.getContext('2d')
+  const cx = size / 2
+  // 水滴：上方圆头 + 下方尖角（尖端就是锚点，配 verticalOrigin: BOTTOM）
+  ctx.beginPath()
+  ctx.arc(cx, size * 0.34, size * 0.26, Math.PI, 0, false)
+  ctx.lineTo(cx, size * 0.94)
+  ctx.closePath()
+  ctx.fillStyle = cssColor
+  ctx.fill()
+  ctx.lineWidth = size * 0.06
+  ctx.strokeStyle = 'rgba(6,16,31,0.85)'
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.arc(cx, size * 0.34, size * 0.09, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'
+  ctx.fill()
+  const url = canvas.toDataURL('image/png')
+  pinCache.set(cssColor, url)
+  return url
+}
 /** 告警脉冲环的最大半径（米） */
 const RING_MAX = 28
 
@@ -36,6 +70,44 @@ function pulseProgress(time) {
 export function createPointLayer(viewer, { labelDistance = 2000 } = {}) {
   /** pointId -> { mast, dot, ring, item } */
   const handles = new Map()
+  /*
+   * 水滴颜色（2026-09-21 用户要求"每个水滴颜色不同"）：pin 用**身份色**（这个点永远这个颜色，
+   * 方便口头指认），地面锚点/立柱仍用**状态色**（绿=正常、橙=阈值、红=告警、灰=失联）。
+   */
+  const PIN_PALETTE = [
+    '#4dd0e1', '#7bd389', '#ffd166', '#ff8fab', '#c792ea',
+    '#8ecae6', '#f4a261', '#a3e635', '#f472b6', '#60a5fa',
+  ]
+  const pinColorOf = (item) => {
+    const n = Number(item?.id)
+    return PIN_PALETTE[(Number.isFinite(n) ? Math.abs(Math.trunc(n)) : 0) % PIN_PALETTE.length]
+  }
+  let removeHeightHandler = null
+
+  /*
+   * 空中 pin 高度自适应（2026-09-21 用户："缩小时水滴还是不够高"）：
+   * 相机越高，引线越长——按相机离地高度取 10%，并夹在 [PIN_MIN, PIN_MAX] 之间，
+   * 这样拉远时标签仍然"悬在空中"，不会缩成一排贴地的小点。
+   * 用 postRender 节流到约 8 fps 更新，避免每帧重算 1000 个点。
+   */
+  const PIN_MIN_M = parseFloat(import.meta.env.VITE_PIN_HEIGHT_M) || 60
+  const PIN_MAX_M = parseFloat(import.meta.env.VITE_PIN_HEIGHT_MAX_M) || 1500
+  let lastHeightTick = 0
+  removeHeightHandler = viewer.scene.postRender.addEventListener(() => {
+    const now = Date.now()
+    if (now - lastHeightTick < 120) return
+    lastHeightTick = now
+    const carto = Cesium.Cartographic.fromCartesian(viewer.camera.positionWC)
+    const camHeight = carto ? carto.height : 0
+    const h = Math.min(Math.max(camHeight * 0.1, PIN_MIN_M), PIN_MAX_M)
+    for (const handle of handles.values()) {
+      if (handle.lon === undefined) continue
+      const top = Cesium.Cartesian3.fromDegrees(handle.lon, handle.lat, handle.baseHeight + h)
+      handle.mast.polyline.positions = [handle.bottom, top]
+      handle.dot.position = top
+      if (handle.pin) handle.pin.position = top
+    }
+  })
   /** 正在闪的点（SSE 刚推来告警）：这些点即使没有未解除警情也要亮环 */
   const pulsing = new Set()
 
@@ -77,6 +149,7 @@ export function createPointLayer(viewer, { labelDistance = 2000 } = {}) {
 
     const visual = resolvePointVisual(item)
     const color = Cesium.Color.fromCssColorString(visual.color)
+    const pinColor = pinColorOf(item)
     const bottom = Cesium.Cartesian3.fromDegrees(lon, lat, ground)
     const top = Cesium.Cartesian3.fromDegrees(lon, lat, ground + MAST_HEIGHT)
 
@@ -86,6 +159,21 @@ export function createPointLayer(viewer, { labelDistance = 2000 } = {}) {
         positions: [bottom, top],
         width: 3,
         material: color.withAlpha(0.75),
+      },
+      properties: { pointId: item.id },
+    })
+
+    // 空中的"水滴 pin"：贴图颜色随状态变，尖端对准引线顶端；billboard 恒为屏幕像素大小，
+    // 所以拉远拉近大小不变、永远正对相机（用户要的"自适应缩放和旋转"）。
+    const pin = viewer.entities.add({
+      id: `pin-${item.id}`,
+      position: top,
+      billboard: {
+        image: pinImage(pinColor),
+        width: 26,
+        height: 26,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       properties: { pointId: item.id },
     })
@@ -125,7 +213,7 @@ export function createPointLayer(viewer, { labelDistance = 2000 } = {}) {
       properties: { pointId: item.id, kind: 'point' },
     })
 
-    return { item, mast, dot, ring: null, color, baseHeight: ground }
+    return { item, mast, dot, pin, ring: null, color, baseHeight: ground, lon, lat, bottom }
   }
 
   /**
@@ -181,11 +269,13 @@ export function createPointLayer(viewer, { labelDistance = 2000 } = {}) {
       : '暂无数据'
     const dim = !item.hasData || stale
 
+    // 水滴 pin 的颜色跟着状态走（本轮新增的"空中 pin"实体）
+    if (handle.pin) handle.pin.billboard.image = pinImage(pinColorOf(item))
     handle.dot.point.color = isRate ? Cesium.Color.TRANSPARENT : color
     handle.dot.point.outlineColor = isRate ? color : Cesium.Color.WHITE.withAlpha(0.95)
     handle.dot.point.outlineWidth = isRate ? 4 : 3
     handle.dot.label.text = `${item.code}  ${value}`
-    handle.dot.label.fillColor = dim ? Cesium.Color.fromCssColorString('#b8c0cc') : Cesium.Color.WHITE
+    handle.dot.label.fillColor = color
     handle.mast.polyline.material = isRate
       ? new Cesium.PolylineDashMaterialProperty({ color: color.withAlpha(0.85), dashLength: 10 })
       : color.withAlpha(0.75)
@@ -286,9 +376,14 @@ export function createPointLayer(viewer, { labelDistance = 2000 } = {}) {
     },
 
     destroy() {
+      if (removeHeightHandler) {
+        removeHeightHandler()
+        removeHeightHandler = null
+      }
       for (const handle of handles.values()) {
         viewer.entities.remove(handle.mast)
         viewer.entities.remove(handle.dot)
+        if (handle.pin) viewer.entities.remove(handle.pin)
         if (handle.ring) viewer.entities.remove(handle.ring)
       }
       handles.clear()

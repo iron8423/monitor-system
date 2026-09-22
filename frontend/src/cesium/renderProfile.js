@@ -30,12 +30,15 @@ export function applyRenderProfile(viewer) {
   viewer.clock.currentTime = Cesium.JulianDate.fromIso8601(SUN_TIME)
   viewer.clock.shouldAnimate = false
 
-  // 只让模型吃光照：椭球（背景）不参与日照，否则背景会被照亮成灰蓝、
-  // 还会接住山体投影长出一块暗斑。天空盒/大气同理，关掉才能保持深色底。
+  /*
+   * 只让模型吃光照，背景不参与日照（否则椭球会被照亮成灰蓝、还接住山体投影长暗斑）。
+   *
+   * ⚠️ 但**不能**再关 `globe.show` / `skyBox` / `skyAtmosphere`（2026-09-22 修）：
+   * 这三行是"深色底 + 只有地块"那个年代的写法。远景层上线后，椭球就是远景影像的载体，
+   * 一关掉，模型之外立刻变回一片虚空——而"转一圈看到地块边缘"正是用户反复提的问题。
+   * 现在只压光度与背景色，保留椭球与大气，让 lit 档和远景层能共存。
+   */
   scene.globe.enableLighting = false
-  scene.globe.show = false
-  scene.skyBox.show = false
-  scene.skyAtmosphere.show = false
   scene.sun.show = false
   scene.backgroundColor = Cesium.Color.fromCssColorString('#0b1622')
 
