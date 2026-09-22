@@ -19,6 +19,7 @@ import io
 import json
 import math
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -47,6 +48,15 @@ SOURCES = {
         "sub": ["0", "1", "2", "3"],
         "crs": "WGS-84 (Web Mercator)",
         "dataset": "Google 卫星影像",
+        "license": "服务条款禁止离线缓存与二次分发；仅内部参考",
+    },
+    "bing": {
+        # Bing 用 quadkey 编号（不是 x/y/z），所以这里占位符是 {quadkey}；国内可直连，不需要 VPN。
+        # 用的是 Cesium ion 里那套 Bing Aerial，目的是**让地块纹理和远景影像同源**，交界不留色差。
+        "url": "https://ecn.t{s}.tiles.virtualearth.net/tiles/a{quadkey}.jpeg?g=1",
+        "sub": ["0", "1", "2", "3"],
+        "crs": "WGS-84 (Web Mercator)",
+        "dataset": "Bing Maps Aerial",
         "license": "服务条款禁止离线缓存与二次分发；仅内部参考",
     },
     "eox": {
@@ -137,15 +147,62 @@ def gcj02_to_wgs84(lon: float, lat: float) -> tuple[float, float]:
     return wlon, wlat
 
 
-def download(url: str, dest: Path) -> int:
-    request = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        payload = response.read()
-    if len(payload) < 100:
-        raise RuntimeError(f"瓦片内容过小（{len(payload)}B），可能该层级没有影像：{url}")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(payload)
-    return len(payload)
+def download(url: str, dest: Path, attempts: int = 4) -> int:
+    """带重试的下载（2026-09-21）。
+
+    为什么必须重试：一次抓几百张瓦片时，源站会中途 reset 连接
+    （实测 Google 33 秒、高德 78 秒就断），一次失败不该让整轮抓取白跑。
+    退避 1.5s → 3s → 6s，仍失败才抛出。
+    """
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(request, timeout=60) as response:
+                payload = response.read()
+            if len(payload) < 100:
+                raise RuntimeError(f"瓦片内容过小（{len(payload)}B），可能该层级没有影像：{url}")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(payload)
+            # 每张之间稍作停顿，降低被限流的概率（抓几百张时不至于被掐）
+            time.sleep(0.05)
+            return len(payload)
+        except Exception as error:  # noqa: BLE001 - 网络异常种类多，统一重试
+            last_error = error
+            if attempt < attempts - 1:
+                time.sleep(1.5 * (2 ** attempt))
+    raise RuntimeError(f"下载失败（已重试 {attempts} 次）：{last_error}")
+
+
+def tile_is_usable(path: Path) -> bool:
+    """已有瓦片是否可以直接复用（断点续抓）。
+
+    为什么要有这个：源站抓几百张时会在中途 reset（实测 Google ~33s、高德 ~78s），
+    一轮跑不完很正常；能续抓的脚本才不会被限流拖死。判据是"能解码 + 不是占位小文件"，
+    避免上一次被 kill 时留下的半张瓦片被当成好数据。
+    """
+    try:
+        if path.stat().st_size < 100:
+            return False
+        with Image.open(path) as image:
+            image.verify()
+        return True
+    except Exception:  # noqa: BLE001 - 任何解码问题都当作"需要重下"
+        return False
+
+
+def tile_to_quadkey(tx: int, ty: int, zoom: int) -> str:
+    """(x, y, z) → Bing quadkey（Bing 的唯一编号方式）。"""
+    digits = []
+    for level in range(zoom, 0, -1):
+        digit = 0
+        mask = 1 << (level - 1)
+        if tx & mask:
+            digit += 1
+        if ty & mask:
+            digit += 2
+        digits.append(str(digit))
+    return "".join(digits)
 
 
 def main() -> int:
@@ -158,6 +215,8 @@ def main() -> int:
     parser.add_argument("--zoom", type=int, default=18)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--key", default="", help="天地图 key")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="忽略已下载的瓦片，全部重抓（默认续抓）")
     args = parser.parse_args()
 
     source = SOURCES[args.source]
@@ -183,22 +242,49 @@ def main() -> int:
     x1f, y1f = lonlat_to_px(e2, s2, args.zoom)
     tx0, ty0, tx1, ty1 = int(x0f // TILE), int(y0f // TILE), int(x1f // TILE), int(y1f // TILE)
 
-    suffix = ".jpg" if args.source in ("gaode", "eox") else ".png"
+    suffix = ".jpg" if args.source in ("gaode", "eox", "bing") else ".png"
     canvas = Image.new("RGB", (TILE * (tx1 - tx0 + 1), TILE * (ty1 - ty0 + 1)), (0, 0, 0))
     entries = []
+    failures = []
     index = 0
+    reused = 0
+    total = (tx1 - tx0 + 1) * (ty1 - ty0 + 1)
+    started = time.time()
     for ty in range(ty0, ty1 + 1):
         for tx in range(tx0, tx1 + 1):
             index += 1
             sub = source["sub"][index % len(source["sub"])]
-            url = source["url"].format(s=sub, x=tx, y=ty, z=args.zoom, key=args.key)
+            url = source["url"].format(
+                s=sub, x=tx, y=ty, z=args.zoom, key=args.key,
+                quadkey=tile_to_quadkey(tx, ty, args.zoom),
+            )
             rel = Path("imagery") / str(args.zoom) / f"{tx}_{ty}{suffix}"
             dest = args.out / rel
-            size = download(url, dest)
+            if not args.overwrite and tile_is_usable(dest):
+                size = dest.stat().st_size
+                reused += 1
+            else:
+                try:
+                    size = download(url, dest)
+                except RuntimeError as error:
+                    failures.append((tx, ty, str(error)))
+                    log(f"  ! 失败 x={tx} y={ty}：{error}")
+                    continue
             canvas.paste(Image.open(dest).convert("RGB"), (TILE * (tx - tx0), TILE * (ty - ty0)))
             entries.append({"z": args.zoom, "x": tx, "y": ty, "file": str(rel).replace("\\", "/"),
                             "bytes": size, "sha256": hashlib.sha256(dest.read_bytes()).hexdigest()})
-    log(f"  瓦片 {len(entries)} 张")
+            if index % 25 == 0 or index == total:
+                log(f"  进度 {index}/{total}（续用 {reused}，失败 {len(failures)}）"
+                    f" 耗时 {time.time() - started:.0f}s")
+    log(f"  瓦片 {len(entries)}/{total} 张（其中续用 {reused} 张）")
+
+    if failures:
+        log(f"  {len(failures)} 张没抓到，本次不生成拼接图。**直接重跑同一条命令即可续抓**：")
+        for tx, ty, error in failures[:10]:
+            log(f"    x={tx} y={ty} {error}")
+        if len(failures) > 10:
+            log(f"    …另外 {len(failures) - 10} 张")
+        return 1
 
     crop = canvas.crop((round(x0f - tx0 * TILE), round(y0f - ty0 * TILE),
                         round(x1f - tx0 * TILE), round(y1f - ty0 * TILE)))
