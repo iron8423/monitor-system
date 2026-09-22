@@ -48,6 +48,9 @@ Thumbs.db
 # 但模板要入库：它是「有哪些变量、默认值是什么」的唯一说明
 !.env.example
 !.env.production.example
+# 开发环境默认值入库（2026-09-22）：让"拉下来 → npm run dev"就能看到三维预览，
+# 不需要每个人再手抄一份 .env.local。个人差异（ion token 等）仍放 .env.local 覆盖。
+!.env.development
 *.local
 application-local.yml
 
@@ -58,10 +61,10 @@ backups/
 #   这些 GLB 的纹理来自 Google/高德影像，**服务条款禁止离线缓存与二次分发**，
 #   推上共享仓库等于再分发；而且单个文件 30 MB 级，几个版本就上百 MB。
 #   正式资产要走"新版本号迁移 + 更新 asset_sha256"，不走这里。
-frontend/public/models/qingyuan-powerplant-big/
-frontend/public/models/qingyuan-powerplant-clean/
-# 远景瓦片金字塔（tools/imagery_fetch/fetch_farfield.py 的产物，同样是 Google 影像）
-frontend/public/farfield/
+# 说明（2026-09-22 更新）：上面三个目录**曾经被排除**，理由是"Google 影像不得再分发"。
+# 2026-09-22 仓库已改为 **private**，资产改为随仓库一起管理（内部预览用），
+# 所以这里不再忽略——但**公开仓库绝不能提交它们**，换仓库可见性前请先看
+# docs/预览环境搭建_给A_20260922.md 的许可见解。
 
 # 子目录里的 IDE 配置（根 .vscode/* 规则管不到 backend/.vscode）
 backend/.vscode/
