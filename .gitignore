@@ -53,3 +53,15 @@ application-local.yml
 
 # 备份产物（tools/backup/*.sh 的输出；含全库 dump，不入库）
 backups/
+
+# 三维预览资产（2026-09-22 清理）：
+#   这些 GLB 的纹理来自 Google/高德影像，**服务条款禁止离线缓存与二次分发**，
+#   推上共享仓库等于再分发；而且单个文件 30 MB 级，几个版本就上百 MB。
+#   正式资产要走"新版本号迁移 + 更新 asset_sha256"，不走这里。
+frontend/public/models/qingyuan-powerplant-big/
+frontend/public/models/qingyuan-powerplant-clean/
+# 远景瓦片金字塔（tools/imagery_fetch/fetch_farfield.py 的产物，同样是 Google 影像）
+frontend/public/farfield/
+
+# 子目录里的 IDE 配置（根 .vscode/* 规则管不到 backend/.vscode）
+backend/.vscode/
