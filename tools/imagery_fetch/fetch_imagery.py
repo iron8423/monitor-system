@@ -59,6 +59,17 @@ SOURCES = {
         "dataset": "Bing Maps Aerial",
         "license": "服务条款禁止离线缓存与二次分发；仅内部参考",
     },
+    "swisstopo": {
+        # 瑞士官方正射影像（SWISSIMAGE），**0.1 m 级**，标准 Web Mercator 瓦片路径。
+        # 用途：做"高精度数据对照实验"——验证数据升级后画质能到什么程度（见
+        # docs/开源高精度数据对照实验方案_20260923.md ）。国内实测可直连，不需要代理。
+        "url": ("https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage"
+                "/default/current/3857/{z}/{x}/{y}.jpeg"),
+        "sub": [""],
+        "crs": "WGS-84 (Web Mercator)",
+        "dataset": "swisstopo SWISSIMAGE（瑞士联邦官方正射影像）",
+        "license": "swisstopo 开放数据（OGD），允许离线缓存与再分发，需署名 swisstopo",
+    },
     "eox": {
         "url": ("https://tiles.maps.eox.at/wmts?layer=s2cloudless-2023_3857&style=default"
                 "&tilematrixset=GoogleMapsCompatible&Service=WMTS&Request=GetTile"
@@ -180,12 +191,22 @@ def tile_is_usable(path: Path) -> bool:
     为什么要有这个：源站抓几百张时会在中途 reset（实测 Google ~33s、高德 ~78s），
     一轮跑不完很正常；能续抓的脚本才不会被限流拖死。判据是"能解码 + 不是占位小文件"，
     避免上一次被 kill 时留下的半张瓦片被当成好数据。
+
+    2026-09-23 追加一条：**纯色/空白瓦片不算可用**。
+    源站在没有影像的层级会返回一张纯白占位图（swisstopo 的 z0~z5 实测就是 255,255,255），
+    它能解码、体积也够，于是被当成好数据存了下来；前端渲染到那一层就是**一块白斑**，
+    而且"断点续抓"会一直复用它、永远不会自己好。判据用"像素值是否几乎无起伏"。
     """
     try:
         if path.stat().st_size < 100:
             return False
         with Image.open(path) as image:
             image.verify()
+        with Image.open(path) as image:
+            probe = image.convert("L").resize((16, 16))
+            values = list(probe.getdata())
+        if not values or max(values) - min(values) < 6:
+            return False
         return True
     except Exception:  # noqa: BLE001 - 任何解码问题都当作"需要重下"
         return False
@@ -242,7 +263,7 @@ def main() -> int:
     x1f, y1f = lonlat_to_px(e2, s2, args.zoom)
     tx0, ty0, tx1, ty1 = int(x0f // TILE), int(y0f // TILE), int(x1f // TILE), int(y1f // TILE)
 
-    suffix = ".jpg" if args.source in ("gaode", "eox", "bing") else ".png"
+    suffix = ".jpg" if args.source in ("gaode", "eox", "bing", "swisstopo") else ".png"
     canvas = Image.new("RGB", (TILE * (tx1 - tx0 + 1), TILE * (ty1 - ty0 + 1)), (0, 0, 0))
     entries = []
     failures = []

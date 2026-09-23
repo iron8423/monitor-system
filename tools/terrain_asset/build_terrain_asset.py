@@ -886,12 +886,22 @@ def solve_radar_pose(terrain: Heightfield, radar: dict, points: dict,
 
 
 def build_radars(terrain: Heightfield, points_def: list[dict], radars_def: list[dict],
-                 rel_heights: dict[str, float] | None = None) -> tuple[list[dict], list[dict]]:
+                 rel_heights: dict[str, float] | None = None,
+                 skip_unplaceable: bool = False) -> tuple[list[dict], list[dict]]:
     rel_heights = rel_heights or {}
     point_lookup = {item["code"]: item for item in points_def}
     radars, bindings_out = [], []
     for radar in radars_def:
-        pose = solve_radar_pose(terrain, radar, point_lookup, rel_heights)
+        try:
+            pose = solve_radar_pose(terrain, radar, point_lookup, rel_heights)
+        except RuntimeError as error:
+            # 默认仍然中断（正式场景不允许缺雷达）；只有显式开启 --skip-unplaceable-radars
+            # 才降级成"告警 + 跳过"。这条用于**数据源试验**：预设场景的雷达布点约束是按
+            # 边坡场址设计的，换成阿尔卑斯这种陡峭地形时可能无解，但地形资产本身仍然有效。
+            if not skip_unplaceable:
+                raise
+            log(f"  ! 跳过雷达 {radar['code']}：{error}")
+            continue
         # pose["ground"] 是**绝对高程**（基准面 + 相对高度）。写进 localPosition 的必须是
         # **相对高度**——ENU 本地坐标里 +Z 的零点就是基准面。V18 曾在这里写成绝对值，
         # 迁移那边又加了一次基准面，结果两台雷达整整齐齐浮在场景上方 107m
@@ -1204,6 +1214,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--material", choices=("unlit", "lit"), default="unlit",
                         help="unlit（默认，与历史资产一致，山体阴影烘焙进纹理）/ "
                              "lit（受光 PBR，配合实时日照与阴影；此时应同时用 --baked-shade 0）")
+    parser.add_argument("--skip-unplaceable-radars", action="store_true",
+                        help="雷达位姿解不出来时跳过并告警，而不是中断"
+                             "（用于换数据源/换地形做资产试验：预设雷达约束可能不适用）")
     parser.add_argument("--baked-shade", type=float, default=1.0,
                         help="烘焙山体阴影的强度：1.0=原样（默认）；0=不烘焙（配合 --material lit）")
     parser.add_argument("--texture-width", type=int, default=None)
@@ -1273,7 +1286,8 @@ def main(argv: list[str] | None = None) -> int:
     mesh = build_mesh(terrain)
 
     log("解算雷达位姿与视线...")
-    radars, bindings = build_radars(terrain, site["points"], site["radars"], point_heights)
+    radars, bindings = build_radars(terrain, site["points"], site["radars"], point_heights,
+                                    skip_unplaceable=args.skip_unplaceable_radars)
     for radar in radars:
         log(f"  {radar['code']} {radar['name']}：位姿 "
             f"({radar['localPosition'][0]:.0f},{radar['localPosition'][1]:.0f}) "

@@ -35,14 +35,20 @@ except Exception:  # noqa: BLE001
     pass
 
 # 每层：(缩放级别, 覆盖东西向米数, 覆盖南北向米数) —— 由内到外嵌套。
-# 末尾那几层（z0~z11）只为"补齐祖先瓦片"：Cesium 在远视角要往上找可用层，
-# 缺一层就 404 一次；这一段的瓦片数很少（每层 1~20 张），但能把控制台刷屏消掉。
+# 末尾那几层（z6~z11）只为"补齐祖先瓦片"：Cesium 在远视角要往上找可用层，
+# 缺一层就 404 一次；这一段的瓦片数很少（每层 1~40 张），但能把控制台刷屏消掉。
+#
+# 2026-09-23 把外圈从 z0 收到 **z6**：
+#   源站（swisstopo）在 z0~z5 没有影像，返回纯白占位图；那几张"白瓦片"铺满整个
+#   72 km 矩形，一旦镜头拉到能看见它们，远景就是**一块白斑**（比糊更糟）。
+#   z0~z5 的瓦片总数只有 7 张，但覆盖范围极大，收益为零、风险全在前端画面上。
+#   Cesium 侧配合把 manifest 的 minimumLevel 一起抬到 6，就不会再请求它们。
 DEFAULT_LEVELS = [
     (15, 9000, 6750),
     (14, 18000, 13500),
     (13, 36000, 27000),
     (12, 72000, 54000),
-] + [(zoom, 72000, 54000) for zoom in range(11, -1, -1)]
+] + [(zoom, 72000, 54000) for zoom in range(11, 5, -1)]
 
 
 def main() -> int:
@@ -124,6 +130,12 @@ def main() -> int:
         # 注意：盘上是 `{z}/{x}_{y}.jpg`。Cesium 默认模板是 `{z}/{x}/{y}.jpg`，
         # 两者不一致会全 404（页面看上去"还行"，其实是一直在用底下的兜底图层）。
         "urlTemplate": "/farfield/{z}/{x}_{y}.jpg",
+        # 换场址/换数据源时**必须换 URL**（2026-09-23 加）。
+        # 瓦片路径 `{z}/{x}_{y}.jpg` 在不同场址下会**撞名**（z0 的 0_0、以及相邻级别的同一格），
+        # 而浏览器是按 URL 缓存的：换了内容但 URL 没变，用户那边就一直看到旧场址的影像
+        # （实测症状：清远的绿色底图叠在瑞士场景外面，"周围的场景加载不出来"）。
+        # 前端会把它拼成 `?v=...`，所以只要这里变了，缓存自动失效。
+        "urlVersion": f"{args.source}-{args.anchor_lat:.4f}-{args.anchor_lon:.4f}",
         "minimumLevel": min(item[0] for item in levels),
         "maximumLevel": max(item[0] for item in levels),
         "rectangle": {"west": west, "south": south, "east": east, "north": north},
