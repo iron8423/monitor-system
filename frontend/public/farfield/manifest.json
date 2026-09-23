@@ -1,118 +1,95 @@
 {
   "generator": "tools/imagery_fetch/fetch_farfield.py",
-  "source": "google",
-  "dataset": "Google 卫星影像",
-  "license": "服务条款禁止离线缓存与二次分发；仅内部参考",
+  "source": "swisstopo",
+  "dataset": "swisstopo SWISSIMAGE（瑞士联邦官方正射影像）",
+  "license": "swisstopo 开放数据（OGD），允许离线缓存与再分发，需署名 swisstopo",
   "anchor": {
-    "longitude": 113.541523,
-    "latitude": 24.4162209
+    "longitude": 8.506,
+    "latitude": 47.3935
   },
   "urlTemplate": "/farfield/{z}/{x}_{y}.jpg",
-  "minimumLevel": 0,
-  "maximumLevel": 15,
+  "urlVersion": "swisstopo-47.3935-8.5060",
+  "minimumLevel": 6,
+  "maximumLevel": 17,
   "rectangle": {
-    "west": 113.18656997202248,
-    "south": 24.172462879401326,
-    "east": 113.89647602797751,
-    "north": 24.65997892059867
+    "west": 8.029152517706136,
+    "south": 47.150652342366556,
+    "east": 8.982847482293865,
+    "north": 47.63634765763345
   },
   "levels": [
     {
+      "zoom": 17,
+      "widthM": 2250.0,
+      "depthM": 1690.0,
+      "tiles": 108
+    },
+    {
+      "zoom": 16,
+      "widthM": 4500.0,
+      "depthM": 3375.0,
+      "tiles": 99
+    },
+    {
       "zoom": 15,
-      "widthM": 9000,
-      "depthM": 6750,
-      "tiles": 63
+      "widthM": 9000.0,
+      "depthM": 6750.0,
+      "tiles": 108
     },
     {
       "zoom": 14,
-      "widthM": 18000,
-      "depthM": 13500,
-      "tiles": 63
+      "widthM": 18000.0,
+      "depthM": 13500.0,
+      "tiles": 108
     },
     {
       "zoom": 13,
-      "widthM": 36000,
-      "depthM": 27000,
-      "tiles": 63
+      "widthM": 36000.0,
+      "depthM": 27000.0,
+      "tiles": 99
     },
     {
       "zoom": 12,
-      "widthM": 72000,
-      "depthM": 54000,
-      "tiles": 63
+      "widthM": 72000.0,
+      "depthM": 54000.0,
+      "tiles": 120
     },
     {
       "zoom": 11,
-      "widthM": 72000,
-      "depthM": 54000,
-      "tiles": 20
+      "widthM": 72000.0,
+      "depthM": 54000.0,
+      "tiles": 42
     },
     {
       "zoom": 10,
-      "widthM": 72000,
-      "depthM": 54000,
-      "tiles": 9
+      "widthM": 72000.0,
+      "depthM": 54000.0,
+      "tiles": 12
     },
     {
       "zoom": 9,
-      "widthM": 72000,
-      "depthM": 54000,
+      "widthM": 72000.0,
+      "depthM": 54000.0,
       "tiles": 4
     },
     {
       "zoom": 8,
-      "widthM": 72000,
-      "depthM": 54000,
+      "widthM": 72000.0,
+      "depthM": 54000.0,
       "tiles": 2
     },
     {
       "zoom": 7,
-      "widthM": 72000,
-      "depthM": 54000,
+      "widthM": 72000.0,
+      "depthM": 54000.0,
       "tiles": 2
     },
     {
       "zoom": 6,
-      "widthM": 72000,
-      "depthM": 54000,
-      "tiles": 1
-    },
-    {
-      "zoom": 5,
-      "widthM": 72000,
-      "depthM": 54000,
-      "tiles": 1
-    },
-    {
-      "zoom": 4,
-      "widthM": 72000,
-      "depthM": 54000,
-      "tiles": 1
-    },
-    {
-      "zoom": 3,
-      "widthM": 72000,
-      "depthM": 54000,
-      "tiles": 1
-    },
-    {
-      "zoom": 2,
-      "widthM": 72000,
-      "depthM": 54000,
-      "tiles": 1
-    },
-    {
-      "zoom": 1,
-      "widthM": 72000,
-      "depthM": 54000,
-      "tiles": 1
-    },
-    {
-      "zoom": 0,
-      "widthM": 72000,
-      "depthM": 54000,
+      "widthM": 72000.0,
+      "depthM": 54000.0,
       "tiles": 1
     }
   ],
-  "credit": "Google 卫星影像（内部预览；服务条款禁止再分发）"
+  "credit": "swisstopo SWISSIMAGE（瑞士联邦官方正射影像）（内部预览；服务条款禁止再分发）"
 }
