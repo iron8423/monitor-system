@@ -51,6 +51,10 @@ Thumbs.db
 # 开发环境默认值入库（2026-09-22）：让"拉下来 → npm run dev"就能看到三维预览，
 # 不需要每个人再手抄一份 .env.local。个人差异（ion token 等）仍放 .env.local 覆盖。
 !.env.development
+# 三个可复现档位（2026-09-23）：现状档= .env.development；参考档= .env.hires；清远档= .env.qingyuan
+# 它们只含"用哪套资产/哪层远景/什么材质档"，不含任何密钥；个人差异仍放 *.local（下一行忽略）。
+!.env.hires
+!.env.qingyuan
 *.local
 application-local.yml
 

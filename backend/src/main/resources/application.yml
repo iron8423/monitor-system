@@ -51,7 +51,12 @@ springdoc:
 
 logging:
   level:
-    com.monitor: debug
+    # 2026-09-23：默认从 debug 收回 info。
+    # 原因（实测）：debug 会把**每条 SQL 与全部参数**打出来，大屏首屏批量接口
+    # `/projects/{id}/points/latest` 在这种日志量下从几十毫秒涨到 20 秒以上，
+    # 超过前端 15s 超时 → 顶部状态芯片一直红着「加载失败」（其实数据是好的）。
+    # 需要排查 SQL 时再临时调回 debug（或加 -Dlogging.level.com.monitor=debug 启动）。
+    com.monitor: info
 
 # 业务自定义配置
 monitor:
