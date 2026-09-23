@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import {
   Cesium,
+  FARFIELD_TERRAIN_ENABLED,
   ION_CONFIGURED,
   LOCAL_SCENE_ENABLED,
   applyViewerTheme,
@@ -13,12 +14,15 @@ import {
   setupImagery,
   setupTerrain,
 } from '@/cesium/createViewer'
-import { createDigitalTwinScene, fitSceneView } from '@/cesium/digitalTwinScene'
+import { animateLookAt, createDigitalTwinScene, fitSceneView, panLookAt } from '@/cesium/digitalTwinScene'
 import { ASSET_OVERRIDE, LIT_RENDERING } from '@/cesium/renderProfile'
 import { createPointLayer } from '@/cesium/pointLayer'
+import { createLabelOverlay } from '@/cesium/labelOverlay'
 import { createHeatmapLayer } from '@/cesium/heatmapLayer'
+import { createZoneLayer } from '@/cesium/zoneLayer'
 import { deviceCoverage, projectDigitalTwin } from '@/api/monitor'
 import MediaGallery from '@/components/MediaGallery.vue'
+import AnimatedNumber from '@/components/AnimatedNumber.vue'
 import ThemeSwitch from '@/components/ThemeSwitch.vue'
 import { ALARM_LEVEL, resolvePointVisual } from '@/constants/status'
 import { HEAT_RAMP_STOPS, heatColorOf, heatExtentOf } from '@/utils/heatScale'
@@ -42,6 +46,8 @@ const container = ref(null)
 let viewer = null
 let pointLayer = null
 let heatLayer = null
+let zoneLayer = null
+let labelOverlay = null
 let mountainScene = null
 let clickHandler = null
 let removePostRender = null
@@ -255,9 +261,9 @@ const SIDE_LIST_LIMIT = 300
  * 于是「回放」不会漏掉某个角落还显示实时值（那种不一致最难解释）。
  */
 const displayPoints = computed(() => {
-  if (!replay.enabled) return points.value
-  const values = replay.values
-  return points.value.map((p) => {
+  const source = applyPreviewPoints(points.value)   // 预览场景里把测点摆到合理位置
+  const base = !replay.enabled ? source : source.map((p) => {
+    const values = replay.values
     const v = values[p.id]
     return {
       ...p,
@@ -273,6 +279,9 @@ const displayPoints = computed(() => {
       collectTime: replay.sampleMsOf(p.id) ?? p.collectTime,
     }
   })
+  // 分区聚焦：选了分区就只留这个分区的测点（3D 图层、热力、列表、弹窗都读这个 computed）
+  if (!activeZone.value) return base
+  return base.filter((p) => pointInZone(p, activeZone.value))
 })
 
 /** 侧栏做轻量窗口化：3D 仍绘制全部点，DOM 最多保留 300 行，并可按编码/名称定位。 */
@@ -344,8 +353,14 @@ const dataStatus = computed(() => {
 
 /** 热力图开关（默认开：演示时「哪片区域形变大」最直观） */
 const heatOn = ref(true)
-/** 雷达视场扇面（每台雷达一个颜色，选中那台提亮）。与热力图一样属于「图层」，可单独关掉。 */
-const sectorOn = ref(true)
+/**
+ * 雷达视场扇面（每台雷达一个颜色，选中那台提亮）。与热力图一样属于「图层」，可单独关掉。
+ *
+ * 2026-09-23 用户要求"先把雷达扫描范围的示意线去掉" → **默认关**。
+ * 关掉后画面里不再有虚线扇形、也不再画"雷达 → 目标"的连线，只留雷达名牌与扇面中心线；
+ * 需要看理论视场时在右侧图例里把这一条勾回来即可（代码与其它图层都没动）。
+ */
+const sectorOn = ref(false)
 /**
  * 垂直视场上下边界（±verticalHalfAngle）默认关闭（2026-09-20 用户反馈「为什么有三个区域」）。
  * 它和水平扇面叠在一起会被读成另一块覆盖区——需要看垂直范围时再打开，
@@ -356,7 +371,8 @@ const verticalOn = ref(false)
  * 地形裁剪覆盖层（P1-11 后半，默认开）。它是"这台雷达按这片地形真的能看到哪儿"：
  * 外缘跟着山脊线走。与理论视场不是一回事——理论视场是参数算出来的，这一层是地形算出来的。
  */
-const coverageOn = ref(true)
+/** 地形裁剪覆盖层：同样是"扫描范围"示意，跟着上面那条一起默认关（用户 2026-09-23 要求）。 */
+const coverageOn = ref(false)
 
 /** 当前主测项是不是「速率」类——点符号用它区分（见 pointLayer.js 的说明） */
 const isRateMetric = computed(() => String(store.primaryMetricCode || '').includes('rate'))
@@ -432,9 +448,221 @@ function focusPoint(point) {
 function resetView() {
   // 2026-09-21：不再依赖"创建场景时那份闭包"（Vite 热更新会保留旧场景实例 → 走旧取景逻辑），
   // 直接调模块级 fitSceneView：每次都从当前场景里真实加载的模型量半径再取景。
-  if (viewer && fitSceneView(viewer)) return
+  clearZone()   // 「回到全局视角」= 回到全区（分区选择一并清掉）
+  if (viewer && fitSceneView(viewer, { duration: 1.4 })) return
   if (mountainScene) mountainScene.flyHome()
   else if (viewer) flyToPoints(viewer, store.points)
+}
+
+/* ───────────────────────── 分区导航（2026-09-23）─────────────────────────
+ * 交互：全局视角看到若干分区（贴地椭圆 + 浮空名称）→ 点一个 → 相机聚焦到该分区、
+ * 左侧测点列表与 3D 测点只剩这个分区的 → 点测点/雷达看详情 → 「回到全局视角」回全区。
+ * 分区数据来自 `public/zones.json`（换场址只换这份文件，代码不动）。
+ */
+const zones = ref([])
+const activeZone = ref(null)
+/** 分区/预览配置的加载 promise：场景创建前要 await 它，否则首屏可能用不到设备摆放 */
+let previewConfigPromise = null
+/** 预览资产的"测点台面"高度（相对锚点，米）；由 public/preview.json 提供，用于把标点放到地表 */
+const previewGroundHeight = ref(NaN)
+/**
+ * 预览资产**地面**的平均高度（相对锚点，米）：决定整块地要下移多少才能坐在椭球面（= 远景影像面）上。
+ * 与上面那个"台面高度"分开存，理由见 loadZones 里的注释。
+ */
+const previewTerrainHeight = ref(NaN)
+/** 预览用设备摆放（public/devices.json）：把雷达摆到场景里合理位置并调好朝向 */
+const previewDevices = ref(null)
+
+/**
+ * 把预览设备摆放应用到场景配置上（**只改内存里的 config**，数据库档案不动）。
+ * 为什么需要：清远那套设备坐标是给边坡场址定的，挂到别的演示资产上会落在不相干的位置；
+ * 这里按"雷达能罩住自己绑定的目标"重新算落位与朝向。
+ */
+function applyPreviewDevices(config) {
+  const devices = previewDevices.value
+  if (!devices?.radars || !config?.radars?.length) return
+  const anchorLon = Number(config.anchorLongitude)
+  const anchorLat = Number(config.anchorLatitude)
+  if (!Number.isFinite(anchorLon) || !Number.isFinite(anchorLat)) return
+  const mPerLon = 111412.84 * Math.cos((anchorLat * Math.PI) / 180)
+    - 93.5 * Math.cos((3 * anchorLat * Math.PI) / 180)
+  const mPerLat = 111132.92 - 559.82 * Math.cos((2 * anchorLat * Math.PI) / 180) + 1.175
+  const ground = (Number(config.anchorHeight) || 0)
+    + (Number.isFinite(previewGroundHeight.value) ? previewGroundHeight.value : 0)
+  for (const radar of config.radars) {
+    const override = devices.radars[radar.code]
+    if (!override) continue
+    radar.longitude = anchorLon + (Number(override.eastM) || 0) / mPerLon
+    radar.latitude = anchorLat + (Number(override.northM) || 0) / mPerLat
+    radar.altitude = ground
+    if (Number.isFinite(Number(override.headingDegrees))) radar.headingDegrees = Number(override.headingDegrees)
+    if (Number.isFinite(Number(override.pitchDegrees))) radar.pitchDegrees = Number(override.pitchDegrees)
+  }
+}
+
+/**
+ * 预览用测点摆放：把档案坐标换成"演示场景里说得通"的位置（只影响显示，不改数据库）。
+ * 没配的测点原样返回，所以换场址只改 devices.json 就行。
+ */
+function applyPreviewPoints(list) {
+  const devices = previewDevices.value
+  const config = sceneConfig.value
+  if (!devices?.points || !list?.length || !config) return list
+  const anchorLon = Number(config.anchorLongitude)
+  const anchorLat = Number(config.anchorLatitude)
+  if (!Number.isFinite(anchorLon) || !Number.isFinite(anchorLat)) return list
+  const mPerLon = 111412.84 * Math.cos((anchorLat * Math.PI) / 180)
+    - 93.5 * Math.cos((3 * anchorLat * Math.PI) / 180)
+  const mPerLat = 111132.92 - 559.82 * Math.cos((2 * anchorLat * Math.PI) / 180) + 1.175
+  const ground = (Number(config.anchorHeight) || 0)
+    + (Number.isFinite(previewGroundHeight.value) ? previewGroundHeight.value : 0)
+  return list.map((point) => {
+    const override = devices.points[point.code]
+    if (!override) return point
+    return {
+      ...point,
+      longitude: anchorLon + (Number(override.eastM) || 0) / mPerLon,
+      latitude: anchorLat + (Number(override.northM) || 0) / mPerLat,
+      altitude: ground,
+    }
+  })
+}
+
+/**
+ * zones.json 存的是本地米（相对资产锚点），而资产被放到**当前项目**的锚点上，
+ * 所以经纬度要按场景锚点现算。分区列表、3D 圈、过滤判定全部读这一份（避免三处口径不一致）。
+ */
+const zonesWithGeo = computed(() => {
+  const anchorLon = Number(sceneConfig.value?.anchorLongitude)
+  const anchorLat = Number(sceneConfig.value?.anchorLatitude)
+  return zones.value.map((zone) => {
+    if (!Number.isFinite(anchorLon) || !Number.isFinite(anchorLat)) return zone
+    const mPerLon = 111412.84 * Math.cos((anchorLat * Math.PI) / 180)
+      - 93.5 * Math.cos((3 * anchorLat * Math.PI) / 180)
+    const mPerLat = 111132.92 - 559.82 * Math.cos((2 * anchorLat * Math.PI) / 180) + 1.175
+    return {
+      ...zone,
+      longitude: anchorLon + (Number(zone.eastM) || 0) / mPerLon,
+      latitude: anchorLat + (Number(zone.northM) || 0) / mPerLat,
+    }
+  })
+})
+
+/**
+ * 读取三份"预览配置"（分区 / 资产地面高度 / 设备摆位）。
+ *
+ * 2026-09-23 修掉一个真事故：三份文件以前写在一个 try 里，并且**边读边应用**——
+ * `applyZones()` 需要场景锚点（把 zones.json 的本地米换算成经纬度），而这里是在
+ * `createViewer()` 之后立刻调用的，`sceneConfig` 往往还是 null → 分区经纬度是 undefined
+ * → `Cartesian3.fromDegrees(NaN)` 抛 `normalized result is not a number` → 整个函数中断，
+ * 后面两份文件根本不读。表现出来的就是用户看到的：**分区里点数全是 0、雷达和测点
+ * 还停在档案坐标上（跑到别的城市去了）**，而分区标签却画出来了（异常发生在它之后）。
+ *
+ * 现在改成：①三份文件各自独立 try，互不牵连；②**先全部读进来，再统一应用**，
+ * 与场景就绪的先后顺序无关；③锚点没就绪时应用是无害的空操作，锚点到位后
+ * `applyZones()` 会由 loadProjectScene 再调一次（见那里的"场景锚点变了"注释）。
+ */
+async function loadZones() {
+  const [zonesResult, previewResult, devicesResult] = await Promise.all([
+    fetchJson('/zones.json'),
+    fetchJson('/preview.json'),
+    fetchJson('/devices.json'),
+  ])
+  if (Array.isArray(zonesResult?.zones)) {
+    zones.value = zonesResult.zones
+  }
+  const ground = Number(previewResult?.groundHeightM)
+  if (Number.isFinite(ground)) previewGroundHeight.value = ground
+  /*
+   * 资产地面（相对锚点）与"测点台面"是两回事，必须分开存：
+   *   · `groundHeightM`（15.3 m）是测点/雷达标点所在的那一层台面 —— 决定立柱起点；
+   *   · `terrainSurfaceHeightM`（≈5.4 m）是这块地**地面**的平均高度 —— 决定整块地要下移多少
+   *     才能坐在椭球面（= 远景影像面）上，见 loadProjectScene 里的说明。
+   * 现场实测（深度拾取 7 个测点脚下）：3.9 / 4.8 / 5.0 / 5.2 / 6.5 / 12.1 m，均值 5.4。
+   */
+  const surface = Number(previewResult?.terrainSurfaceHeightM)
+  if (Number.isFinite(surface)) previewTerrainHeight.value = surface
+  if (devicesResult?.radars || devicesResult?.points) previewDevices.value = devicesResult
+  // 三份配置齐了再落地：分区（贴地椭圆/标签）、测点贴地、雷达落位
+  applyZones()
+  plantMastsOnTerrain().catch(() => {})
+}
+
+/** 读一份 JSON；失败只记一条日志并返回 null，不让整个加载流程陪葬 */
+async function fetchJson(url) {
+  try {
+    const response = await fetch(url, { cache: 'no-cache' })
+    if (!response.ok) {
+      console.warn('[scene] 预览配置缺失：', url, response.status)
+      return null
+    }
+    return await response.json()
+  } catch (error) {
+    console.warn('[scene] 预览配置读取失败：', url, error?.message || error)
+    return null
+  }
+}
+
+/** 场景锚点高度变了（换项目/换资产）要重新算分区的贴地高度 */
+function applyZones() {
+  if (!zoneLayer) return
+  const config = sceneConfig.value
+  zoneLayer.setZones(zonesWithGeo.value, config?.anchorHeight || 0)
+  zoneLayer.setActive(activeZone.value?.id || null)
+}
+
+/** 点某个分区：聚焦 + 过滤（过滤在 displayPoints 里做） */
+function selectZone(zone) {
+  activeZone.value = zone
+  zoneLayer?.setActive(zone.id)
+  flyToZone(zone)
+}
+
+function clearZone() {
+  if (!activeZone.value) return
+  activeZone.value = null
+  zoneLayer?.setActive(null)
+}
+
+/** 相机飞进分区：与 fitSceneView 同一套做法（留在场址 lookAt 变换里，别绕地球转） */
+function flyToZone(zone) {
+  const config = sceneConfig.value
+  if (!viewer || !config) return
+  const anchor = Cesium.Cartesian3.fromDegrees(
+    Number(config.anchorLongitude), Number(config.anchorLatitude), Number(config.anchorHeight) || 0,
+  )
+  const frame = Cesium.Transforms.eastNorthUpToFixedFrame(anchor)
+  const local = new Cesium.Cartesian3(
+    Number(zone.eastM) || 0,
+    Number(zone.northM) || 0,
+    (Number(zone.groundHeightM) || 0) + 12,
+  )
+  const target = Cesium.Matrix4.multiplyByPoint(frame, local, new Cesium.Cartesian3())
+  const camera = zone.camera || {}
+  // 动画（2026-09-23 用户要求"直接平移过去"）：直线插值位置与朝向，不走航空式飞行弧线
+  panLookAt(
+    viewer, target,
+    Number(camera.heading ?? 315), Number(camera.pitch ?? -26), Number(camera.rangeM ?? 420),
+    1100,
+  )
+}
+
+/** 测点是否落在分区里（半径判定；分区是圆形的） */
+function pointInZone(point, zone) {
+  const lon = Number(point?.longitude)
+  const lat = Number(point?.latitude)
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return false
+  const mPerLon = 111412.84 * Math.cos((lat * Math.PI) / 180) - 93.5 * Math.cos((3 * lat * Math.PI) / 180)
+  const mPerLat = 111132.92 - 559.82 * Math.cos((2 * lat * Math.PI) / 180) + 1.175
+  const dx = (lon - Number(zone.longitude)) * mPerLon
+  const dy = (lat - Number(zone.latitude)) * mPerLat
+  return Math.hypot(dx, dy) <= Number(zone.radiusM || 0)
+}
+
+/** 分区里有多少个测点（列表上给个数，选之前就知道值不值得点进去） */
+function zonePointCount(zone) {
+  // 用"预览摆位后"的测点算：预览模式下测点位置来自 devices.json，与档案坐标不同
+  return applyPreviewPoints(points.value).filter((point) => pointInZone(point, zone)).length
 }
 
 /** 窗口尺寸变了要重算取景（FOV/宽高比变了，同一个距离就不"刚好装下"了） */
@@ -475,11 +703,35 @@ async function loadData() {
   }
 }
 
+/** 正在建场景的项目 id：同一项目的并发请求合并成一次（见 loadProjectScene 的说明） */
+let sceneLoadInFlight = null
+
 /**
- * 按当前项目加载自己的数字孪生资产。generation 用于解决快速切换项目时的异步竞态：
- * 后发请求获胜，迟到的旧场景立即销毁，绝不覆盖新项目。
+ * 按当前项目加载三维场景。**同一项目的并发请求只建一次**（2026-09-23）。
+ *
+ * 为什么需要：首屏有两条路径同时走到这里——`loadData()` 把 projectId 写进 store 会触发
+ * 项目 watch，`initViewer()` 自己在 loadData 之后又显式调一次。两边都 await 网络与 GLB，
+ * 于是同一份场景被建两遍：多花一倍带宽，而且两套实体在同一帧里互相覆盖/删除
+ * （雷达名牌、视场覆盖层整个消失，就是这么来的；见 digitalTwinScene 里 token 的说明）。
+ *
+ * 去重是安全的：重复请求的入参完全相同，结果必然相同；真正的项目切换（不同 id）
+ * 仍然走下面 generation 的"后发者获胜"。
  */
 async function loadProjectScene(projectId) {
+  if (sceneLoadInFlight === projectId) return null
+  sceneLoadInFlight = projectId
+  try {
+    return await doLoadProjectScene(projectId)
+  } finally {
+    if (sceneLoadInFlight === projectId) sceneLoadInFlight = null
+  }
+}
+
+/**
+ * 场景加载的实际实现。generation 用于解决快速切换项目时的异步竞态：
+ * 后发请求获胜，迟到的旧场景立即销毁，绝不覆盖新项目。
+ */
+async function doLoadProjectScene(projectId) {
   const generation = ++sceneLoadGeneration
   sceneError.value = ''
   sceneConfig.value = null
@@ -499,14 +751,75 @@ async function loadProjectScene(projectId) {
   try {
     const config = await projectDigitalTwin(projectId)
     if (generation !== sceneLoadGeneration) return null
+    // 等分区/预览配置就绪：雷达落位要用到 previewGroundHeight 与 devices.json
+    await previewConfigPromise?.catch(() => {})
+    /*
+     * 预览锚点覆盖（2026-09-23）：演示资产放在"清远锚点"上，而远景层是瑞士正射——
+     * 两者相差约一万公里，于是四周只命中 z0~z11 的全球低清层（糊成一片绿）。
+     * 把锚点也搬到资产真正的场址，资产/远景/分区/设备就全对齐了。
+     * 只在本地预览用；数据库里的项目锚点不动。
+     */
+    const anchorOverride = String(import.meta.env.VITE_ANCHOR_OVERRIDE || '').split(',').map(Number)
+    if (anchorOverride.length === 3 && anchorOverride.every(Number.isFinite)) {
+      config.anchorLongitude = anchorOverride[0]
+      config.anchorLatitude = anchorOverride[1]
+      config.anchorHeight = anchorOverride[2]
+    }
     // 本地试验：把资产临时指到另一份 GLB（受光版），并且跳过哈希核对——
     // 数据库里记的是旧资产的 SHA-256，对着新资产核对只会得到一条假告警。
     // 真正上线要走新版本号迁移把 asset_sha256 一起更新。
     const overridden = Boolean(ASSET_OVERRIDE) && config?.enabled
     if (overridden) config.assetUrl = ASSET_OVERRIDE
+    /*
+     * 把地块落到"渲染出来的地面"上 —— 修 2026-09-23 用户反馈的"模型飘在天上"。
+     *
+     * 现象：压低相机（俯角接近水平）时，模型像一块悬空的板子浮在地面影像之上，
+     * 板子边缘就是一道断崖。
+     *
+     * 根因（已量化，不是猜的）：
+     *   · viewer 建的是 `EllipsoidTerrainProvider`，**椭球面在 0 m**，远景影像就铺在它上面；
+     *   · 而场址锚点记的是真实海拔（演示场址 395 m），资产挂在锚点坐标系里；
+     *   · 深度拾取实测：模型自己的地面在锚点之上 4~12 m（均值 ≈5.4 m），
+     *     也就是模型地面实际在 400 m 左右，比影像面高 **395 m** —— 这就是那道断崖。
+     *
+     * 修法：把锚点高度改成"让资产地面正好落在椭球面上"，
+     * 即 `anchorHeight = -地表高度(相对锚点)`。这样：
+     *   · 模型地面 ≈ 0，与远景影像同一个平面，断崖消失；
+     *   · 测点/雷达/分区/立柱全都按 `anchorHeight + 相对高度` 算，跟着一起平移，不会错位；
+     *   · 经纬度完全不动，只是把整块地整体下移到 Cesium 真正画出来的地面上。
+     *
+     * 接了真实地形（`VITE_FARFIELD_TERRAIN=1`）时**不能**这么做——那时椭球/地形是真实的，
+     * 锚点海拔必须保持原样。
+     *
+     * 下移量取 `preview.json` 的 `terrainSurfaceHeightM`，且**只对演示资产生效**：
+     * 流水线产出的地形资产，其局部原点本来就在地面基准上（相对高度 ≈0），别的项目按 0 处理即可。
+     */
+    if (!FARFIELD_TERRAIN_ENABLED) {
+      const surface = overridden ? Number(previewTerrainHeight.value) : 0
+      config.anchorHeight = -(Number.isFinite(surface) ? surface : 0)
+    }
     if (!config?.enabled) {
       mountainState.value = 'skipped'
+      /*
+       * 该项目没配三维场景（2026-09-23 修）：以前这里直接 return，旧场景已被 destroy，
+       * 于是画面全黑、相机停在 41m 那种无意义的位置——用户看到的就是"切项目出 bug"。
+       * 现在：清掉分区、把相机放到该项目测点的上方（没有测点就退到全球视角），
+       * 并在界面上保留"未配置场景"的说明（那条提示本来就有）。
+       */
+      clearZone()
+      zoneLayer?.setZones([], 0)
+      // 上一场可能把相机留在"某个场址的 lookAt 坐标系"里——不清掉的话，
+      // 下一次切回有场景的项目时，取景会在这个旧坐标系里算，表现就是"跑到旧的地方去"
+      try {
+        viewer?.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
+      } catch { /* 忽略 */ }
       if (store.pointsOfProject.length) flyToPoints(viewer, store.pointsOfProject)
+      else if (viewer) {
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(113.05133, 23.75946, 2.0e6),
+          duration: 1.4,
+        })
+      }
       // 顺手找一个配了场景的项目：这不是全库扫描，只是给「当前项目没配」的人一个能点的出口
       findSceneAlternate(projectId, generation)
       return null
@@ -514,6 +827,8 @@ async function loadProjectScene(projectId) {
     // 资产哈希核对（P0-5）与模型加载并行：核对只是"报一条"，
     // 既不该拖慢首屏，也不该拦住场景——模型真坏了也要先把现场显示出来。
     if (!overridden) integrity.verify(config).catch(() => {})
+    // 预览设备摆放：把雷达落到场景里合理的位置、朝向对着自己的目标（只改内存 config）
+    applyPreviewDevices(config)
     // 覆盖层几何与资产加载**并行**取：它是一次几十毫秒的高程场计算，但也不该串在首屏前面。
     // 失败（老后端没有这个端点 / 没导出高程场）就让 radar.coverage 保持 undefined，
     // 场景层会只画理论视场——不冒充、不报错拦屏。
@@ -529,6 +844,9 @@ async function loadProjectScene(projectId) {
     }
     mountainScene = scene
     sceneConfig.value = config
+    applyZones()   // 场景锚点变了，分区贴地高度要跟着重算
+    // 场景换了，脚下的地面也换了：重新把测点贴到地表（本地资产不在 terrainProvider 里，必须贴模型）
+    plantMastsOnTerrain().catch(() => {})
     if (config.radars?.length) selectRadar(config.radars[0].deviceId)
     // 新场景要继承当前的图层开关状态：关掉「视场扇面」后切项目，
     // 不该因为新建了场景就自己又亮回来
@@ -544,7 +862,7 @@ async function loadProjectScene(projectId) {
     // （表现为"模型能看见、但相机停在默认全球视角"）。fitSceneView 独立、可重复调用，
     // 并且它自己装相机边界（进场 = 全景 = 最远距离，三者同一个数）。
     try {
-      fitSceneView(viewer)
+      fitSceneView(viewer, { duration: 1.8 })   // 换项目/换场景：平滑推入，别硬切
     } catch (error) {
       console.warn('[cesium] 进场取景失败（不影响场景显示）：', error)
     }
@@ -625,11 +943,34 @@ async function initViewer() {
     viewer = createViewer(container.value)
     removeRenderError = viewer.scene.renderError.addEventListener((_scene, error) => reportViewerError(error))
     bindContextEvents(viewer)
-    pointLayer = createPointLayer(viewer)
+    zoneLayer = createZoneLayer(viewer, { onSelect: selectZone })
+    /*
+     * 测点标签把分区名标签当**外部障碍**：屏幕空间避让时先给分区名让位。
+     * 这里传的是取值函数而不是数组——分区层每帧都在重算自己的位置，
+     * 取值的时刻必须在避让那一瞬间（见 pointLayer 的 postRender 循环）。
+     */
+    pointLayer = createPointLayer(viewer, {
+      obstacles: () => zoneLayer?.labelRects() || [],
+    })
     heatLayer = createHeatmapLayer(viewer)
+    /*
+     * 标签引线走**屏幕空间叠加层**（2D canvas 压在 Cesium 画布上）：
+     * 测点的水滴/圆点/标签都设了 `disableDepthTestDistance: Infinity`（永远画在最上层），
+     * 引线作为它们的附属，用同一套策略才自洽——用 3D 折线会被山体整段遮掉（详见 labelOverlay.js）。
+     */
+    labelOverlay = createLabelOverlay(viewer)
+    labelOverlay.setProvider(() => [
+      ...(pointLayer?.leaderSegments() || []),
+      ...(zoneLayer?.leaderSegments() || []),
+    ])
+    previewConfigPromise = loadZones()
     // 暴露到全局，便于在浏览器控制台排查（也方便后续做演示调试）
     window.__viewer = viewer
     window.__Cesium = Cesium
+    // 标签避让的诊断入口（无头验证脚本读它：window.__pointLayer.labelDiag()）
+    window.__pointLayer = pointLayer
+    window.__zoneLayer = zoneLayer
+    window.__labelOverlay = labelOverlay
 
     clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
     clickHandler.setInputAction((movement) => {
@@ -689,6 +1030,10 @@ function teardownViewer() {
   clickHandler = null
   heatLayer?.destroy()
   heatLayer = null
+  zoneLayer?.destroy()
+  zoneLayer = null
+  labelOverlay?.destroy()
+  labelOverlay = null
   pointLayer?.destroy()
   pointLayer = null
   mountainScene?.destroy()
@@ -700,6 +1045,8 @@ function teardownViewer() {
   }
   window.__viewer = null
   window.__digitalTwinScene = null
+  window.__pointLayer = null
+  window.__zoneLayer = null
   viewer = null
 }
 
@@ -751,8 +1098,18 @@ onMounted(async () => {
         camH = carto ? Math.round(carto.height) : 0
         const prims = v.scene.primitives
         for (let i = 0; i < prims.length; i += 1) {
-          const r = Number(prims.get(i)?.boundingSphere?.radius)
-          if (Number.isFinite(r) && r > 0) { liveRadius = Math.round(r); break }
+          /*
+           * 取半径要**整段包住**（2026-09-23）：切到"没配场景"的项目时，
+           * `createDigitalTwinScene` 的 destroy 会把模型从 primitives 里摘掉，
+           * 而 Model 的 boundingSphere 在被销毁后再读会抛
+           *   DeveloperError（Model.get: texture 已经没了）
+           * 这个诊断定时器每秒跑一次，异常就变成"每秒刷一条红字"，很难看出真正原因。
+           * 诊断行本身不该有任何抛异常的能力——读不到就当读不到。
+           */
+          try {
+            const r = Number(prims.get(i)?.boundingSphere?.radius)
+            if (Number.isFinite(r) && r > 0) { liveRadius = Math.round(r); break }
+          } catch { /* 已销毁的图元：忽略 */ }
         }
       }
       fitDebug.value = `模式=${f.coordinateMode || '?'} 模型半径=${liveRadius || f.radius || '?'}${liveRadius ? '(场景实测)' : ''} 取景距离=${f.lastRange || '?'} 相机离地=${camH}m`
@@ -767,18 +1124,36 @@ onMounted(async () => {
  *     （新建测点、漏事件）。比后端产出周期刷得更快没有意义，只会白刷接口。
  */
 
-/** 地形就绪后，把 7 根立柱的起点换到真实地形面上 */
+/**
+ * 场地就绪后，把立柱起点从"档案高程"换到**脚下的地表**。
+ *
+ * 2026-09-23（用户反馈"标点和地图不适配"）踩坑记录：
+ *   · `sampleTerrainMostDetailed(viewer.terrainProvider, …)` 采的是**地球椭球/全球地形**，
+ *     而我们的地面是一个 GLB 资产（不在地形提供者里）→ 测点悬空；
+ *   · 改用 `scene.clampToHeightMostDetailed` 也不行：它对普通 Model primitive 不生效，
+ *     实测返回 -63079 m（把点甩到地心）；
+ *   · 最终做法：本地资产由流水线算出的**地面高度**（`public/preview.json`，随资产一起生成）
+ *     + 场景锚点高度 → 直接算出测点该站的高度。资产换场址时这份 JSON 跟着换即可。
+ */
 async function plantMastsOnTerrain() {
-  const list = store.points.filter(
+  const list = applyPreviewPoints(store.points).filter(
     (p) => Number.isFinite(Number(p.longitude)) && Number.isFinite(Number(p.latitude)),
   )
   if (!list.length) return
   try {
+    const preview = previewGroundHeight.value
+    const anchorHeight = Number(sceneConfig.value?.anchorHeight) || 0
+    if (Number.isFinite(preview)) {
+      // 本地预览资产：用资产地形的地面高度（相对锚点）直接算绝对高度
+      const ground = anchorHeight + preview
+      pointLayer?.applyTerrainHeights(list.map((p) => [p.id, ground]))
+      return
+    }
     const cartos = list.map((p) => Cesium.Cartographic.fromDegrees(Number(p.longitude), Number(p.latitude)))
     const sampled = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, cartos)
     pointLayer?.applyTerrainHeights(sampled.map((c, i) => [list[i].id, c.height]))
   } catch (error) {
-    console.warn('[cesium] 地形高程采样失败，立柱沿用档案高程：', error?.message || error)
+    console.warn('[cesium] 贴地失败，立柱沿用档案高程：', error?.message || error)
   }
 }
 
@@ -993,7 +1368,30 @@ onBeforeUnmount(() => {
 
     <!-- 左侧测点列表 -->
     <aside class="hud side">
-      <div class="panel-title">测点（{{ points.length }}）</div>
+      <!--
+        分区导航（2026-09-23 用户需求）：全局视角先选分区 → 相机聚焦 + 只看该分区的测点。
+        3D 里点分区椭圆也能触发同一个 selectZone（两条入口，行为一致）。
+      -->
+      <template v-if="zonesWithGeo.length">
+        <div class="panel-title">分区（{{ zonesWithGeo.length }}）</div>
+        <ul class="zone-list">
+          <li
+            v-for="zone in zonesWithGeo"
+            :key="zone.id"
+            :class="{ active: activeZone?.id === zone.id }"
+            @click="selectZone(zone)"
+          >
+            <span class="code">{{ zone.name }}</span>
+            <span class="value">{{ zonePointCount(zone) }} 点</span>
+          </li>
+          <li :class="{ active: !activeZone }" @click="resetView()">
+            <span class="code">全区（不筛选）</span>
+            <span class="value">{{ points.length }} 点</span>
+          </li>
+        </ul>
+      </template>
+      <div v-if="activeZone" class="zone-hint">正在看：{{ activeZone.name }} · {{ activeZone.desc }}</div>
+      <div class="panel-title">测点（{{ displayPoints.length }}）</div>
       <input v-model="pointSearch" class="side-search" placeholder="搜索点号或名称" />
       <ul class="point-list">
         <li
@@ -1161,12 +1559,20 @@ onBeforeUnmount(() => {
     </div>
     </div>
 
-    <!-- 点击测点后的浮窗 -->
-    <div
-      v-if="popup.visible && selected"
-      class="hud popup"
-      :style="{ left: `${popup.x}px`, top: `${popup.y}px` }"
-    >
+    <!--
+      点击测点后的浮窗。
+      2026-09-23（用户反馈"测点数据太僵硬、点一下没有任何反馈"）：加了入场/切点/离场三套动效，
+      而且**按 pointId 做 key**——点另一个点时整个浮窗重挂载，入场动画自然重放，
+      数据行的错峰动画也跟着重来，肉眼能确认"这是刚点出来的另一个点"。
+      位置仍然是每帧跟随测点投影，所以动画只用 opacity/transform，不动 left/top。
+    -->
+    <Transition name="popup-pop">
+      <div
+        v-if="popup.visible && selected"
+        :key="popup.pointId"
+        class="hud popup"
+        :style="{ left: `${popup.x}px`, top: `${popup.y}px` }"
+      >
       <div class="popup-head">
         <span class="code">{{ selected.code }}</span>
         <span class="name">{{ selected.name }}</span>
@@ -1175,10 +1581,16 @@ onBeforeUnmount(() => {
       </div>
       <div class="popup-body">
         <!-- 测项按档案列（当前主测项标出来），不再写死「累计形变 / 形变速率」 -->
-        <div v-for="row in selectedMetricRows" :key="row.code" class="kv" :class="{ main: row.primary }">
+        <div
+          v-for="(row, index) in selectedMetricRows"
+          :key="row.code"
+          class="kv reveal"
+          :class="{ main: row.primary }"
+          :style="{ animationDelay: `${60 + index * 45}ms` }"
+        >
           <span>{{ row.name }}<template v-if="row.primary">（主）</template></span>
           <b>
-            {{ row.value === null || row.value === undefined ? '—' : formatNumber(row.value, 3) }}
+            <AnimatedNumber :value="Number.isFinite(row.value) ? Number(row.value) : null" :digits="3" />
             <em>{{ row.unit }}</em>
           </b>
         </div>
@@ -1227,7 +1639,8 @@ onBeforeUnmount(() => {
         <button class="btn" @click="router.push('/points')">去看曲线</button>
         <button class="btn" @click="router.push(`/media?pointId=${popup.pointId}`)">现场照片</button>
       </div>
-    </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -1740,6 +2153,47 @@ onBeforeUnmount(() => {
   color: var(--mk-hud-muted);
 }
 
+/* 分区导航（2026-09-23）：点分区 → 聚焦 + 过滤测点 */
+.zone-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+
+.zone-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--mk-hud-muted);
+}
+
+.zone-list li:hover {
+  background: rgba(78, 168, 255, 0.14);
+}
+
+.zone-list li.active {
+  background: rgba(255, 180, 84, 0.18);
+  color: var(--mk-hud-text);
+}
+
+.zone-list li .value {
+  margin-left: auto;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.zone-hint {
+  margin: 4px 0 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mk-hud-muted);
+}
+
 .panel-foot {
   padding-top: 10px;
 }
@@ -1818,6 +2272,48 @@ onBeforeUnmount(() => {
   width: 264px;
   padding: 10px 12px;
   transform: translate(-50%, calc(-100% - 18px));
+  /* 入场/切点/离场动效（2026-09-23）。只动 opacity 与 transform：
+     位置是每帧由 trackPopup() 写 left/top 的，动画碰 left/top 会打架。 */
+  transition: opacity 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  will-change: opacity, transform;
+}
+
+.popup-pop-enter-from,
+.popup-pop-leave-to {
+  /* 从"更靠下、略小"处冒出来：像从测点上弹出来的，而不是凭空切出来 */
+  opacity: 0;
+  transform: translate(-50%, calc(-100% - 6px)) scale(0.92);
+}
+
+.popup-pop-enter-to,
+.popup-pop-leave-from {
+  opacity: 1;
+  transform: translate(-50%, calc(-100% - 18px)) scale(1);
+}
+
+/* 数据行错峰入场：点一个新点时，先读到点号与主测项，再一行行"落"下来 */
+.popup .reveal {
+  animation: popup-row-in 0.34s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+@keyframes popup-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 系统开了"减少动态效果"就全部摊平：动画是锦上添花，不能变成眩晕源 */
+@media (prefers-reduced-motion: reduce) {
+  .popup,
+  .popup .reveal {
+    transition: none;
+    animation: none;
+  }
 }
 
 .popup-head {

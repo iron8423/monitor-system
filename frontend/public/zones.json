@@ -1,0 +1,80 @@
+{
+  "note": "预览用分区定义：坐标是**相对资产锚点的本地米**（eastM=东, northM=北），由前端按所在场景的锚点换算成经纬度——这样同一份资产挂到任何场址都对得上。groundHeightM 是从地形采样的本地高度（贴地用）。换场址只改这一份文件。",
+  "anchor": {
+    "longitude": 8.506,
+    "latitude": 47.3935,
+    "floor": 395.0
+  },
+  "zones": [
+    {
+      "id": "ridge-north",
+      "name": "山脊监测区（北）",
+      "desc": "山脊测点集中区：3 个测点、1 台雷达（北侧山脊形变雷达）",
+      "eastM": -60,
+      "northM": 170,
+      "radiusM": 200,
+      "groundHeightM": 2.6,
+      "camera": {
+        "heading": 315,
+        "pitch": -14,
+        "rangeM": 360
+      }
+    },
+    {
+      "id": "slope-south",
+      "name": "边坡监测区（南）",
+      "desc": "边坡测点集中区：4 个测点、1 台雷达（南侧滑坡形变雷达）",
+      "eastM": 110,
+      "northM": -110,
+      "radiusM": 200,
+      "groundHeightM": 5.9,
+      "camera": {
+        "heading": 315,
+        "pitch": -14,
+        "rangeM": 360
+      }
+    },
+    {
+      "id": "water-plant-west",
+      "name": "水厂与厂区（西）",
+      "desc": "水处理构筑物与厂区厂房，暂未布点",
+      "eastM": -430,
+      "northM": 200,
+      "radiusM": 220,
+      "groundHeightM": 6.0,
+      "camera": {
+        "heading": 315,
+        "pitch": -14,
+        "rangeM": 420
+      }
+    },
+    {
+      "id": "rail-yard-southwest",
+      "name": "铁路货场（西南）",
+      "desc": "编组站与货运轨道，暂未布点",
+      "eastM": -420,
+      "northM": -320,
+      "radiusM": 220,
+      "groundHeightM": 7.3,
+      "camera": {
+        "heading": 315,
+        "pitch": -14,
+        "rangeM": 380
+      }
+    },
+    {
+      "id": "blocks-southeast",
+      "name": "街区与河岸（东南）",
+      "desc": "街区建筑群与河岸绿化带，暂未布点",
+      "eastM": 150,
+      "northM": -330,
+      "radiusM": 250,
+      "groundHeightM": 7.8,
+      "camera": {
+        "heading": 315,
+        "pitch": -14,
+        "rangeM": 440
+      }
+    }
+  ]
+}

@@ -42,7 +42,15 @@ export function applyRenderProfile(viewer) {
   scene.sun.show = false
   scene.backgroundColor = Cesium.Color.fromCssColorString('#0b1622')
 
-  scene.shadowMap.enabled = true
+  /*
+   * 阴影贴图默认开，但**必须能被关掉**（2026-09-23）：
+   * 实测"航拍级参考档"（0.1 m 正射 + 2 m 网格 + 39 MB 资产）在开启阴影后，
+   * 地面与建筑立面上会出现一层规则细网格——那是阴影贴图的**自遮蔽（shadow acne）**，
+   * 不是纹理问题，也不是模型问题：同一机位把 shadowMap 一关就完全干净。
+   * 而且正射影像本身就含真实日照与建筑投影，再叠一层实时阴影属于重复计算。
+   * 因此受光档允许 VITE_SHADOWS=0 只留光照、不投影。
+   */
+  scene.shadowMap.enabled = env.VITE_SHADOWS !== '0'
   scene.shadowMap.softShadows = true
   scene.shadowMap.darkness = 0.28
   scene.postProcessStages.fxaa.enabled = true

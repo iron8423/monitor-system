@@ -32,6 +32,16 @@ export const LOCAL_SCENE_ENABLED = SCENE_MODE === 'mountain'
 const FARFIELD = String(import.meta.env.VITE_FARFIELD || 'ion').toLowerCase()
 /** 远景要不要用 Cesium 全球地形（ion asset 1）：有真实起伏，但需要联网且更吃性能。 */
 const FARFIELD_TERRAIN = String(import.meta.env.VITE_FARFIELD_TERRAIN || '0') === '1'
+/**
+ * 是否接了**真实地形**（而不是默认的椭球）。
+ *
+ * 为什么要把这件事导出：没有真实地形时，椭球面高度 0 就是"地面"，
+ * 而场址锚点记的是真实海拔（本演示 395 m）——资产挂在锚点坐标系里，
+ * 于是整块地盘悬空 395 m，压低相机就能看到"一块飘在天上的板子"（2026-09-23 用户反馈）。
+ * 修法是**把那块地落到椭球面上**（见 ScreenView.loadProjectScene），
+ * 但接了真实地形时绝不能这么做（那时椭球/地形是真实的，锚点海拔必须保持）。
+ */
+export const FARFIELD_TERRAIN_ENABLED = FARFIELD_TERRAIN
 
 /**
  * 场景底色（椭球底色）按主题给两个值。
@@ -70,6 +80,7 @@ export function applyViewerTheme(viewer, theme = document.documentElement.datase
 
 /** 全球模式的远程兜底底图；默认 mountain 模式不会请求它。 */
 const FALLBACK_IMAGERY = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+
 
 /**
  * 创建 Cesium 视图。
@@ -266,8 +277,19 @@ async function addLocalFarfield(viewer) {
     if (!response.ok) return null
     const manifest = await response.json()
     const rect = manifest.rectangle || {}
+    /*
+     * 缓存击穿：瓦片路径在不同场址下会**撞名**（z0 的 0_0、相邻级别的同一格），
+     * 而浏览器按 URL 缓存图片。换场址（清远 → 苏黎世）时 URL 一模一样，
+     * 用户那边就一直看到旧场址的影像：症状是"周围的场景怎么都不对/一片糊"，
+     * 而开无痕窗口/强刷之后又正常。manifest 里的 `urlVersion` 由抓取脚本按
+     * 数据源 + 锚点生成，在这里拼成 `?v=...`，内容一变缓存自动失效。
+     */
+    const baseUrl = manifest.urlTemplate || '/farfield/{z}/{x}_{y}.jpg'
+    const url = manifest.urlVersion
+      ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}v=${encodeURIComponent(manifest.urlVersion)}`
+      : baseUrl
     const provider = new Cesium.UrlTemplateImageryProvider({
-      url: manifest.urlTemplate || '/farfield/{z}/{x}_{y}.jpg',
+      url,
       rectangle: Cesium.Rectangle.fromDegrees(rect.west, rect.south, rect.east, rect.north),
       minimumLevel: manifest.minimumLevel ?? 0,
       maximumLevel: manifest.maximumLevel ?? 18,

@@ -116,14 +116,15 @@ export function radarColorOf(index) {
   return RADAR_COLORS[Math.abs(index) % RADAR_COLORS.length]
 }
 
-function addRadar(viewer, radar, index = 0) {
+function addRadar(viewer, radar, index = 0, token = 'dt-') {
   const frame = radarFrame(radar)
   if (!frame) return { entities: [], targetEntities: [] }
   const id = radar.deviceId ?? radar.code
   const entities = []
   const targetEntities = []
   const add = (suffix, options) => {
-    const entityId = `dt-radar-${id}-${suffix}`
+    // token 让**每一次建场景**用一套独立的 id（见 createDigitalTwinScene 里 sceneToken 的说明）
+    const entityId = `${token}radar-${id}-${suffix}`
     // 同 id 已存在时先摘掉再挂：创建流程可能被并发触发两次（初始化 + 项目变化），
     // 而两边都会 await 加载资产——只在函数开头清一次挡不住这种交错（实测仍会抛
     // "An entity with id ... already exists"）。这里逐个 id 幂等化，谁后建谁生效。
@@ -168,15 +169,42 @@ function addRadar(viewer, radar, index = 0) {
       outline: true,
       outlineColor: Cesium.Color.fromCssColorString(statusColor),
     },
+    properties: { kind: 'radar', deviceId: radar.deviceId },
+  })
+  /*
+   * 雷达名牌（2026-09-23 用户反馈"雷达标签飞在竖线没有接地、不随缩放自适应"）。
+   *
+   * 以前名牌是挂在**天线头**上的一个 label：位置固定在离地 8.8 m，
+   * 于是它永远悬在半空——天线柱只从 1.6 m 到 8.2 m，柱脚离地还有一截，
+   * 看上去就是"一块牌子飘在竖线上方"。而且字号是死值，拉远拉近一个样。
+   *
+   * 现在把名牌拆成"**贴地引线 + 引线顶端的名牌**"两件，和测点是同一套做法：
+   *   · 引线起点 = 雷达脚下的地面（z=0.15 m，确保真的接上地）；
+   *   · 引线终点 = 名牌锚点，高度跟着**相机离地高度**走（见 updateRadarLabels）；
+   *   · 名牌字号也按相机高度线性插值，缩到最远仍然读得出名字。
+   */
+  const labelAnchor = localToWorld(frame, [0, 0, headHeight + 6])
+  const labelGround = localToWorld(frame, [0, 0, 0.15])
+  const leader = add('label-leader', {
+    polyline: {
+      positions: [labelGround, labelAnchor],
+      width: 1.6,
+      material: Cesium.Color.fromCssColorString(faceColor).withAlpha(0.7),
+    },
+    properties: { kind: 'radar', deviceId: radar.deviceId },
+  })
+  const label = add('label', {
+    position: labelAnchor,
     label: {
       text: radar.name || radar.code || '雷达',
-      font: '13px "Microsoft YaHei", sans-serif',
+      font: '14px "Microsoft YaHei", sans-serif',
       fillColor: Cesium.Color.WHITE,
       showBackground: true,
       backgroundColor: Cesium.Color.fromCssColorString('#06101f').withAlpha(0.82),
       backgroundPadding: new Cesium.Cartesian2(8, 4),
-      pixelOffset: new Cesium.Cartesian2(0, -26),
+      pixelOffset: new Cesium.Cartesian2(0, -4),
       verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      // 名牌也是点击目标（和雷达头一样能选中这台雷达）
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
     properties: { kind: 'radar', deviceId: radar.deviceId },
@@ -365,6 +393,8 @@ function addRadar(viewer, radar, index = 0) {
     entities,
     targetEntities,
     faceColor,
+    // 名牌句柄：位置/字号由 createDigitalTwinScene 的相机自适应循环统一更新
+    labelHandle: { label, leader, frame, headHeight, ground: labelGround },
     sector: { face: sectorFace, outline: sectorOutline, upper: sectorUpper, lower: sectorLower },
     coverage: { face: coverageFace, outline: coverageOutline },
   }
@@ -390,6 +420,31 @@ function cameraOf(config) {
 let sceneRadius = 1500
 let sceneViewer = null
 let cameraClampHandler = null
+/** 场景实例自增号：用于给每个实例的实体 id 加前缀，避免并发建场景时互相删实体 */
+let sceneToken = 0
+/*
+ * 相机限制器总开关（2026-09-23）：切换项目/场景时相机会从旧场址飞到新场址，
+ * 而限制器是**按新场址锚点**每帧把相机拽回来的——飞行中途被它拽一下就会被 setView 打断，
+ * 相机停在朝向旧场址的方向上，看到的是一片黑。所以飞行期间必须临时关掉它。
+ */
+let clampEnabled = true
+export function setClampEnabled(enabled) {
+  clampEnabled = Boolean(enabled)
+}
+/**
+ * 正在进行的相机飞行数（2026-09-23 第二轮修）：
+ * 用布尔量会被"两次切换叠加"打穿——第一次飞行的完成回调把限制器打开时，
+ * 第二次还在飞，于是中途被拽走（用户看到"跑到旧的地方去"）。改成计数，只有全部飞完才恢复。
+ */
+let flightsInProgress = 0
+function beginFlight() {
+  flightsInProgress += 1
+  clampEnabled = false
+}
+function endFlight() {
+  flightsInProgress = Math.max(0, flightsInProgress - 1)
+  if (flightsInProgress === 0) clampEnabled = true
+}
 /** 最近一次场景的锚点（ENU 原点），供"回到全局视角"在不依赖旧 scene 实例的情况下复用 */
 export let lastSceneAnchor = null
 export let lastSceneHeading = 0
@@ -406,8 +461,12 @@ function radiusFromScene(viewer) {
   if (prims) {
     for (let i = 0; i < prims.length; i += 1) {
       const p = prims.get(i)
-      const r = Number(p?.boundingSphere?.radius)
-      if (Number.isFinite(r) && r > 0) return { radius: r, measured: true }
+      // 未就绪/已销毁的 Model 读 boundingSphere 会**抛异常**（见下面 createDigitalTwinScene 的说明），
+      // 这里是"回到全局视角/切分区"都会走的路径，抛出去就是按钮点了没反应。
+      try {
+        const r = Number(p?.boundingSphere?.radius)
+        if (Number.isFinite(r) && r > 0) return { radius: r, measured: true }
+      } catch { /* 换下一个图元 */ }
     }
   }
   return { radius: sceneRadius, measured: false }
@@ -418,7 +477,7 @@ function radiusFromScene(viewer) {
  * 大屏的"回到全局视角"按钮直接调它，因此即使页面没有整页刷新、旧场景实例还在，
  * 取景逻辑也用的是最新代码。返回一组数字供界面诊断显示。
  */
-export function fitSceneView(viewer) {
+export function fitSceneView(viewer, { duration = 0 } = {}) {
   if (!viewer) return null
   const { radius, measured } = radiusFromScene(viewer)
   sceneViewer = viewer
@@ -427,15 +486,14 @@ export function fitSceneView(viewer) {
     lastSceneAnchor ||
     Cesium.Cartesian3.fromDegrees(113.541523, 24.4162209, 0)
   const range = fitRangeFor(sceneRadius, viewer)
-  applyFitView(viewer, anchor, lastSceneHeading, lastScenePitch, 0)
+  applyFitView(viewer, anchor, lastSceneHeading, lastScenePitch, duration)
   const info = {
     radius: Math.round(sceneRadius),
     radiusMeasured: measured,
     lastRange: Math.round(range),
   }
-  // 平移/缩放的边界也在这里装（幂等）：超过"取景距离"就把相机按原方向拉回来，
-  // 这样"看不到虚空"不依赖任何创建场景时的代码路径。
-  const anchorForClamp = anchor
+  // 俯仰角兜底也在这里装（幂等）：只改姿态、不动位置，见下面的说明。
+  // 「看不到虚空」不依赖任何创建场景时的代码路径。
   if (!viewer.__fitClampInstalled) {
     viewer.__fitClampInstalled = true
     let lastClampAt = 0
@@ -455,11 +513,22 @@ export function fitSceneView(viewer) {
       if ((pitchDeg > maxPitch || pitchDeg < minPitch) && now - lastClampAt > 400) {
         lastClampAt = now
         const clamped = Math.min(Math.max(pitchDeg, minPitch), maxPitch)
-        const range = Cesium.Cartesian3.distance(viewer.camera.positionWC, anchorForClamp)
-        viewer.camera.lookAt(
-          anchorForClamp,
-          new Cesium.HeadingPitchRange(viewer.camera.heading, Cesium.Math.toRadians(clamped), range),
-        )
+        /*
+         * 只改姿态、**不动位置**（2026-09-23 用户反馈"旋转受限"）。
+         *
+         * 以前这里用 `lookAt(锚点, HPR(heading, clamped, range))`：它会把相机重新按
+         * "到锚点的距离 = range"摆一遍。虽然 range 取的是当前距离，看着没变，但在
+         * lookAt 坐标系里连续拖动时，每 400 ms 被这样"重摆"一次，手感就是**转到一个角度
+         * 就被弹一下、越拖越粘**——那正是用户说的"旋转受限"。
+         * `setView({ orientation })` 不带 destination 时只改朝向，位置原样保留。
+         */
+        viewer.camera.setView({
+          orientation: {
+            heading: viewer.camera.heading,
+            pitch: Cesium.Math.toRadians(clamped),
+            roll: 0,
+          },
+        })
       }
     })
   }
@@ -523,23 +592,137 @@ function applyFitView(viewer, anchor, headingDeg, pitchDeg, duration = 0) {
    *   平移 → 直接禁用（铺满状态下平移必然露边）。
    * 全部限制都变成"本地米"，不用再跟地球半径较劲。
    */
-  viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
-  viewer.camera.lookAt(
-    anchor,
-    new Cesium.HeadingPitchRange(
-      Cesium.Math.toRadians(headingDeg),
-      Cesium.Math.toRadians(pitchDeg),
-      range,
-    ),
+  const headingRad = Cesium.Math.toRadians(headingDeg)
+  const pitchRad = Cesium.Math.toRadians(pitchDeg)
+  if (duration > 0) {
+    // 有动画时走 flyTo；飞完再回到"场址 lookAt 变换"，否则之后的旋转会绕地球转（老问题）
+    beginFlight()   // 飞行期间别让限制器（按新锚点）把相机拽回来打断飞行
+    animateLookAt(viewer, anchor, headingDeg, pitchDeg, range, duration).then((done) => {
+      endFlight()
+      if (done) attachCameraLimits(viewer, anchor, range)
+    })
+  } else {
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
+    viewer.camera.lookAt(
+      anchor,
+      new Cesium.HeadingPitchRange(headingRad, pitchRad, range),
+    )
+  }
+  attachCameraLimits(viewer, anchor, range)
+}
+
+/**
+ * 平滑地把相机送到"目标点 + 给定朝向/俯角/距离"（2026-09-23 用户要求切换有动画）。
+ *
+ * 做法：先用 ENU 数学算出目标相机位置（Cesium 的 flyTo 里 heading/pitch/roll 是相对
+ * **目的地的 ENU 系**解释的，所以朝向直接用同一组角度即可），飞完之后再用 `lookAt`
+ * 把相机重新锚回场址坐标系——两处姿态完全一致，所以看不出跳变，但保住了"绕场址旋转"。
+ */
+export function animateLookAt(viewer, target, headingDeg, pitchDeg, rangeM, duration = 1.6) {
+  if (!viewer || !target) return Promise.resolve(false)
+  const heading = Cesium.Math.toRadians(headingDeg)
+  const pitch = Cesium.Math.toRadians(pitchDeg)
+  const frame = Cesium.Transforms.eastNorthUpToFixedFrame(target)
+  const direction = new Cesium.Cartesian3(
+    Math.sin(heading) * Math.cos(pitch),
+    Math.cos(heading) * Math.cos(pitch),
+    Math.sin(pitch),
   )
+  const offset = Cesium.Cartesian3.multiplyByScalar(direction, -rangeM, new Cesium.Cartesian3())
+  const destination = Cesium.Matrix4.multiplyByPoint(frame, offset, new Cesium.Cartesian3())
+  return new Promise((resolve) => {
+    viewer.camera.flyTo({
+      destination,
+      orientation: { heading, pitch, roll: 0 },
+      duration,
+      complete: () => {
+        viewer.camera.lookAt(target, new Cesium.HeadingPitchRange(heading, pitch, rangeM))
+        resolve(true)
+      },
+      cancel: () => resolve(false),
+    })
+  })
+}
+
+/**
+ * **直接平移**式取景（2026-09-23 用户要求："不要先向上再下来，直接平移过去就行"）。
+ *
+ * 为什么 `flyTo` 会"先升后降"：Cesium 的 flyTo 走的是航空式飞行路径（会抬升再落），
+ * 场址内切换看着就像绕了一圈。这里改成在**世界坐标里对位置做直线插值**、
+ * 朝向做角度插值——就是纯粹的平移+转向，适合几百米量级的场址内切换。
+ * 大跨度（跨场址）仍应使用 animateLookAt 的飞行动画，否则会穿过地球。
+ */
+export function panLookAt(viewer, target, headingDeg, pitchDeg, rangeM, durationMs = 1100) {
+  if (!viewer || !target) return Promise.resolve(false)
+  const heading = Cesium.Math.toRadians(headingDeg)
+  const pitch = Cesium.Math.toRadians(pitchDeg)
+  const frame = Cesium.Transforms.eastNorthUpToFixedFrame(target)
+  const direction = new Cesium.Cartesian3(
+    Math.sin(heading) * Math.cos(pitch),
+    Math.cos(heading) * Math.cos(pitch),
+    Math.sin(pitch),
+  )
+  const offset = Cesium.Cartesian3.multiplyByScalar(direction, -rangeM, new Cesium.Cartesian3())
+  const endPosition = Cesium.Matrix4.multiplyByPoint(frame, offset, new Cesium.Cartesian3())
+  const startPosition = Cesium.Cartesian3.clone(viewer.camera.positionWC)
+  const startHeading = viewer.camera.heading
+  const startPitch = viewer.camera.pitch
+  // 取最短转向路径（避免 350° → 10° 时反向绕一大圈）
+  let deltaHeading = heading - startHeading
+  while (deltaHeading > Math.PI) deltaHeading -= Math.PI * 2
+  while (deltaHeading < -Math.PI) deltaHeading += Math.PI * 2
+  const startedAt = performance.now()
+  beginFlight()
+  return new Promise((resolve) => {
+    const step = () => {
+      const t = Math.min(1, (performance.now() - startedAt) / durationMs)
+      const k = t * t * (3 - 2 * t)   // smoothstep：起步和收尾都平顺
+      const position = Cesium.Cartesian3.lerp(
+        startPosition, endPosition, k, new Cesium.Cartesian3(),
+      )
+      viewer.camera.setView({
+        destination: position,
+        orientation: {
+          heading: startHeading + deltaHeading * k,
+          pitch: startPitch + (pitch - startPitch) * k,
+          roll: 0,
+        },
+      })
+      if (t < 1) {
+        requestAnimationFrame(step)
+        return
+      }
+      viewer.camera.lookAt(target, new Cesium.HeadingPitchRange(heading, pitch, rangeM))
+      endFlight()
+      resolve(true)
+    }
+    requestAnimationFrame(step)
+  })
+}
+
+/**
+ * 距离/平移/俯仰的三条限制（提取出来，动画与非动画两条路径共用）。
+ *
+ * 2026-09-23 用户反馈"缩放到最小/最大都有问题、旋转受限"，这里逐条对账：
+ *   · 以前 `maximumZoomDistance = range`（=取景距离本身）→ **根本不能往外缩**，
+ *     一滚轮就顶住；而全局视角按钮用的就是同一个距离，所以"缩放到最小"其实是"回到取景距离"。
+ *     现在放宽到 `取景距离 × VITE_MAX_ZOOM_FACTOR`（默认 1.8），能再拉远看周边，
+ *     因为远景层铺的是真实影像，拉远看到的仍然是地面而不是虚空。
+ *   · 以前 `minimumZoomDistance = max(80, range×0.12)`（默认 125 m）→ **贴不近**，
+ *     想看建筑立面、想有"身临其境"的感觉时推不进去。现在降到 `max(25, range×0.05)`（默认约 52 m）。
+ *   · `enableTranslate = false` 保留：相机待在"绕场址"的 lookAt 坐标系里，
+ *     平移就会滑到场址之外、露出地块边缘——那是用户明确不要的虚空。
+ */
+function attachCameraLimits(viewer, anchor, range) {
   const ctrl = viewer.scene.screenSpaceCameraController
-  // 距离：只能往里（0.12 倍）不能往外（1.0 倍 = 进场全景）
-  ctrl.minimumZoomDistance = Math.max(80, range * 0.12)
-  ctrl.maximumZoomDistance = range
-  // 平移禁用；旋转/倾斜保留（都在场址坐标系里进行，天然绕场址）
+  const zoomOutFactor = parseFloat(import.meta.env.VITE_MAX_ZOOM_FACTOR) || 1.8
+  const zoomInFactor = parseFloat(import.meta.env.VITE_MIN_ZOOM_FACTOR) || 0.05
+  ctrl.minimumZoomDistance = Math.max(25, range * zoomInFactor)
+  ctrl.maximumZoomDistance = range * zoomOutFactor
   ctrl.enableTranslate = false
   ctrl.enableTilt = true
   ctrl.enableLook = true
+  lastSceneAnchor = anchor
 }
 
 /**
@@ -547,16 +730,34 @@ function applyFitView(viewer, anchor, headingDeg, pitchDeg, duration = 0) {
  */
 export async function createDigitalTwinScene(viewer, rawConfig) {
   const config = validateConfig(rawConfig)
+  // 新场景开始：清掉上一次飞行留下的状态（否则限制器可能一直是关的，或计数残留）
+  flightsInProgress = 0
+  clampEnabled = true
+  /*
+   * 每个场景实例一套独立的实体 id 前缀（2026-09-23 修掉一个真事故）。
+   *
+   * 触发路径：首屏 `loadData()` 会把 projectId 写进 store（→ 触发项目 watch，建一次场景），
+   * 紧接着 `initViewer()` 自己又会 `await loadProjectScene(...)`；WebGL 上下文恢复时
+   * initViewer 还会再来一遍。同一时刻有两个 `createDigitalTwinScene` 在跑是常态。
+   *
+   * 两边以前都用 `dt-radar-1-label` 这种**同一个 id**，于是输的那一边在
+   * `if (generation !== sceneLoadGeneration) { scene.destroy() }` 里按 id 删实体时，
+   * 删掉的其实是**赢的那一边刚建好的实体**——雷达名牌、视场扇面、覆盖层全没了，
+   * 页面上只剩模型和测点（"雷达标签不接地 / 雷达不见了"就是这么来的）。
+   * 现在 id 带实例前缀：谁删谁自己的，删不到别人的。
+   */
+  sceneToken += 1
+  const token = `dt${sceneToken}-`
   /*
    * 先清掉上一场的残留实体（2026-09-22 查到的"顶栏挂假故障"）：
    * loadProjectScene 会被并发触发两次（初始化 + 项目变化），第二次给同一台雷达
    * add 同 id 的实体时，Cesium 直接抛
    *   "An entity with id dt-radar-1-platform already exists in this collection"
    * 于是整场被判成"数字孪生加载失败"——可画面其实是好的，顶栏就一直挂着一条假故障。
-   * 场景里的实体 id 统一以 `dt-` 开头，这里按前缀清一遍，重复创建就变成幂等的。
+   * 场景里的实体 id 统一以 `dt` 开头，这里按前缀清一遍，重复创建就变成幂等的。
    */
   for (const entity of viewer.entities.values.filter(
-    (item) => String(item.id || '').startsWith('dt-'),
+    (item) => String(item.id || '').startsWith('dt'),
   )) {
     viewer.entities.remove(entity)
   }
@@ -592,7 +793,20 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
   // 都不能把相机拉到"模型之外"——用户反馈"移动会移动到虚空里"，根因是 Cesium 的
   // maximumZoomDistance 约束的是"到椭球的距离"，与我们自己的模型毫无关系。
   sceneViewer = viewer
-  const measuredRadius = Number(asset?.boundingSphere?.radius)
+  /*
+   * 读包围球要包 try（2026-09-23，航拍级资产暴露）：
+   * `model.boundingSphere` 在模型**未就绪**时是**抛 DeveloperError**（"The model is not loaded"），
+   * 不是返回 undefined —— 所以 `asset?.boundingSphere?.radius` 这种写法保护不了它。
+   * 上面那段就绪等待最多只等 3 s；39 MB / 8192 贴图的重资产（软件渲染）到这里还没 ready，
+   * 于是异常从建场景函数里抛出去，**后面取景、相机限制、诊断全都不执行**——画面里能看到模型，
+   * 但顶部显示"数字孪生加载失败"，怎么点都不取景。轻资产一直没暴露这个问题。
+   */
+  let measuredRadius = NaN
+  try {
+    measuredRadius = Number(asset?.boundingSphere?.radius)
+  } catch {
+    /* 没就绪就先不量，用兜底半径；下面挂 readyEvent 补量 */
+  }
   sceneRadius = Math.max(100, Number.isFinite(measuredRadius) && measuredRadius > 0 ? measuredRadius : 1500)
   if (typeof window !== 'undefined') {
     window.__sceneFit = {
@@ -601,6 +815,22 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
       radius: sceneRadius,
       radiusMeasured: Number.isFinite(measuredRadius) && measuredRadius > 0,
     }
+  }
+  // 迟到的就绪也要把半径补上：取景距离按它算，量不到就会一直用 1500 的兜底值
+  if (!(Number.isFinite(measuredRadius) && measuredRadius > 0) && asset?.readyEvent?.addEventListener) {
+    try {
+      asset.readyEvent.addEventListener(() => {
+        try {
+          const late = Number(asset.boundingSphere?.radius)
+          if (!Number.isFinite(late) || late <= 0) return
+          sceneRadius = Math.max(100, late)
+          if (typeof window !== 'undefined' && window.__sceneFit) {
+            window.__sceneFit.radius = sceneRadius
+            window.__sceneFit.radiusMeasured = true
+          }
+        } catch { /* 仍然读不到就当没量到 */ }
+      })
+    } catch { /* 忽略 */ }
   }
   const anchorCartesian = Cesium.Cartesian3.fromDegrees(
     finite(config.anchorLongitude),
@@ -618,6 +848,7 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
   viewer.scene.screenSpaceCameraController.maximumZoomDistance = maxDistance * 2
   if (cameraClampHandler) viewer.scene.postRender.removeEventListener(cameraClampHandler)
   cameraClampHandler = () => {
+    if (!clampEnabled) return
     const cam = viewer.camera.positionWC
     const d = Cesium.Cartesian3.distance(cam, anchorCartesian)
     if (d <= maxDistance) return
@@ -638,6 +869,32 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
   viewer.scene.postRender.addEventListener(cameraClampHandler)
   const decorations = []
   const radarGroups = new Map()
+  /** 雷达名牌的自适应句柄（见 addRadar 里的说明） */
+  const radarLabels = []
+  /*
+   * 雷达名牌随相机高度自适应：贴地时名牌放低（引线短、几乎站在雷达头上），
+   * 拉远时抬高并放大字号——和测点、分区标签同一套口径，三层的"随缩放自适应"表现一致。
+   * 节流到约 8 fps：名字只有几台，但也没必要每帧重算。
+   */
+  let radarLabelTick = 0
+  const radarLabelHandler = () => {
+    if (!radarLabels.length) return
+    const now = Date.now()
+    if (now - radarLabelTick < 120) return
+    radarLabelTick = now
+    const carto = Cesium.Cartographic.fromCartesian(viewer.camera.positionWC)
+    const camHeight = carto ? Math.max(0, carto.height) : 0
+    const t = Math.min(1, Math.max(0, (camHeight - 150) / (2400 - 150)))
+    const lift = 6 + 26 * t          // 名牌相对天线头再抬多少米
+    const scale = 0.9 + 0.45 * t     // 字号倍数
+    for (const handle of radarLabels) {
+      const tip = localToWorld(handle.frame, [0, 0, handle.headHeight + lift])
+      handle.label.position = tip
+      handle.label.label.scale = scale
+      handle.leader.polyline.positions = [handle.ground, tip]
+    }
+  }
+  viewer.scene.postRender.addEventListener(radarLabelHandler)
   // 两个图层开关与当前选中：每台雷达四片形状的可见性由它们合成（见 applyRadarVisibility）
   let sectorVisible = true
   let verticalVisible = false
@@ -646,10 +903,12 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
   let activeRadarKey = null
   // 下标用于配色：RADAR_COLORS 按声明顺序分配，保证「同一台雷达每次打开都是同一个颜色」
   ;(config.radars || []).forEach((radar, index) => {
-    const group = addRadar(viewer, radar, index)
+    const group = addRadar(viewer, radar, index, token)
     decorations.push(...group.entities)
+    if (group.labelHandle) radarLabels.push(group.labelHandle)
     radarGroups.set(radar.deviceId ?? radar.code, group)
   })
+  radarLabelHandler()
 
   // 局部场景保持固定可读光照，避免系统时间改变导致夜间全黑。
   viewer.scene.light = new Cesium.DirectionalLight({
@@ -797,6 +1056,7 @@ export async function createDigitalTwinScene(viewer, rawConfig) {
     setCoverageVisible,
     pickRadarId,
     destroy() {
+      viewer.scene.postRender.removeEventListener(radarLabelHandler)
       for (const entity of decorations) viewer.entities.remove(entity)
       if (!asset.isDestroyed?.()) viewer.scene.primitives.remove(asset)
     },

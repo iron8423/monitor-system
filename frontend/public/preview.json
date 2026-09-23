@@ -1,0 +1,5 @@
+{
+  "note": "预览资产的两个高度（相对资产锚点，米），换场址重新生成资产时同步更新。groundHeightM = 测点/雷达标点所在的那层台面（立柱起点用它）；terrainSurfaceHeightM = 这块地**地面**的平均高度（把整块地摆到椭球面上用它，见 ScreenView.loadProjectScene 的说明）。",
+  "groundHeightM": 15.3,
+  "terrainSurfaceHeightM": 5.4
+}

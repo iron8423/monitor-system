@@ -1,0 +1,28 @@
+{
+  "note": "预览用设备摆放（2026-09-23）：只影响**演示场景**里雷达/测点的落位，不动数据库档案。坐标为相对资产锚点的本地米（eastM=东, northM=北），朝向按各自绑定目标算过，保证扇面能罩住目标。换场址时同步改这份文件即可。",
+  "radars": {
+    "radar-001": {
+      "eastM": -420,
+      "northM": -30,
+      "headingDegrees": 69,
+      "pitchDegrees": -5,
+      "why": "北侧山脊形变雷达：绑定 P-HK01/02/03 + P-BP01，方位角 47°~91°，取中值 69° ± 30° 全覆盖，最远 450 m（量程 620 m）"
+    },
+    "radar-002": {
+      "eastM": -60,
+      "northM": -300,
+      "headingDegrees": 42,
+      "pitchDegrees": -5,
+      "why": "南侧滑坡形变雷达：绑定 P-BP02/03/04，方位角 24°~60°，取中值 42° ± 30° 全覆盖，最远 300 m（量程 620 m）"
+    }
+  },
+  "points": {
+    "P-HK01": { "eastM": -140, "northM": 230, "zone": "ridge-north" },
+    "P-HK02": { "eastM": -40, "northM": 200, "zone": "ridge-north" },
+    "P-HK03": { "eastM": 60, "northM": 140, "zone": "ridge-north" },
+    "P-BP01": { "eastM": 30, "northM": -40, "zone": "slope-south" },
+    "P-BP02": { "eastM": 120, "northM": -70, "zone": "slope-south" },
+    "P-BP03": { "eastM": 200, "northM": -120, "zone": "slope-south" },
+    "P-BP04": { "eastM": 110, "northM": -190, "zone": "slope-south" }
+  }
+}
