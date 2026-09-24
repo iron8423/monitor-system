@@ -55,6 +55,7 @@ Thumbs.db
 # 它们只含"用哪套资产/哪层远景/什么材质档"，不含任何密钥；个人差异仍放 *.local（下一行忽略）。
 !.env.hires
 !.env.qingyuan
+!.env.flat
 *.local
 application-local.yml
 
