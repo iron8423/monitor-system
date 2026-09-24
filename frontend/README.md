@@ -145,6 +145,21 @@ src/
 
 路由 `/screen` 是**独立于工作台布局**的整屏页面（自带 HUD，不套侧边菜单），入口在侧边栏「3D 大屏」。
 
+### 演示档位（2026-09-24）
+
+四个档位随仓库入库，**切换只改 mode 文件，不改代码**：
+
+| 档位 | 命令 | 资产 |
+|---|---|---|
+| **默认（演示用）** | `npm run dev` | `public/models/wh-plant-hires/wh-plant-hires.glb`（灰模 + 屋面贴正射影像，lit + HDR） |
+| 白模对照档 | `npx vite --mode flat` | `public/models/wh-plant/wh-plant.glb`（同场址白模） |
+| 航拍级参考档 | `npx vite --mode hires --port 5174 --strictPort` | 与默认档同参（保留给固定端口与既有脚本） |
+| 清远档 | `npx vite --mode qingyuan` | `public/models/qingyuan-powerplant-big/qingyuan-powerplant-big.glb` |
+
+- 档位文件：`.env.development`（默认）/ `.env.flat` / `.env.hires` / `.env.qingyuan`；个人本地覆盖写 `*.local`（不进 git）；优先级 `.env < .env.local < .env.[mode] < .env.[mode].local`。
+- ⚠️ Vite 的 **mode 文件不叠加 `.env.development`**：新增档位时变量要写全（现有四份都是全量）。
+- 资产来源与署名（swisstopo 开放数据 OGD，**需署名**）见各资产目录的 `ASSET_PROVENANCE.md`；数据精度与观感的对照结论见 `../docs/开源高精度数据对照实验结果_20260923.md`。
+
 ### 依赖与静态资源
 
 - `cesium`（当前 1.145.0）是普通依赖。

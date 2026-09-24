@@ -10,6 +10,57 @@
 > 接口契约：[`docs/B侧接口契约_M0.md`](docs/B侧接口契约_M0.md)
 > 现状与待办：[`docs/全项目功能与工具复查清单_20260918.md`](docs/全项目功能与工具复查清单_20260918.md)（32 条：P0 6 / P1 14 / P2 12）· [`docs/monitor-system_系统完善与改进清单.md`](docs/monitor-system_系统完善与改进清单.md)（更早的 55 条对账，留作历史）
 
+## 接手入口（分支 `handoff/3d-visual-20260923`）
+
+> 给接手人：**先按这一节跑起来，再往下看细节**。同一提交的 tag 为 `snapshot-3d-preview-20260923`（2026-09-24）。
+
+### 1. 拉取（推荐 `git worktree`，不动你现有的工作树）
+
+```bash
+git fetch origin
+git worktree add ../monitor-system-handoff handoff/3d-visual-20260923
+cd ../monitor-system-handoff
+# 或直接新克隆：
+# git clone -b handoff/3d-visual-20260923 https://github.com/iron8423/monitor-system.git monitor-system-handoff
+```
+
+### 2. 跑起来（本地 H2 + 三个进程）
+
+```bash
+cd backend && ./mvnw.cmd -o spring-boot:run     # 8080；Linux/macOS 用 ./mvnw
+cd frontend && npm install && npm run dev       # 5173 → http://localhost:5173/screen
+cd tools/radar_simulator && python radar_simulator.py --interval 5 --count 0 --step-minutes 0 --ingest-mode REALTIME
+```
+
+演示账号 `admin / 123456`。**H2 是内存库，重启后端即清空；清空后必须重跑模拟器**，否则大屏所有测点都是"暂无数据"。
+
+### 3. 三维大屏的四个档位（资产随仓库入库，clone 即可切换）
+
+| 档位 | 命令 | 内容 |
+|---|---|---|
+| **默认（演示用）** | `npm run dev` | 灰模 + 屋面贴正射影像：`wh-plant-hires`（0.1 m 正射 + 2 m 网格 + 8192 纹理，lit + HDR） |
+| 白模对照档 | `npx vite --mode flat` | `wh-plant`（同场址白模），用于"数据到位前后"的同机位对照 |
+| 航拍级参考档 | `npx vite --mode hires --port 5174 --strictPort` | 与默认档同参（保留给固定端口与既有脚本） |
+| 清远档 | `npx vite --mode qingyuan` | 清远电厂预览资产 + 在线影像兜底 |
+
+资产来源、许可与署名要求见各资产目录的 `ASSET_PROVENANCE.md`：均为 swisstopo 开放数据（OGD），**允许离线缓存与再分发，需署名 swisstopo**；因此**本仓库必须保持 private**，仓库可见性变更前先核对影像许可。
+
+### 4. 自检
+
+```bash
+cd frontend && npm run selfcheck && npm run build     # 自检 94 条 + 生产构建
+tools/acceptance/run-all.sh                           # 后端验收（演示账号开启、严格契约关闭）
+```
+
+### 5. 三维这条线的文档（均在 `docs/`）
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/3D数字孪生_对比材料_20260923/3D数字孪生_阶段计划与演示进度_20260924.md`](docs/3D数字孪生_对比材料_20260923/3D数字孪生_阶段计划与演示进度_20260924.md) | 阶段计划与演示进度（以阶段为主线的单一入口） |
+| [`docs/进度交接_20260923_第四轮.md`](docs/进度交接_20260923_第四轮.md) | 大屏交互那一轮的完整交接（服务怎么起、坑与验证） |
+| [`docs/开源高精度数据对照实验结果_20260923.md`](docs/开源高精度数据对照实验结果_20260923.md) | 数据档位对照实验（T1/T2/T3） |
+| [`docs/3D数字孪生_对比材料_20260923/参考档结论_20260923.md`](docs/3D数字孪生_对比材料_20260923/参考档结论_20260923.md) | 航拍级参考档的结论与三张同机位对比图 |
+
 ## 快速开始
 
 三种形态按需选一种；三者跑的是同一份代码，差别只在数据库、鉴权严格度和前端由谁托管。
@@ -115,6 +166,16 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 
 ## 3D 数字孪生（V2 · 双雷达）
 
+### 演示档与数据档位（2026-09-23 起）
+
+- **演示场址 = 苏黎世 Werdhölzli 污水处理厂周边**（公开数据样板，厂区形态对标"电厂厂区"监测场景，1200 × 900 m）。
+  - **默认（演示用）= `wh-plant-hires`**：0.1 m 航拍正射 + 0.5 m 实测高程 + 官方 CityGML LoD2 真几何，**屋面贴真实正射影像**、墙面受光；38.9 MB / 597,753 三角面。
+  - **对照 = `wh-plant`**：同场址、同机位，建筑为白模（顶点色 + 烘焙明暗）；13.2 MB / 192,753 三角面。
+  - **远景**：同址 swisstopo SWISSIMAGE 瓦片金字塔（z6~z17，离线可用）。
+  - 四个档位的切换命令见上文「接手入口」第 3 节；数据精度与观感的对照结论见 `docs/开源高精度数据对照实验结果_20260923.md`。
+- 上述资产均为 **swisstopo 开放数据（OGD）**：允许离线缓存与再分发，**使用时必须署名 swisstopo**；每份资产的数据源、生成脚本、规格与 SHA-256 见 `frontend/public/models/*/ASSET_PROVENANCE.md`。
+- 下文介绍的 `qingyuan-hillside-*`、`mountain-demo`、`qingyuan-{bridge,factory,railway}` 等场景**仍然保留**（同一套"按项目加载资产"的机制），与本演示档并存，互不影响。
+
 - **自持模型，不依赖在线服务**：仓库内自带两份地形资产，运行期都不请求 Cesium ion 或在线底图；设 `VITE_SCENE_MODE=globe` 可切回 ion 真实地形 + 卫星影像模式。
   - **默认（V19 起）= `qingyuan-hillside-2.0.0`**：离线「真实地形」资产。几何骨架来自公开 DEM（SRTM 派生，30m 级）、色彩底来自公开卫星影像（Sentinel-2 cloudless，10m 级、CC BY 4.0），中高频细节由生成器程序化补充并**逐条写在资产的 `ASSET_PROVENANCE.md` 里**；1000m × 750m、94,000 三角面、真实起伏约 237m、4096×3072 内嵌纹理。两台雷达放在**监测区之外的稳定地面**（量程 620m，分别看守 4/3 个目标）。数据来源、复现方式与「实测 vs 程序化」的边界见 [`tools/terrain_asset/README.md`](tools/terrain_asset/README.md) 与 [`docs/3D数字孪生_离线真实地形资产_20260918.md`](docs/3D数字孪生_离线真实地形资产_20260918.md)。
   - **保留（回退）= `qingyuan-hillside-1.0.0`（320×240m 首版）与 `mountain-demo-2.0.0`（纯程序化虚构山体）**：只切换默认项目的 `asset_url`，旧资产文件与历史迁移都不删。
@@ -138,6 +199,8 @@ monitor-system/                 ← GitHub 单仓库（iron8423/monitor-system�
 | 前端自检（store 与纯函数真跑） | `cd frontend && npm run selfcheck`（需在后端运行时执行） | **73 条 / 0 失败** |
 | 前端 P0 脚本（模拟网络 + 源码绊线） | `cd frontend && node scripts/check-p0-stage1.mjs` | **35 项全通过** |
 | 前端构建 | `cd frontend && npm run build` | 通过（仅有 Cesium/ECharts 大 chunk 提示） |
+
+> **2026-09-23 复核**（B 侧实测）：前端自检 **94 条 / 0 失败**、`npm run build` 通过；三维大屏的标签避让、引线、远景补层与相机约束四项另有专项回归脚本，结果见 [`docs/进度交接_20260923_第四轮.md`](docs/进度交接_20260923_第四轮.md)。后端套件与断言数以后续 `tools/acceptance/README.md` 为准。
 
 ```bash
 tools/acceptance/run-all.sh --fresh   # 另起空库后端（18080）跑完整套，跑完自动停
