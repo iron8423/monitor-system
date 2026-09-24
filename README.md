@@ -29,10 +29,17 @@ cd ../monitor-system-handoff
 ```bash
 cd backend && ./mvnw.cmd -o spring-boot:run     # 8080；Linux/macOS 用 ./mvnw
 cd frontend && npm install && npm run dev       # 5173 → http://localhost:5173/screen
-cd tools/radar_simulator && python radar_simulator.py --interval 5 --count 0 --step-minutes 0 --ingest-mode REALTIME
+
+# 数据保活（推荐）：每 60s 给四个场景各补一轮"实时"数据，采集时间跟着当前时间走，
+# 也保证四台雷达不因"5 分钟没数据"被判离线。脚本内部调用 python3，请确保 python3 在 PATH 上。
+cd tools/radar_simulator && ./keepalive_all_scenes.sh
+# 只补一轮（冒烟）：./keepalive_all_scenes.sh --once
+# 想要历史曲线有东西看：先 ./seed_all_scenes.sh（四个场景各灌 12 小时历史），再常驻保活
 ```
 
 演示账号 `admin / 123456`。**H2 是内存库，重启后端即清空；清空后必须重跑模拟器**，否则大屏所有测点都是"暂无数据"。
+
+> ⚠️ 不要用 `radar_simulator.py --interval 5 --count 0 --step-minutes 0` 常驻：`--step-minutes 0` 会把 `collectTime` 钉在启动那一刻（界面上的"采集时间"不再前进）。它只适合一次性冒烟，长期保活用 `keepalive_all_scenes.sh`。
 
 ### 3. 三维大屏的四个档位（资产随仓库入库，clone 即可切换）
 
